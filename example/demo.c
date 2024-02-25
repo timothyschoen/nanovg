@@ -1131,6 +1131,51 @@ void drawScissor(NVGcontext* vg, float x, float y, float t)
 	nvgRestore(vg);
 }
 
+void drawBezierCurve(NVGcontext* vg, float x0, float y0, float radius, float t){
+
+	float x1 = x0 + radius*cos(2*NVG_PI*t/5);
+	float y1 = y0 + radius*sin(2*NVG_PI*t/5);
+
+	float cx0 = x0;
+	float cy0 = y0 + ((y1 - y0) * 0.75f);
+	float cx1 = x1;
+	float cy1 = y0 + ((y1 - y0) * 0.75f);
+
+	nvgBeginPath(vg);
+	nvgMoveTo(vg, x0, y0);
+	nvgLineTo(vg, cx0, cy0);
+	nvgLineTo(vg, cx1, cy1);
+	nvgLineTo(vg, x1, y1);
+	nvgStrokeColor(vg,nvgRGBA(200,200,200,255));
+	nvgStrokeWidth(vg,2.0f);
+	nvgStroke(vg);
+
+	nvgLineCap(vg, NVG_ROUND);
+	nvgStrokeWidth(vg,5);
+	nvgLineJoin(vg, NVG_ROUND);
+
+	nvgBeginPath(vg);
+	nvgMoveTo(vg, x0, y0);
+	nvgBezierTo(vg, cx0, cy0, cx1, cy1, x1, y1);
+	nvgLineStyle(vg, NVG_LINE_SOLID);
+	nvgStrokeColor(vg, nvgRGBA(40, 53, 147,255));
+	nvgStroke(vg);
+
+	nvgLineStyle(vg, NVG_LINE_DASHED);
+	nvgStrokeColor(vg, nvgRGBA(255, 195, 0,255));
+	nvgStroke(vg);
+	
+	nvgBeginPath(vg);
+	nvgCircle(vg,x0,y0,5.0f);
+	nvgCircle(vg,cx0,cy0,5.0f);
+	nvgCircle(vg,cx1,cy1,5.0f);
+	nvgCircle(vg,x1,y1,5.0f);
+	nvgLineStyle(vg, NVG_LINE_SOLID);
+	nvgFillColor(vg,nvgRGBA(64,192,64,255));
+	nvgFill(vg);
+}
+
+>>>>>>> 20d3886 (fixed butt behavior)
 void renderDemo(NVGcontext* vg, float mx, float my, float width, float height,
 				float t, int blowup, DemoData* data)
 {
