@@ -124,7 +124,8 @@ enum GLNVGshaderType {
 	NSVG_SHADER_FILLGRAD,
 	NSVG_SHADER_FILLIMG,
 	NSVG_SHADER_SIMPLE,
-	NSVG_SHADER_IMG
+	NSVG_SHADER_IMG,
+	NSVG_SHADER_DOTS
 };
 
 #if NANOVG_GL_USE_UNIFORMBUFFER
@@ -533,7 +534,7 @@ static int glnvg__renderCreate(void* uptr)
 #if NANOVG_GL_USE_UNIFORMBUFFER
 	"#define USE_UNIFORMBUFFER 1\n"
 #else
-	"#define UNIFORMARRAY_SIZE 11\n"
+	"#define UNIFORMARRAY_SIZE 12\n"
 #endif
 	"\n";
 
@@ -613,7 +614,7 @@ static int glnvg__renderCreate(void* uptr)
 		"	#define feather frag[9].w\n"
 		"	#define strokeMult frag[10].x\n"
 		"	#define strokeThr frag[10].y\n"
-		"	#define lineStyle frag[10].z\n"
+		"	#define lineStyle int(frag[10].z)\n"
 		"	#define texType int(frag[10].w)\n"
 		"	#define type int(frag[11].x)\n"
 		"#endif\n"
@@ -631,8 +632,11 @@ static int glnvg__renderCreate(void* uptr)
 		"	return clamp(sc.x,0.0,1.0) * clamp(sc.y,0.0,1.0);\n"
 		"}\n"
 		"float glow(vec2 uv){\n"
-		"  return smoothstep(0, 1, 1.0 - 2.0 * abs(uv.x));\n"
+		"  return smoothstep(0.0, 1.0, 1.0 - 2.0 * abs(uv.x));\n"
 		"}\n"
+        "float circleDist(vec2 p, vec2 center) {\n"
+        "  return distance(center, p) - 0.5f;\n"
+        "}\n"
 		"float dashed(vec2 uv){\n"
 		"	float fy = fract(uv.y / 4.0);\n"
 		"	float w = step(fy, 0.5);\n"
@@ -642,14 +646,14 @@ static int glnvg__renderCreate(void* uptr)
 		"	} else if(fy <= 0.5) {\n"
 			"	fy = 0.5 - fy;\n"
 			"} else {\n"
-			"	fy = 0;\n"
+			"	fy = 0.0;\n"
 			"}\n"
-			"w *= smoothstep(0, 1, 6 * (0.25 - (uv.x * uv.x  + fy * fy)));\n"
+			"w *= smoothstep(0.0, 1.0, 6.0 * (0.25 - (uv.x * uv.x  + fy * fy)));\n"
 		"	return w;\n"
 		"}\n"
 		"float dotted(vec2 uv){\n"
 		"	float fy = 4.0 * fract(uv.y / (4.0)) - 0.5;\n"
-		"	return smoothstep(0,1, 6*(0.25 - (uv.x * uv.x  + fy * fy)));\n"
+		"	return smoothstep(0.0, 1.0, 6.0 * (0.25 - (uv.x * uv.x  + fy * fy)));\n"
 		"}\n"
 		"#ifdef EDGE_AA\n"
 		"// Stroke - from [0..1] to clipped pyramid, where the slope is 1px.\n"
@@ -663,15 +667,15 @@ static int glnvg__renderCreate(void* uptr)
 		"	float scissor = scissorMask(fpos);\n"
 		"#ifdef EDGE_AA\n"
 		"	float strokeAlpha = strokeMask();\n"
-			"if(lineStyle==2) strokeAlpha*=dashed(uv);\n"
-			"if(lineStyle==3) strokeAlpha*=dotted(uv);\n"
-			"if(lineStyle==4) strokeAlpha*=glow(uv);\n"
+			"if(lineStyle == 2) strokeAlpha*=dashed(uv);\n"
+			"if(lineStyle == 3) strokeAlpha*=dotted(uv);\n"
+			"if(lineStyle == 4) strokeAlpha*=glow(uv);\n"
 		"	if (strokeAlpha < strokeThr) discard;\n"
 		"#else\n"
 		"	float strokeAlpha = 1.0;\n"
-			"if(lineStyle==2) strokeAlpha*=dashed(uv);\n"
-			"if(lineStyle==3) strokeAlpha*=dotted(uv);\n"
-			"if(lineStyle==4) strokeAlpha*=glow(uv);\n"
+			"if(lineStyle == 2) strokeAlpha*=dashed(uv);\n"
+			"if(lineStyle == 3) strokeAlpha*=dotted(uv);\n"
+			"if(lineStyle == 4) strokeAlpha*=glow(uv);\n"
 			"if (lineStyle > 1 && strokeAlpha < strokeThr) discard;\n"
 		"#endif\n"
 		"	if (type == 0) {			// Gradient\n"
@@ -709,7 +713,14 @@ static int glnvg__renderCreate(void* uptr)
 		"		if (texType == 2) color = vec4(color.x);"
 		"		color *= scissor;\n"
 		"		result = color * innerCol;\n"
-		"	}\n"
+		"	} else if (type == 4) {     // Dot pattern for plugdata\n"
+        "       vec2 pt = (paintMat * vec3(fpos, 1.0)).xy - (0.5 * radius);\n"
+        "       vec2 center = pt.xy - mod(pt.xy, radius) + (0.5 * radius);\n"
+        "       vec4 dotColor = mix(innerCol, outerCol, step(0.5f, circleDist(pt.xy, center)));\n"
+        "       vec4 color = mix(dotColor, vec4(0.0f, 0.0f, 0.0f, 0.0f), 0.1f * distance(uv.xy, vec2(0.5f)));\n"
+        "       color *= strokeAlpha * scissor;\n"
+        "       result = color;\n"
+        "    }\n"
 		"#ifdef NANOVG_GL3\n"
 		"	outColor = result;\n"
 		"#else\n"
@@ -1017,7 +1028,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
 		#endif
 //		printf("frag->texType = %d\n", frag->texType);
 	} else {
-		frag->type = NSVG_SHADER_FILLGRAD;
+		frag->type = paint->dots ? NSVG_SHADER_DOTS : NSVG_SHADER_FILLGRAD;
 		frag->radius = paint->radius;
 		frag->feather = paint->feather;
 		nvgTransformInverse(invxform, paint->xform);

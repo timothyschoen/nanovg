@@ -51,6 +51,7 @@ struct NVGpaint {
 	NVGcolor innerColor;
 	NVGcolor outerColor;
 	int image;
+    int dots;
 };
 typedef struct NVGpaint NVGpaint;
 
@@ -436,6 +437,8 @@ NVGpaint nvgRadialGradient(NVGcontext* ctx, float cx, float cy, float inr, float
 NVGpaint nvgImagePattern(NVGcontext* ctx, float ox, float oy, float ex, float ey,
 						 float angle, int image, float alpha);
 
+// Creates a dot pattern, that is rendered on shader (used for plugdata canvas background)
+NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, int patternSize);
 //
 // Scissoring
 //
