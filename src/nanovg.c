@@ -899,11 +899,13 @@ NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, int patter
     return p;
 }
 
-NVGpaint nvgRoundedRectPaint(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
+void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
 {
     NVGpaint p;
-    NVG_NOTUSED(ctx);
     memset(&p, 0, sizeof(p));
+    
+    nvgBeginPath(ctx);
+    nvgRect(ctx, x - 0.5f, y - 0.5f, w + 1.0f, h + 1.0f);
     
     x += 0.5f;
     y += 0.5f;
@@ -921,7 +923,8 @@ NVGpaint nvgRoundedRectPaint(NVGcontext* ctx, float x, float y, float w, float h
 	p.extent[0] = w * 0.5f;
 	p.extent[1] = h * 0.5f;
 
-    return p;
+    nvgFillPaint(ctx, p);
+    nvgFill(ctx);
 }
 
 NVGpaint nvgLinearGradient(NVGcontext* ctx,

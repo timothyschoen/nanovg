@@ -126,8 +126,7 @@ enum GLNVGshaderType {
 	NSVG_SHADER_SIMPLE,
 	NSVG_SHADER_IMG,
 	NSVG_SHADER_DOTS,
-	NSVG_SHADER_FAST_FILLCOLOR,
-	NSVG_SHADER_FAST_FILLIMG,
+	NSVG_SHADER_FAST_ROUNDEDRECT,
 	NSVG_SHADER_FILLCOLOR,
 };
 
@@ -691,17 +690,7 @@ static int glnvg__renderCreate(void* uptr)
         "       float alias = 0.5 * length(max(abs(dx), abs(dy)));\n"
         "       float alpha = 1.0f - (smoothstep(0.0, alias, d) * smoothstep(1.0 - alias, 1.0, d));"
         "		result = vec4(color.rgb * alpha, alpha) * scissor;\n"
-        "	} else if (type == 6) {		//fast fill image\n"
-        "		vec2 pt = (paintMat * vec3(fpos,1.0)).xy / extent;\n"
-        "#ifdef NANOVG_GL3\n"
-        "		vec4 color = texture(tex, pt);\n"
-        "#else\n"
-        "		vec4 color = texture2D(tex, pt);\n"
-        "#endif\n"
-        "		color = vec4(color.xyz*color.w,color.w);"
-        "		color *= innerCol;\n"
-        "		result = color * scissor;\n"
-        "	} else if(type == 7) {			// fill color\n"
+        "	} else if(type == 6) {			// fill color\n"
         "	  result = innerCol * strokeAlpha * scissor;\n"
         "	}"
 		"	if (type == 0) {			// Gradient\n"
@@ -1057,7 +1046,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
 //		printf("frag->texType = %d\n", frag->texType);
 	}
     else if(paint->rounded_rect) {
-        frag->type = NSVG_SHADER_FAST_FILLCOLOR;
+        frag->type = NSVG_SHADER_FAST_ROUNDEDRECT;
         frag->radius = paint->radius;
         nvgTransformInverse(invxform, paint->xform);
         frag->scissorExt[0] = scissor->extent[0];
@@ -1536,11 +1525,12 @@ static void glnvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperation
         frag = nvg__fragUniformPtr(gl, call->uniformOffset);
         glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset), paint, scissor, fringe, fringe, -1.0f, 0);
     }
+
     if(paint->rounded_rect)
     {
-        frag->type = NSVG_SHADER_FAST_FILLCOLOR;
+        frag->type = NSVG_SHADER_FAST_ROUNDEDRECT;
     }
-    if (paint->image == 0 && !is_gradient) {
+    else if (paint->image == 0 && !is_gradient) {
       frag->type = NSVG_SHADER_FILLCOLOR;
     }
 
