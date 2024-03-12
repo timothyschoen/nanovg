@@ -899,6 +899,31 @@ NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, int patter
     return p;
 }
 
+NVGpaint nvgRoundedRectPaint(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
+{
+    NVGpaint p;
+    NVG_NOTUSED(ctx);
+    memset(&p, 0, sizeof(p));
+    
+    x += 0.5f;
+    y += 0.5f;
+    w -= 1.0f;
+    h -= 1.0f;
+
+	nvgTransformIdentity(p.xform);
+	p.xform[4] = x+w*0.5f;
+	p.xform[5] = y+h*0.5f;
+
+    p.rounded_rect = 1;
+    p.radius = radius;
+	p.innerColor = icol;
+    p.outerColor = ocol;
+	p.extent[0] = w * 0.5f;
+	p.extent[1] = h * 0.5f;
+
+    return p;
+}
+
 NVGpaint nvgLinearGradient(NVGcontext* ctx,
 								  float sx, float sy, float ex, float ey,
 								  NVGcolor icol, NVGcolor ocol)
@@ -1955,7 +1980,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 		path->fill = 0;
 		path->nfill = 0;
 		t = 0;
-		
+
 		// Calculate fringe or stroke
 		loop = (path->closed == 0) ? 0 : 1;
 		dst = verts;
@@ -2009,7 +2034,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			}
 			p0 = p1++;
 		}
-		
+
 		if (loop) {
 			// Loop it
 			nvg__vset(dst, verts[0].x, verts[0].y, u0, 1, -1, t); dst++;

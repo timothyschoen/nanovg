@@ -681,8 +681,16 @@ static int glnvg__renderCreate(void* uptr)
 			"if(lineStyle == 4) strokeAlpha*=glow(uv);\n"
 			"if (lineStyle > 1 && strokeAlpha < strokeThr) discard;\n"
 		"#endif\n"
-    		"	if (type == 5) {		//fast fill color\n"
-        "		result = innerCol * scissor;\n"
+    		"	if (type == 5) {		//rounded rect fill+stroke\n"
+        "    // Calculate distance to edge.   \n"
+        "		vec2 pt = (paintMat * vec3(fpos,1.0)).xy;\n"
+		"		float d = clamp((sdroundrect(pt, extent, radius)), 0.0, 1.0);\n"
+		"       vec4 color = mix(innerCol, outerCol, step(0.1f, d));\n"
+        "       vec2 dx = dFdx(pt);\n"
+        "       vec2 dy = dFdy(pt);\n"
+        "       float alias = 0.5 * length(max(abs(dx), abs(dy)));\n"
+        "       float alpha = 1.0f - (smoothstep(0.0, alias, d) * smoothstep(1.0 - alias, 1.0, d));"
+        "		result = vec4(color.rgb * alpha, alpha) * scissor;\n"
         "	} else if (type == 6) {		//fast fill image\n"
         "		vec2 pt = (paintMat * vec3(fpos,1.0)).xy / extent;\n"
         "#ifdef NANOVG_GL3\n"
@@ -694,7 +702,6 @@ static int glnvg__renderCreate(void* uptr)
         "		color *= innerCol;\n"
         "		result = color * scissor;\n"
         "	} else if(type == 7) {			// fill color\n"
-        "	  strokeAlpha = strokeMask();\n"
         "	  result = innerCol * strokeAlpha * scissor;\n"
         "	}"
 		"	if (type == 0) {			// Gradient\n"
@@ -1048,12 +1055,23 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
 			frag->texType = 2.0f;
 		#endif
 //		printf("frag->texType = %d\n", frag->texType);
-	} else if(paint->dots) {
+	}
+    else if(paint->rounded_rect) {
+        frag->type = NSVG_SHADER_FAST_FILLCOLOR;
+        frag->radius = paint->radius;
+        nvgTransformInverse(invxform, paint->xform);
+        frag->scissorExt[0] = scissor->extent[0];
+		frag->scissorExt[1] = scissor->extent[1];
+		frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
+		frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
+    }
+    else if(paint->dots) {
 	   frag->type = NSVG_SHADER_DOTS;
 	   frag->radius = paint->radius;
 		nvgTransformInverse(invxform, paint->xform);
 	} else if (paint->image == 0 && lineStyle == NVG_LINE_SOLID && !is_gradient) {
         frag->type = NSVG_SHADER_FILLCOLOR;
+        nvgTransformInverse(invxform, paint->xform);
     } else {
 		frag->type = NSVG_SHADER_FILLGRAD;
 		frag->radius = paint->radius;
@@ -1501,7 +1519,7 @@ static void glnvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperation
         glnvg__vset(&quad[1], bounds[2], bounds[1], 0.5f, 1.0f);
         glnvg__vset(&quad[2], bounds[0], bounds[3], 0.5f, 1.0f);
         glnvg__vset(&quad[3], bounds[0], bounds[1], 0.5f, 1.0f);
-        
+
         call->uniformOffset = glnvg__allocFragUniforms(gl, 2);
         if (call->uniformOffset == -1) goto error;
         // Simple shader for stencil
@@ -1518,7 +1536,10 @@ static void glnvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperation
         frag = nvg__fragUniformPtr(gl, call->uniformOffset);
         glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset), paint, scissor, fringe, fringe, -1.0f, 0);
     }
-    
+    if(paint->rounded_rect)
+    {
+        frag->type = NSVG_SHADER_FAST_FILLCOLOR;
+    }
     if (paint->image == 0 && !is_gradient) {
       frag->type = NSVG_SHADER_FILLCOLOR;
     }
