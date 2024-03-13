@@ -32,8 +32,6 @@ void nvgluBindFramebuffer(NVGLUframebuffer* fb);
 NVGLUframebuffer* nvgluCreateFramebuffer(NVGcontext* ctx, int w, int h, int imageFlags);
 void nvgluDeleteFramebuffer(NVGLUframebuffer* fb);
 
-#endif // NANOVG_GL_UTILS_H
-
 #ifdef NANOVG_GL_IMPLEMENTATION
 
 #if defined(NANOVG_GL3) || defined(NANOVG_GLES2) || defined(NANOVG_GLES3)
@@ -152,3 +150,4 @@ void nvgluDeleteFramebuffer(NVGLUframebuffer* fb)
 }
 
 #endif // NANOVG_GL_IMPLEMENTATION
+#endif // NANOVG_GL_UTILS_H
