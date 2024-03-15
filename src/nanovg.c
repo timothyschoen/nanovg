@@ -894,7 +894,7 @@ NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, int patter
 	nvgTransformIdentity(p.xform);
     p.dots = 1;
     p.radius = patternSize;
-    p.feather = feather * 2.0f;
+    p.feather = nvg__clampf(feather * 0.5f, 0.0f, 0.5f);
 	p.innerColor = icol;
 	p.outerColor = ocol;
     return p;

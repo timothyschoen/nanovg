@@ -745,7 +745,7 @@ static int glnvg__renderCreate(void* uptr)
 		"	} else if (type == 4) {     // Dot pattern for plugdata\n"
         "       vec2 pt = (paintMat * vec3(fpos, 1.0f)).xy - (0.5f * radius);\n"
         "       vec2 center = pt.xy - mod(pt.xy, radius) + (0.5f * radius);\n"
-        "       vec4 dotColor = mix(innerCol, outerCol, smoothstep(feather, 1.0f - feather, circleDist(pt.xy, center, 0.25f)));\n"
+        "       vec4 dotColor = mix(innerCol, outerCol, smoothstep(0.5f - feather, 0.5f + feather, circleDist(pt.xy, center, 0.25f)));\n"
         "       vec4 color = mix(dotColor, vec4(0.0f, 0.0f, 0.0f, 0.0f), 0.1f * distance(uv.xy, vec2(0.5f)));\n"
         "       color *= scissor;\n"
         "       result = color;\n"
@@ -1069,6 +1069,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
     else if(paint->dots) {
 	   frag->type = NSVG_SHADER_DOTS;
 	   frag->radius = paint->radius;
+	   frag->feather = paint->feather;
 		nvgTransformInverse(invxform, paint->xform);
 	} else if (paint->image == 0 && lineStyle == NVG_LINE_SOLID && !is_gradient) {
         frag->type = NSVG_SHADER_FILLCOLOR;
