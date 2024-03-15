@@ -2519,7 +2519,7 @@ void nvgStroke(NVGcontext* ctx)
 
 	nvg__flattenPaths(ctx);
 
-	if (ctx->params.edgeAntiAlias && state->shapeAntiAlias && state->lineStyle < 1)
+	if (ctx->params.edgeAntiAlias && state->shapeAntiAlias && state->lineStyle <= 1)
 		nvg__expandStroke(ctx, strokeWidth*0.5f, ctx->fringeWidth, state->lineCap, state->lineJoin, state->lineStyle, state->miterLimit);
 	else
 		nvg__expandStroke(ctx, strokeWidth*0.5f, 0.0f, state->lineCap, state->lineJoin, state->lineStyle, state->miterLimit);
