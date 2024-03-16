@@ -24,12 +24,14 @@ struct NVGLUframebuffer {
 	GLuint rbo;
 	GLuint texture;
 	int image;
+	int mipmapped;
 };
 typedef struct NVGLUframebuffer NVGLUframebuffer;
 
 // Helper function to create GL frame buffer to render to.
 void nvgluBindFramebuffer(NVGLUframebuffer* fb);
 NVGLUframebuffer* nvgluCreateFramebuffer(NVGcontext* ctx, int w, int h, int imageFlags);
+void nvgluGenerateMipmaps(NVGLUframebuffer* fb);
 void nvgluDeleteFramebuffer(NVGLUframebuffer* fb);
 
 #ifdef NANOVG_GL_IMPLEMENTATION
@@ -126,6 +128,13 @@ void nvgluBindFramebuffer(NVGLUframebuffer* fb)
 #else
 	NVG_NOTUSED(fb);
 #endif
+}
+
+void nvgluGenerateMipmaps(NVGLUframebuffer* fb)
+{
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, fb->texture);
+    glGenerateMipmap(GL_TEXTURE_2D);
 }
 
 void nvgluDeleteFramebuffer(NVGLUframebuffer* fb)
