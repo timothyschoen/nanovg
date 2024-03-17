@@ -640,17 +640,17 @@ static int glnvg__renderCreate(void* uptr)
         "  return distance(center, p) - d;\n"
         "}\n"
         "float dashed(vec2 uv){\n"
-		"	float fy = fract(uv.y / 8.0f);\n"
-		"	float w = step(fy, 0.5f);\n"
-		"	fy *= 4.0f;\n"
-		"	if(fy >= 1.5f){\n"
-		"		fy -= 1.5f;\n"
-		"	} else if(fy <= 0.5f) {\n"
-			"	fy = 0.5f - fy;\n"
+		"	float fy = fract(uv.y / radius);\n"
+		"	float w = step(fy, (radius / 8.0f));\n"
+		"	fy *= (radius * 0.75);\n"
+		"	if(fy >= (radius / 2.666f)){\n"
+		"		fy -= (radius / 2.666f);\n"
+		"	} else if(fy <= (radius / 8.0f)) {\n"
+			"	fy -= (radius / 8.0f);\n"
 			"} else {\n"
 			"	fy = 0.0f;\n"
 			"}\n"
-			"w *= smoothstep(0.4f, 0.6f, 6.0f * (0.25f - (uv.x * uv.x  + fy * fy)));\n"
+			"w *= smoothstep(0.0f, 1.0f, (radius * 1.5f) * (0.25f - (uv.x * uv.x  + fy * fy)));\n"
 		"	return w;\n"
 		"}\n"
 		"float dotted(vec2 uv){\n"
@@ -1016,6 +1016,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
 	frag->innerCol = glnvg__premulColor(paint->innerColor);
 	frag->outerCol = glnvg__premulColor(paint->outerColor);
 	frag->lineStyle = lineStyle;
+	frag->radius = paint->radius;
 	if (scissor->extent[0] < -0.5f || scissor->extent[1] < -0.5f) {
 		memset(frag->scissorMat, 0, sizeof(frag->scissorMat));
 		frag->scissorExt[0] = 1.0f;

@@ -278,6 +278,9 @@ void nvgStrokeWidth(NVGcontext* ctx, float size);
 // Can be one of NVG_LINE_SOLID (default), NVG_LINE_GLOW, NVG_LINE_DASHED, NVG LINE_DOTTED
 void nvgLineStyle(NVGcontext* ctx, int lineStyle);
 
+// Set line dash length if NVG_LINE_DASHED is active
+void nvgDashLength(NVGcontext* ctx, float length);
+
 // Sets how the end of the line (cap) is drawn,
 // Can be one of: NVG_BUTT (default), NVG_ROUND, NVG_SQUARE.
 void nvgLineCap(NVGcontext* ctx, int cap);

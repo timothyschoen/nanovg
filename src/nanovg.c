@@ -728,6 +728,14 @@ void nvgLineStyle(NVGcontext* ctx, int lineStyle) {
 	state->lineStyle = lineStyle;
 }
 
+// Set line dash length if NVG_LINE_DASHED is active
+void nvgDashLength(NVGcontext* ctx, float length)
+{
+    NVGstate* state = nvg__getState(ctx);
+    state->stroke.radius = length;
+}
+
+
 void nvgLineCap(NVGcontext* ctx, int cap)
 {
 	NVGstate* state = nvg__getState(ctx);
