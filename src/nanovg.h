@@ -52,6 +52,7 @@ struct NVGpaint {
 	NVGcolor outerColor;
 	int image;
     int dots;
+    float dot_pattern_size;
     int rounded_rect;
 };
 typedef struct NVGpaint NVGpaint;
@@ -442,7 +443,7 @@ NVGpaint nvgImagePattern(NVGcontext* ctx, float ox, float oy, float ex, float ey
 						 float angle, int image, float alpha);
 
 // Creates a dot pattern, that is rendered on shader (used for plugdata canvas background)
-NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, int patternSize, float feather);
+NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patternSize, float dotRadius, float feather);
 
 void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius);
 //

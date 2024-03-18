@@ -203,6 +203,7 @@ struct GLNVGfragUniforms {
 		float feather;
 		float strokeMult;
 		float strokeThr;
+		float patternSize;
 		int lineStyle;
 		int texType;
 		int type;
@@ -223,12 +224,12 @@ struct GLNVGfragUniforms {
 				float feather;
 				float strokeMult;
 				float strokeThr;
+				float patternSize;
 				float lineStyle;
 				float texType;
 				float type;
 				float unused1;
 				float unused2;
-				float unused3;
 			};
 			float uniformArray[NANOVG_GL_UNIFORMARRAY_SIZE][4];
 		};
@@ -585,7 +586,8 @@ static int glnvg__renderCreate(void* uptr)
 		"		float feather;\n"
 		"		float strokeMult;\n"
 		"		float strokeThr;\n"
-			"   int lineStyle;\n"
+		"       float patternSize;\n"
+		"       int lineStyle;\n"
 		"		int texType;\n"
 		"		int type;\n"
 		"	};\n"
@@ -616,9 +618,10 @@ static int glnvg__renderCreate(void* uptr)
 		"	#define feather frag[9].w\n"
 		"	#define strokeMult frag[10].x\n"
 		"	#define strokeThr frag[10].y\n"
-		"	#define lineStyle int(frag[10].z)\n"
-		"	#define texType int(frag[10].w)\n"
-		"	#define type int(frag[11].x)\n"
+		"	#define patternSize frag[10].z\n"
+		"	#define lineStyle int(frag[10].w)\n"
+		"	#define texType int(frag[11].x)\n"
+		"	#define type int(frag[11].y)\n"
 		"#endif\n"
 		"\n"
 		"float sdroundrect(vec2 pt, vec2 ext, float rad) {\n"
@@ -751,9 +754,9 @@ static int glnvg__renderCreate(void* uptr)
 		"		color *= scissor;\n"
 		"		result = color * innerCol;\n"
 		"	} else if (type == 4) {     // Dot pattern for plugdata\n"
-        "       vec2 pt = (paintMat * vec3(fpos, 1.0f)).xy - (0.5f * radius);\n"
-        "       vec2 center = pt.xy - mod(pt.xy, radius) + (0.5f * radius);\n"
-        "       vec4 dotColor = mix(innerCol, outerCol, smoothstep(0.5f - feather, 0.5f + feather, circleDist(pt.xy, center, 0.25f)));\n"
+        "       vec2 pt = (paintMat * vec3(fpos, 1.0f)).xy - (0.5f * patternSize);\n"
+        "       vec2 center = pt.xy - mod(pt.xy, patternSize) + (0.5f * patternSize);\n"
+        "       vec4 dotColor = mix(innerCol, outerCol, smoothstep(0.5f - feather, 0.5f + feather, circleDist(pt.xy, center, radius)));\n"
         "       vec4 color = mix(dotColor, vec4(0.0f, 0.0f, 0.0f, 0.0f), 0.1f * distance(uv.xy, vec2(0.5f)));\n"
         "       color *= scissor;\n"
         "       result = color;\n"
@@ -1068,7 +1071,6 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
 	}
     else if(paint->rounded_rect) {
         frag->type = NSVG_SHADER_FAST_ROUNDEDRECT;
-        frag->radius = paint->radius;
         nvgTransformInverse(invxform, paint->xform);
         frag->scissorExt[0] = scissor->extent[0];
 		frag->scissorExt[1] = scissor->extent[1];
@@ -1077,15 +1079,14 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
     }
     else if(paint->dots) {
 	   frag->type = NSVG_SHADER_DOTS;
-	   frag->radius = paint->radius;
 	   frag->feather = paint->feather;
+	   frag->patternSize = paint->dot_pattern_size;
 		nvgTransformInverse(invxform, paint->xform);
 	} else if (paint->image == 0 && lineStyle == NVG_LINE_SOLID && !is_gradient) {
         frag->type = NSVG_SHADER_FILLCOLOR;
         nvgTransformInverse(invxform, paint->xform);
     } else {
 		frag->type = NSVG_SHADER_FILLGRAD;
-		frag->radius = paint->radius;
 		frag->feather = paint->feather;
 		nvgTransformInverse(invxform, paint->xform);
 	}

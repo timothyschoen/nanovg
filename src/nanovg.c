@@ -893,7 +893,7 @@ void nvgDeleteImage(NVGcontext* ctx, int image)
 	ctx->params.renderDeleteTexture(ctx->params.userPtr, image);
 }
 
-NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, int patternSize, float feather)
+NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patternSize, float dotRadius, float feather)
 {
     NVGpaint p;
     NVG_NOTUSED(ctx);
@@ -901,7 +901,8 @@ NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, int patter
 
 	nvgTransformIdentity(p.xform);
     p.dots = 1;
-    p.radius = patternSize;
+    p.radius = dotRadius * 0.25f;
+    p.dot_pattern_size = patternSize;
     p.feather = nvg__clampf(feather * 0.5f, 0.0f, 0.5f);
 	p.innerColor = icol;
 	p.outerColor = ocol;
