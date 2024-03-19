@@ -1131,6 +1131,35 @@ void nvgIntersectScissor(NVGcontext* ctx, float x, float y, float w, float h)
 	nvgScissor(ctx, rect[0], rect[1], rect[2], rect[3]);
 }
 
+void nvgIntersectRoundedScissor(NVGcontext* ctx, float x, float y, float w, float h, float r)
+{
+    NVGstate* state = nvg__getState(ctx);
+    float pxform[6], invxorm[6];
+    float rect[4];
+    float ex, ey, tex, tey;
+
+    // If no previous scissor has been set, set the scissor as current scissor.
+    if (state->scissor.extent[0] < 0) {
+        nvgRoundedScissor(ctx, x, y, w, h, r);
+        return;
+    }
+
+    // Transform the current scissor rect into current transform space.
+    // If there is difference in rotation, this will be approximation.
+    memcpy(pxform, state->scissor.xform, sizeof(float)*6);
+    ex = state->scissor.extent[0];
+    ey = state->scissor.extent[1];
+    nvgTransformInverse(invxorm, state->xform);
+    nvgTransformMultiply(pxform, invxorm);
+    tex = ex*nvg__absf(pxform[0]) + ey*nvg__absf(pxform[2]);
+    tey = ex*nvg__absf(pxform[1]) + ey*nvg__absf(pxform[3]);
+
+    // Intersect rects.
+    nvg__isectRects(rect, pxform[4]-tex,pxform[5]-tey,tex*2,tey*2, x,y,w,h);
+
+    nvgRoundedScissor(ctx, rect[0], rect[1], rect[2], rect[3], r);
+}
+
 void nvgResetScissor(NVGcontext* ctx)
 {
 	NVGstate* state = nvg__getState(ctx);

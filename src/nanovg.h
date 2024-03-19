@@ -467,6 +467,9 @@ void nvgRoundedScissor(NVGcontext* ctx, float x, float y, float w, float h, floa
 // transform space. The resulting shape is always rectangle.
 void nvgIntersectScissor(NVGcontext* ctx, float x, float y, float w, float h);
 
+// Same as nvgIntersectScissors but with rounded rectangle
+void nvgIntersectRoundedScissor(NVGcontext* ctx, float x, float y, float w, float h, float r);
+
 // Reset and disables scissoring.
 void nvgResetScissor(NVGcontext* ctx);
 
