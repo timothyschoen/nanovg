@@ -30,6 +30,40 @@ extern "C" {
 #pragma warning(disable: 4201)  // nonstandard extension used : nameless struct/union
 #endif
 
+#if defined NANOVG_GL2_IMPLEMENTATION
+  #define NANOVG_GL_IMPLEMENTATION 1
+  #define nvgCreateContext(flags) nvgCreateGL2(flags)
+  #define nvgDeleteContext(context) nvgDeleteGL2(context)
+#elif defined NANOVG_GLES2_IMPLEMENTATION
+  #define NANOVG_GL_IMPLEMENTATION 1
+  #define nvgCreateContext(flags) nvgCreateGLES2(flags)
+  #define nvgDeleteContext(context) nvgDeleteGLES2(context)
+#elif defined NANOVG_GL3_IMPLEMENTATION
+  #define NANOVG_GL_IMPLEMENTATION 1
+  #define nvgCreateContext(flags) nvgCreateGL3(flags)
+  #define nvgDeleteContext(context) nvgDeleteGL3(context)
+#elif defined NANOVG_GLES3_IMPLEMENTATION
+  #define NANOVG_GL_IMPLEMENTATION 1
+  #define nvgCreateContext(flags) nvgCreateGLES3(flags)
+  #define nvgDeleteContext(context) nvgDeleteGLES3(context)
+#elif defined NANOVG_METAL_IMPLEMENTATION
+  #define nvgCreateContext(layer, flags, width, height) mnvgCreateContext(layer, flags, width, height)
+  #define nvgDeleteContext(context) nvgDeleteMTL(context)
+  #define nvgBindFramebuffer(fb) mnvgBindFramebuffer(fb)
+  #define nvgCreateFramebuffer(ctx, w, h, flags) mnvgCreateFramebuffer(ctx, w, h, flags)
+  #define nvgDeleteFramebuffer(fb) mnvgDeleteFramebuffer(fb)
+  #define nvgViewport(x, y, w, h)
+  #define NVGframebuffer MNVGframebuffer
+#endif
+#if defined NANOVG_GL_IMPLEMENTATION
+#define nvgBindFramebuffer(fb) nvgluBindFramebuffer(fb)
+#define nvgCreateFramebuffer(ctx, w, h, flags) nvgluCreateFramebuffer(ctx, w, h, flags)
+#define nvgDeleteFramebuffer(fb) nvgluDeleteFramebuffer(fb)
+#define nvgViewport(x, y, w, h) glViewport(x, y, w, h)
+#define NVGframebuffer NVGLUframebuffer
+#endif
+
+
 typedef struct NVGcontext NVGcontext;
 
 struct NVGcolor {
@@ -750,6 +784,10 @@ void nvgDebugDumpPathCache(NVGcontext* ctx);
 
 #ifdef __cplusplus
 }
+#endif
+
+#if defined NANOVG_METAL_IMPLEMENTATION
+#include "nanovg_mtl.h"
 #endif
 
 #endif // NANOVG_H

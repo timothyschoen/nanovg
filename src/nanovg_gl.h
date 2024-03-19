@@ -624,9 +624,10 @@ static int glnvg__renderCreate(void* uptr)
 		"	#define lineStyle int(frag[10].w)\n"
 		"	#define texType int(frag[11].x)\n"
 		"	#define type int(frag[11].y)\n"
+		/*
 		"	#define lineStyle int(frag[10].z)\n"
 		"	#define texType int(frag[10].w)\n"
-		"	#define type int(frag[11].x)\n"
+		"	#define type int(frag[11].x)\n"          TODO: ??? */
 		"   #define scissorRadius frag[12].x\n"
 		"#endif\n"
 		"\n"
@@ -1091,7 +1092,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
 		frag->scissorExt[1] = scissor->extent[1];
         frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
         frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
-        frag->scissorRadius = scissor->radius;
+        frag->radius = scissor->radius;
     }
     else if(paint->dots) {
 	   frag->type = NSVG_SHADER_DOTS;
