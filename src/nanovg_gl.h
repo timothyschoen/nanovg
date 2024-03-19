@@ -207,6 +207,7 @@ struct GLNVGfragUniforms {
 		int lineStyle;
 		int texType;
 		int type;
+        float scissorRadius;
 	#else
 		// note: after modifying layout or size of uniform array,
 		// don't forget to also update the fragment shader source!
@@ -228,8 +229,8 @@ struct GLNVGfragUniforms {
 				float lineStyle;
 				float texType;
 				float type;
+				float scissorRadius;
 				float unused1;
-				float unused2;
 			};
 			float uniformArray[NANOVG_GL_UNIFORMARRAY_SIZE][4];
 		};
@@ -590,6 +591,7 @@ static int glnvg__renderCreate(void* uptr)
 		"       int lineStyle;\n"
 		"		int texType;\n"
 		"		int type;\n"
+        "       float scissorRadius;\n"
 		"	};\n"
 		"#else\n" // NANOVG_GL3 && !USE_UNIFORMBUFFER
 		"	uniform vec4 frag[UNIFORMARRAY_SIZE];\n"
@@ -622,6 +624,10 @@ static int glnvg__renderCreate(void* uptr)
 		"	#define lineStyle int(frag[10].w)\n"
 		"	#define texType int(frag[11].x)\n"
 		"	#define type int(frag[11].y)\n"
+		"	#define lineStyle int(frag[10].z)\n"
+		"	#define texType int(frag[10].w)\n"
+		"	#define type int(frag[11].x)\n"
+		"   #define scissorRadius frag[12].x\n"
 		"#endif\n"
 		"\n"
 		"float sdroundrect(vec2 pt, vec2 ext, float rad) {\n"
@@ -629,13 +635,18 @@ static int glnvg__renderCreate(void* uptr)
 		"	vec2 d = abs(pt) - ext2;\n"
 		"	return min(max(d.x,d.y),0.0f) + length(max(d,0.0f)) - rad;\n"
 		"}\n"
-		"\n"
 		"// Scissoring\n"
 		"float scissorMask(vec2 p) {\n"
 		"	vec2 sc = (abs((scissorMat * vec3(p,1.0f)).xy) - scissorExt);\n"
 		"	sc = vec2(0.5f,0.5f) - sc * scissorScale;\n"
 		"	return clamp(sc.x,0.0f,1.0f) * clamp(sc.y,0.0f,1.0f);\n"
 		"}\n"
+        "// Calculate scissor path with rounded corners\n"
+        "float roundedScissorMask(vec2 p, float rad) {\n"
+        "	 vec2 sc = (abs((scissorMat * vec3(p,1.0f)).xy));\n"
+        "    float sc2 = sdroundrect(sc, scissorExt, rad);\n"
+        "    return smoothstep(1.0, 0.0, sc2);\n"
+        "}\n"
 		"float glow(vec2 uv){\n"
 		"  return smoothstep(0.0f, 1.0f, 1.0f - 2.0f * abs(uv.x));\n"
 		"}\n"
@@ -681,7 +692,7 @@ static int glnvg__renderCreate(void* uptr)
 		"\n"
 		"void main(void) {\n"
 		"   vec4 result;\n"
-		"	float scissor = scissorMask(fpos);\n"
+        "   float scissor = scissorRadius == 0.0f ? scissorMask(fpos) : roundedScissorMask(fpos, scissorRadius);\n"
 		"   if(scissor == 0.0f)  {\n"
 		"#ifdef NANOVG_GL3\n"
 		"	outColor = vec4(0, 0, 0, 0);\n"
@@ -1026,13 +1037,17 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
 		frag->scissorExt[1] = 1.0f;
 		frag->scissorScale[0] = 1.0f;
 		frag->scissorScale[1] = 1.0f;
+        frag->scissorRadius = 0.0f;
 	} else {
+
 		nvgTransformInverse(invxform, scissor->xform);
 		glnvg__xformToMat3x4(frag->scissorMat, invxform);
 		frag->scissorExt[0] = scissor->extent[0];
 		frag->scissorExt[1] = scissor->extent[1];
-		frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
-		frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
+
+        frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
+        frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
+        frag->scissorRadius = scissor->radius / frag->scissorScale[0];
 	}
 
 	memcpy(frag->extent, paint->extent, sizeof(frag->extent));
@@ -1074,8 +1089,9 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         nvgTransformInverse(invxform, paint->xform);
         frag->scissorExt[0] = scissor->extent[0];
 		frag->scissorExt[1] = scissor->extent[1];
-		frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
-		frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
+        frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
+        frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
+        frag->scissorRadius = scissor->radius;
     }
     else if(paint->dots) {
 	   frag->type = NSVG_SHADER_DOTS;

@@ -47,7 +47,7 @@
 #define NVG_INIT_VERTS_SIZE 256
 
 #ifndef NVG_MAX_STATES
-#define NVG_MAX_STATES 32
+#define NVG_MAX_STATES 64
 #endif
 
 #define NVG_KAPPA90 0.5522847493f	// Length proportional to radius of a cubic bezier handle for 90deg arcs.
@@ -675,6 +675,7 @@ void nvgReset(NVGcontext* ctx)
 
 	state->scissor.extent[0] = -1.0f;
 	state->scissor.extent[1] = -1.0f;
+    state->scissor.radius = 0.0f;
 
 	state->fontSize = 16.0f;
 	state->letterSpacing = 0.0f;
@@ -1066,7 +1067,26 @@ void nvgScissor(NVGcontext* ctx, float x, float y, float w, float h)
 
 	state->scissor.extent[0] = w*0.5f;
 	state->scissor.extent[1] = h*0.5f;
+    state->scissor.radius = 0;
 }
+
+void nvgRoundedScissor(NVGcontext* ctx, float x, float y, float w, float h, float r)
+{
+    NVGstate* state = nvg__getState(ctx);
+    ctx->scissor = (NVGscissorBounds){x, y, w, h};
+    w = nvg__maxf(0.0f, w);
+    h = nvg__maxf(0.0f, h);
+
+    nvgTransformIdentity(state->scissor.xform);
+    state->scissor.xform[4] = x+w*0.5f;
+    state->scissor.xform[5] = y+h*0.5f;
+    nvgTransformMultiply(state->scissor.xform, state->xform);
+
+    state->scissor.extent[0] = w*0.5f;
+    state->scissor.extent[1] = h*0.5f;
+    state->scissor.radius = r;
+}
+
 
 static void nvg__isectRects(float* dst,
 							float ax, float ay, float aw, float ah,
@@ -1117,6 +1137,7 @@ void nvgResetScissor(NVGcontext* ctx)
 	memset(state->scissor.xform, 0, sizeof(state->scissor.xform));
 	state->scissor.extent[0] = -1.0f;
 	state->scissor.extent[1] = -1.0f;
+    state->scissor.radius = 0.0f;
 }
 
 // Global composite operation.

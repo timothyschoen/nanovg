@@ -456,6 +456,9 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
 // The scissor rectangle is transformed by the current transform.
 void nvgScissor(NVGcontext* ctx, float x, float y, float w, float h);
 
+// Sets the current scissor rounded rectangle.
+void nvgRoundedScissor(NVGcontext* ctx, float x, float y, float w, float h, float r);
+
 // Intersects current scissor rectangle with the specified rectangle.
 // The scissor rectangle is transformed by the current transform.
 // Note: in case the rotation of previous scissor rect differs from
@@ -679,6 +682,7 @@ enum NVGtexture {
 struct NVGscissor {
 	float xform[6];
 	float extent[2];
+    float radius;
 };
 typedef struct NVGscissor NVGscissor;
 
