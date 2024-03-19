@@ -1047,7 +1047,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
 
         frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
         frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
-        frag->scissorRadius = scissor->radius / frag->scissorScale[0];
+        frag->scissorRadius = scissor->radius;
 	}
 
 	memcpy(frag->extent, paint->extent, sizeof(frag->extent));
