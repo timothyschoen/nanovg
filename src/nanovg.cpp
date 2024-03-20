@@ -57,10 +57,6 @@
 
 #define NVG_COUNTOF(arr) (sizeof(arr) / sizeof(0[arr]))
 
-#define BEZIER_CACHE 0
-#define BEZIER_CACHE_SIZE (2048)
-#define BEZIER_BUCKET_SIZE 10
-
 extern "C" {
 
 enum NVGcommands {
@@ -150,6 +146,7 @@ typedef struct {
     float miterLimit;
     float fringeWidth;
     int lastFrame;
+    float xform[6];
     std::vector<NVGpath> paths;
   };
   
@@ -177,10 +174,7 @@ struct NVGcontext {
 	int textTriCount;
     int frames;
     struct NVGscissorBounds scissor;
-#if BEZIER_CACHE
-  BezierCache* bezierCache;
-#endif
-  StrokeCache* strokeCache;
+    StrokeCache* strokeCache;
 };
 
 static float nvg__sqrtf(float a) { return sqrtf(a); }
@@ -382,10 +376,6 @@ NVGcontext* nvgCreateInternal(NVGparams* params)
 	ctx->fontImageIdx = 0;
 	ctx->scissor = (NVGscissorBounds){0.0f, 0.0f, -1.0f, -1.0f};
   
-  // Create bezier cache.
-#if BEZIER_CACHE
-  ctx->bezierCache = new BezierCache{100*100};
-#endif
   ctx->strokeCache = new StrokeCache{100*100};
   
 	return ctx;
@@ -429,9 +419,6 @@ void nvgDeleteInternal(NVGcontext* ctx)
 	if (ctx->params.renderDelete != NULL)
 		ctx->params.renderDelete(ctx->params.userPtr);
   
-#if BEZIER_CACHE
-  delete ctx->bezierCache;
-#endif
   delete ctx->strokeCache;
   
   free(ctx);;
@@ -455,10 +442,6 @@ void nvgBeginFrame(NVGcontext* ctx, float windowWidth, float windowHeight, float
 	ctx->fillTriCount = 0;
 	ctx->strokeTriCount = 0;
 	ctx->textTriCount = 0;
-}
-
-float nvgDevicePixelRatio(NVGcontext* ctx) {
-  return ctx->devicePxRatio;
 }
 
 void nvgCancelFrame(NVGcontext* ctx)
@@ -496,23 +479,14 @@ void nvgEndFrame(NVGcontext* ctx)
 		ctx->fontImageIdx = 0;
 	}
   
-#if BEZIER_CACHE
-  // Clear unused paths from the cache.
-  for(auto& vec : (*ctx->bezierCache)) {
-    vec.erase(std::remove_if(vec.begin(), vec.end(), [ctx](auto& l) { return l.lastFrame != ctx->frames; }),
-              vec.end());
-  }
-  
-#endif
-  
   // Clear unused paths from the cache.
   for(auto& vec : (*ctx->strokeCache)) {
     
     auto pred = [ctx](auto& l) {
-      bool remove = l.lastFrame != ctx->frames;
+      bool remove = l.lastFrame < ctx->frames - 30;
       if(remove) {
         for(auto& path : l.paths) {
-          free(path.stroke);
+    
           free(path.fill);
         }
       }
@@ -1487,104 +1461,10 @@ static void nvg__vset(NVGvertex* vtx, float x, float y, float u, float v, float 
 	vtx->t = t; // Path length normalized by stroke width
 }
 
-static void nvg__tesselateBezier(NVGcontext* ctx, BezierCacheLine* cache,
-								 float x1, float y1, float x2, float y2,
-								 float x3, float y3, float x4, float y4,
-								 int level, int type)
-{
-	float x12,y12,x23,y23,x34,y34,x123,y123,x234,y234,x1234,y1234;
-	float dx,dy,d2,d3;
-
-	if (level > 10) return;
-
-	x12 = (x1+x2)*0.5f;
-	y12 = (y1+y2)*0.5f;
-	x23 = (x2+x3)*0.5f;
-	y23 = (y2+y3)*0.5f;
-	x34 = (x3+x4)*0.5f;
-	y34 = (y3+y4)*0.5f;
-	x123 = (x12+x23)*0.5f;
-	y123 = (y12+y23)*0.5f;
-
-	dx = x4 - x1;
-	dy = y4 - y1;
-	d2 = nvg__absf(((x2 - x4) * dy - (y2 - y4) * dx));
-	d3 = nvg__absf(((x3 - x4) * dy - (y3 - y4) * dx));
-
-	if ((d2 + d3)*(d2 + d3) < ctx->tessTol * (dx*dx + dy*dy)) {
-    
-    if(cache) {
-      cache->pts.push_back(x4);
-      cache->pts.push_back(y4);
-      cache->flags.push_back(type);
-      cache->npts++;
-    }
-    
-		nvg__addPoint(ctx, x4, y4, type);
-		return;
-	}
-
-/*	if (nvg__absf(x1+x3-x2-x2) + nvg__absf(y1+y3-y2-y2) + nvg__absf(x2+x4-x3-x3) + nvg__absf(y2+y4-y3-y3) < ctx->tessTol) {
-		nvg__addPoint(ctx, x4, y4, type);
-		return;
-	}*/
-
-	x234 = (x23+x34)*0.5f;
-	y234 = (y23+y34)*0.5f;
-	x1234 = (x123+x234)*0.5f;
-	y1234 = (y123+y234)*0.5f;
-
-	nvg__tesselateBezier(ctx, cache, x1,y1, x12,y12, x123,y123, x1234,y1234, level+1, 0);
-	nvg__tesselateBezier(ctx, cache, x1234,y1234, x234,y234, x34,y34, x4,y4, level+1, type);
-}
-
-#if BEZIER_CACHE
-  
-static void nvg__tesselateBezierCache(NVGcontext* ctx,
-                                 float x1, float y1, float x2, float y2,
-                                 float x3, float y3, float x4, float y4, int type)
-{
-  NVGbezierPath path = {x1,y1,x2,y2,x3,y3,x4,y4};
-  
-  // 100x100 regular grid
-  unsigned int x = ((unsigned int) fabsf(x1)) % 100;
-  unsigned int y = ((unsigned int) fabsf(y1)) % 100;
-  
-  //printf("%d %d\n", x, y);
-  
-  auto& vec = (*ctx->bezierCache)[ x + y*100 ];
-  
-  //printf("size: %lu\n", vec.size());
-  
-  for(auto& l : vec) {
-    if(memcmp(&path, &l.path, sizeof(NVGbezierPath)) == 0) {
-      l.lastFrame = ctx->frames;
-      
-      for(int i=0;i<l.npts;++i) {
-        nvg__addPoint(ctx, l.pts[2*i], l.pts[2*i+1], l.flags[i]);
-      }
-      
-      printf("hit\n");
-      return;
-    }
-  }
-  
-  printf("miss\n");
-  
-  vec.push_back(BezierCacheLine());
-  auto& l = vec.back();
-  l.path = path;
-  l.lastFrame = ctx->frames;
-  
-  nvg__tesselateBezierAFD(ctx, &l, x1, y1, x2, y2, x3, y3, x4, y4, 0, type);
-  
-}
-#endif
 // Adaptive forward differencing for bezier tesselation.
 void nvg__tesselateBezierAFD(NVGcontext* ctx, float x1, float y1, float x2, float y2,
                                float x3, float y3, float x4, float y4, int type)
 {
-
   // Power basis.
   float ax = -x1 + 3*x2 - 3*x3 + x4;
   float ay = -y1 + 3*y2 - 3*y3 + y4;
@@ -1684,7 +1564,6 @@ void nvg__tesselateBezierAFD(NVGcontext* ctx, float x1, float y1, float x2, floa
     assert(t <= ONE);
 
   }
-
 }
 
 static void nvg__flattenPaths(NVGcontext* ctx)
@@ -1727,11 +1606,8 @@ static void nvg__flattenPaths(NVGcontext* ctx)
 				cp1 = &ctx->commands[i+1];
 				cp2 = &ctx->commands[i+3];
 				p = &ctx->commands[i+5];
-#if BEZIER_CACHE
-				nvg__tesselateBezierCache(ctx, last->x,last->y, cp1[0],cp1[1], cp2[0],cp2[1], p[0],p[1], NVG_PT_CORNER);
-#else
-        nvg__tesselateBezierAFD(ctx, NULL, last->x,last->y, cp1[0],cp1[1], cp2[0],cp2[1], p[0],p[1], 0, NVG_PT_CORNER);
-#endif
+
+                nvg__tesselateBezierAFD(ctx, last->x,last->y, cp1[0],cp1[1], cp2[0],cp2[1], p[0],p[1], NVG_PT_CORNER);
 			}
 			i += 7;
 			break;
@@ -2641,13 +2517,107 @@ void nvgDebugDumpPathCache(NVGcontext* ctx)
 	}
 }
 
+static StrokeCacheLine* findCachedStroke(NVGcontext* ctx, float strokeWidth) {
+  if(ctx->ncommands < 3) {
+    return NULL;
+  }
+    
+  float x = ctx->commands[1];
+  float y = ctx->commands[2];
+  
+  NVGstate* state = nvg__getState(ctx);
+  float invxform[6];
+  nvgTransformInverse(invxform, state->xform);
+  nvgTransformPoint(&x, &y, invxform, x, y);
+    
+  // Look at the commands.
+  unsigned int hash_x = ((unsigned int) fabsf(x)) % 100;
+  unsigned int hash_y = ((unsigned int) fabsf(y)) % 100;
+  
+  auto& vec = (*ctx->strokeCache)[ hash_x + hash_y*100 ];
+  
+  for(auto& l : vec) {
+    if(ctx->ncommands == l.commands.size()
+       && (memcmp(ctx->commands, l.commands.data(), ctx->ncommands * sizeof(float)) == 0)
+       & strokeWidth == l.strokeWidth
+       & state->lineCap == l.lineCap
+       & state->lineJoin == l.lineJoin
+       & state->miterLimit == l.miterLimit
+       & ctx->fringeWidth == l.fringeWidth) {
+      
+      l.lastFrame = ctx->frames;
+      return &l;
+      
+    }
+  }
+  
+  // Cache miss.
+  return NULL;
+}
+
+static StrokeCacheLine* addCachedStroke(NVGcontext* ctx, float strokeWidth) {
+  if(ctx->ncommands < 3) {
+    return NULL;
+  }
+  float x = ctx->commands[1];
+  float y = ctx->commands[2];
+  
+  NVGstate* state = nvg__getState(ctx);
+  float invxform[6];
+  nvgTransformInverse(invxform, state->xform);
+  nvgTransformPoint(&x, &y, invxform, x, y);
+  
+  // Look at the commands.
+  unsigned int hash_x = ((unsigned int) fabsf(x)) % 100;
+  unsigned int hash_y = ((unsigned int) fabsf(y)) % 100;
+  
+
+  auto& vec = (*ctx->strokeCache)[ hash_x + hash_y*100 ];
+  vec.push_back(StrokeCacheLine());
+  
+  auto& l = vec.back();
+  
+  l.commands.resize(ctx->ncommands);
+  std::copy(ctx->commands, ctx->commands+ctx->ncommands, l.commands.begin());
+
+  l.strokeWidth = strokeWidth;
+  l.lineCap = state->lineCap;
+  l.lineJoin = state->lineJoin;
+  l.miterLimit = state->miterLimit;
+  l.fringeWidth = ctx->fringeWidth;
+  l.lastFrame = ctx->frames;
+  memcpy(l.xform, invxform, 6);
+
+  return &l;
+}
+
 void nvgFill(NVGcontext* ctx)
 {
 	NVGstate* state = nvg__getState(ctx);
 	const NVGpath* path;
 	NVGpaint fillPaint = state->fill;
 	int i;
-
+    
+    if(auto l = findCachedStroke(ctx, -1)) {
+      nvgSave(ctx);
+      //nvgTransform(ctx, l->xform[0], l->xform[1], l->xform[2], l->xform[3], l->xform[4], l->xform[5]);
+      
+      // Cache hit, send to backend!
+      ctx->params.renderFill(ctx->params.userPtr, &fillPaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
+                               ctx->cache->bounds, l->paths.data(), (int) l->paths.size());
+      nvgRestore(ctx);
+      
+      // Count triangles
+      for(auto& path : l->paths) {
+        ctx->strokeTriCount += path.nstroke-2;
+        ctx->drawCallCount++;
+      }
+      
+      return;
+    }
+    
+    auto l = addCachedStroke(ctx, -1);
+    
 	nvg__flattenPaths(ctx);
 	if (ctx->params.edgeAntiAlias && state->shapeAntiAlias)
 		nvg__expandFill(ctx, ctx->fringeWidth, NVG_MITER, 2.4f);
@@ -2661,6 +2631,26 @@ void nvgFill(NVGcontext* ctx)
 	ctx->params.renderFill(ctx->params.userPtr, &fillPaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
 						   ctx->cache->bounds, ctx->cache->paths, ctx->cache->npaths);
 
+    if(l) {
+      l->lastFrame = ctx->frames;
+      for (i = 0; i < ctx->cache->npaths; i++) {
+        
+        auto p = ctx->cache->paths[i];
+        
+        // Duplicate path data.
+        auto fill = p.fill;
+        p.fill = (NVGvertex*) malloc( p.nfill * sizeof(NVGvertex) );
+        memcpy(p.fill, fill, p.nfill * sizeof(NVGvertex));
+
+        auto stroke = p.stroke;
+        p.stroke = (NVGvertex*) malloc( p.nstroke * sizeof(NVGvertex) );
+        memcpy(p.stroke, stroke, p.nstroke * sizeof(NVGvertex));
+      
+        l->paths.push_back(p);
+        
+      }
+    }
+    
 	// Count triangles
 	for (i = 0; i < ctx->cache->npaths; i++) {
 		path = &ctx->cache->paths[i];
@@ -2670,65 +2660,6 @@ void nvgFill(NVGcontext* ctx)
 	}
 }
   
-  static StrokeCacheLine* findCachedStroke(NVGcontext* ctx, float strokeWidth) {
-    if(ctx->ncommands < 3) {
-      return NULL;
-    }
-    
-    // Look at the commands.
-    unsigned int x = ((unsigned int) fabsf(ctx->commands[1])) % 100;
-    unsigned int y = ((unsigned int) fabsf(ctx->commands[2])) % 100;
-    
-    auto& vec = (*ctx->strokeCache)[ x + y*100 ];
-    NVGstate* state = nvg__getState(ctx);
-    
-    for(auto& l : vec) {
-      
-      if(ctx->ncommands == l.commands.size()
-         and (memcmp(ctx->commands, l.commands.data(), ctx->ncommands * sizeof(float)) == 0)
-         and strokeWidth == l.strokeWidth
-         and state->lineCap == l.lineCap
-         and state->lineJoin == l.lineJoin
-         and state->miterLimit == l.miterLimit
-         and ctx->fringeWidth == l.fringeWidth) {
-        
-        l.lastFrame = ctx->frames;
-        return &l;
-        
-      }
-    }
-    
-    // Cache miss.
-    return NULL;
-  }
-  
-  static StrokeCacheLine* addCachedStroke(NVGcontext* ctx, float strokeWidth) {
-    if(ctx->ncommands < 3) {
-      return NULL;
-    }
-    
-    // Look at the commands.
-    unsigned int x = ((unsigned int) fabsf(ctx->commands[1])) % 100;
-    unsigned int y = ((unsigned int) fabsf(ctx->commands[2])) % 100;
-    
-    auto& vec = (*ctx->strokeCache)[ x + y*100 ];
-    vec.push_back(StrokeCacheLine());
-    
-    auto& l = vec.back();
-    
-    l.commands.resize(ctx->ncommands);
-    std::copy(ctx->commands, ctx->commands+ctx->ncommands, l.commands.begin());
-    NVGstate* state = nvg__getState(ctx);
-    l.strokeWidth = strokeWidth;
-    l.lineCap = state->lineCap;
-    l.lineJoin = state->lineJoin;
-    l.miterLimit = state->miterLimit;
-    l.fringeWidth = ctx->fringeWidth;
-    l.lastFrame = ctx->frames;
-
-    return &l;
-  }
-
 void nvgStroke(NVGcontext* ctx)
 {
 	NVGstate* state = nvg__getState(ctx);
@@ -2754,12 +2685,14 @@ void nvgStroke(NVGcontext* ctx)
   // Look for cached paths using the command buffer and other state.
   if(auto l = findCachedStroke(ctx, strokeWidth)) {
     
-    //printf("hit\n");
-    
+      nvgSave(ctx);
+      nvgTransform(ctx, l->xform[0], l->xform[1], l->xform[2], l->xform[3], l->xform[4], l->xform[5]);
+    printf("hit\n");
     // Cache hit, send to backend!
-    ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, &state->scissor, ctx->fringeWidth,
-                             strokeWidth, l->paths.data(), (int) l->paths.size());
-    
+    ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
+                             strokeWidth, state->lineStyle, l->paths.data(), (int) l->paths.size());
+      nvgRestore(ctx);
+      
     // Count triangles
     for(auto& path : l->paths) {
       ctx->strokeTriCount += path.nstroke-2;
@@ -2769,7 +2702,7 @@ void nvgStroke(NVGcontext* ctx)
     return;
   }
   
-  //printf("miss\n");
+  printf("miss\n");
   
   // Cache miss, add a line in the cache.
   auto l = addCachedStroke(ctx, strokeWidth);
@@ -2781,7 +2714,7 @@ void nvgStroke(NVGcontext* ctx)
 	else
 		nvg__expandStroke(ctx, strokeWidth*0.5f, 0.0f, state->lineCap, state->lineJoin, state->lineStyle, state->miterLimit);
 
-	ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, &state->scissor, ctx->fringeWidth,
+	ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
 							 strokeWidth, state->lineStyle, ctx->cache->paths, ctx->cache->npaths);
   
   // Save the generated paths.

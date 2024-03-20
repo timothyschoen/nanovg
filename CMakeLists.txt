@@ -7,9 +7,9 @@ project(${PROJECT_NAME})
 set(SRC_DIR "./src")
 
 if(NANOVG_METAL_IMPLEMENTATION)
-file(GLOB SRCS ${SRC_DIR}/*.c ${SRC_DIR}/*.m)
+file(GLOB SRCS ${SRC_DIR}/*.cpp ${SRC_DIR}/*.m)
 else()
-file(GLOB SRCS ${SRC_DIR}/*.c)
+file(GLOB SRCS ${SRC_DIR}/*.cpp)
 endif()
 
 file(GLOB HDRS ${SRC_DIR}/*.h)
