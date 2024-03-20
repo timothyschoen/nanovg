@@ -5,7 +5,6 @@
 #ifdef NANOVG_GLEW
 #  include <GL/glew.h>
 #endif
-#include <GLFW/glfw3.h>
 #include "nanovg.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -871,34 +870,44 @@ void drawLines(NVGcontext* vg, float x, float y, float w, float h, float strokeW
 	nvgRestore(vg);
 }
 
-int loadDemoData(NVGcontext* vg, DemoData* data)
+int loadDemoData(NVGcontext* vg, DemoData* data, const char* dir)
 {
 	int i;
 
 	if (vg == NULL)
 		return -1;
+  
+  char file[256];
 
 	for (i = 0; i < 12; i++) {
-		char file[128];
-		snprintf(file, 128, "../example/images/image%d.jpg", i+1);
+		
+		snprintf(file, sizeof(file), "%s/images/image%d.jpg", dir, i+1);
 		data->images[i] = nvgCreateImage(vg, file, 0);
 		if (data->images[i] == 0) {
 			printf("Could not load %s.\n", file);
 			return -1;
 		}
 	}
+  
+  snprintf(file, sizeof(file), "%s/entypo.ttf", dir);
 
-	data->fontIcons = nvgCreateFont(vg, "icons", "../example/entypo.ttf");
+	data->fontIcons = nvgCreateFont(vg, "icons", file);
 	if (data->fontIcons == -1) {
 		printf("Could not add font icons.\n");
 		return -1;
 	}
-	data->fontNormal = nvgCreateFont(vg, "sans", "../example/Roboto-Regular.ttf");
+  
+  snprintf(file, sizeof(file), "%s/Roboto-Regular.ttf", dir);
+  
+	data->fontNormal = nvgCreateFont(vg, "sans", file);
 	if (data->fontNormal == -1) {
 		printf("Could not add font italic.\n");
 		return -1;
 	}
-	data->fontBold = nvgCreateFont(vg, "sans-bold", "../example/Roboto-Bold.ttf");
+  
+  snprintf(file, sizeof(file), "%s/Roboto-Bold.ttf", dir);
+  
+	data->fontBold = nvgCreateFont(vg, "sans-bold", file);
 	if (data->fontBold == -1) {
 		printf("Could not add font bold.\n");
 		return -1;
@@ -1347,7 +1356,8 @@ void saveScreenShot(int w, int h, int premult, const char* name)
 	unsigned char* image = (unsigned char*)malloc(w*h*4);
 	if (image == NULL)
 		return;
-	glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, image);
+  // XXX: on iOS, GL_RGBA is undefined here
+	// glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, image);
 	if (premult)
 		unpremultiplyAlpha(image, w, h, w*4);
 	else
