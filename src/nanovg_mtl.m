@@ -30,8 +30,12 @@
 #include <string.h>
 
 #import <Metal/Metal.h>
-#import <QuartzCore/QuartzCore.h>
+#if TARGET_OS_IPHONE
+#import <UIKit/UIKit.h>
+#else
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
+#endif
 #import <QuartzCore/CAMetalLayer.h>
 #import <simd/simd.h>
 #include <TargetConditionals.h>
@@ -448,6 +452,21 @@ static void mtlnvg__xformToMat3x3(matrix_float3x3* m3, float* t) {
                             (vector_float3){t[4], t[5], 1.0f});
 }
 
+#if TARGET_OS_IPHONE
+
+
+NVGcontext* mnvgSetViewBounds(void* view, int width, int height) {
+    [(CAMetalLayer*)[(__bridge UIView*)view layer] setDrawableSize:CGSizeMake(width, height)];
+}
+
+NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
+    CAMetalLayer *metalLayer = (CAMetalLayer*)[(__bridge UIView*)view layer];
+    metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    metalLayer.device = MTLCreateSystemDefaultDevice();
+    [metalLayer setDrawableSize:CGSizeMake(width, height)];
+    return nvgCreateMTL((__bridge void*)metalLayer, flags);
+}
+#else
 NVGcontext* mnvgSetViewBounds(void* view, int width, int height) {
     [(CAMetalLayer*)[(__bridge NSView*)view layer] setDrawableSize:CGSizeMake(width, height)];
 }
@@ -463,7 +482,7 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
 
     return nvgCreateMTL((__bridge void*)((__bridge NSView*) view).layer, flags);
 }
-
+#endif
 
 NVGcontext* nvgCreateMTL(void* metalLayer, int flags) {
 #ifdef MNVG_INVALID_TARGET
@@ -492,7 +511,11 @@ NVGcontext* nvgCreateMTL(void* metalLayer, int flags) {
   params.edgeAntiAlias = flags & NVG_ANTIALIAS ? 1 : 0;
 
   mtl.flags = flags;
+#if TARGET_OS_SIMULATOR
+    mtl.fragSize = 256;
+#else
   mtl.fragSize = sizeof(MNVGfragUniforms);
+#endif
   mtl.indexSize = 4;  // MTLIndexTypeUInt32
   mtl.metalLayer = (__bridge CAMetalLayer*)metalLayer;
 

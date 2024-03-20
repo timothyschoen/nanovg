@@ -1092,7 +1092,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
 		frag->scissorExt[1] = scissor->extent[1];
         frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
         frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
-        frag->radius = scissor->radius;
+        frag->radius = paint->radius;
     }
     else if(paint->dots) {
 	   frag->type = NSVG_SHADER_DOTS;
