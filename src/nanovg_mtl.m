@@ -21,14 +21,13 @@
 // ---
 // Author: olliwang@ollix.com (Olli Wang)
 
-#include "nanovg_mtl.h"
-
 #include <math.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "nanovg_mtl.h"
 #import <Metal/Metal.h>
 #if TARGET_OS_IPHONE
 #import <UIKit/UIKit.h>

@@ -571,6 +571,14 @@ void nvgFill(NVGcontext* ctx);
 // Fills the current path with current stroke style.
 void nvgStroke(NVGcontext* ctx);
 
+// Saves the current path to the paths cache
+void nvgSavePath(NVGcontext* ctx, uint32_t pathId);
+
+// Load and set a path from path cache
+int nvgLoadPath(NVGcontext* ctx, uint32_t pathId);
+
+// Clean up path cache empty
+void nvgDeletePath(NVGcontext* ctx, uint32_t pathId);
 
 //
 // Text
