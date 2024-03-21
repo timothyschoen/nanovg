@@ -114,6 +114,7 @@ struct NVGpathCache {
 	int npoints;
 	int cpoints;
 	NVGpath* paths;
+    NVGpath* cachedPaths;
 	int npaths;
 	int cpaths;
 	NVGvertex* verts;
@@ -142,10 +143,9 @@ struct BezierCacheLine {
   
   struct StrokeCacheLine {
     std::vector<NVGpath> paths;
-    float xform[6];
   };
   
-using StrokeCache = std::unordered_map<uint32_t, StrokeCacheLine>;
+using StrokeCache = std::map<uint32_t, StrokeCacheLine>;
 
 struct NVGcontext {
 	NVGparams params;
@@ -167,8 +167,10 @@ struct NVGcontext {
 	int fillTriCount;
 	int strokeTriCount;
 	int textTriCount;
-    int isCached;
     struct NVGscissorBounds scissor;
+    int isCached;
+    NVGpath userCachedPaths[4];
+    NVGvertex cachedVertexBuffer[512];
     StrokeCache* strokeCache;
 };
 
@@ -2522,7 +2524,7 @@ void nvgDebugDumpPathCache(NVGcontext* ctx)
 
 void nvgSavePath(NVGcontext* ctx, uint32_t pathId)
 {
-    if(ctx->ncommands < 3) {
+    if(ctx->ncommands < 3 || ctx->cache->npaths > 3) {
       return NULL;
     }
     
@@ -2531,13 +2533,12 @@ void nvgSavePath(NVGcontext* ctx, uint32_t pathId)
     
     float invxform[6];
     nvgTransformInverse(invxform, state->xform);
-    memcpy(cacheEntry.xform, invxform, 6 * sizeof(float));
-    
-    CACHE[pathId] = cacheEntry;
-    
+        
     for (int i = 0; i < ctx->cache->npaths; i++) {
-    
+      
       auto& p = ctx->cache->paths[i];
+      if(p.nfill > 255 || p.nstroke > 255) return;
+        
       NVGpath pathCopy = p;
         
       // Duplicate path data
@@ -2575,43 +2576,43 @@ void nvgDeletePath(NVGcontext* ctx, uint32_t pathId)
 
 int nvgLoadPath(NVGcontext* ctx, uint32_t pathId)
 {
-    if(CACHE.count(pathId))
+    if(CACHE.contains(pathId))
     {
         NVGstate* state = nvg__getState(ctx);
         nvgBeginPath(ctx);
         
-        auto cacheEntry = CACHE[pathId];
+        auto& cacheEntry = CACHE[pathId];
         auto numPaths = cacheEntry.paths.size();
         
-        ctx->cache->paths = (NVGpath*)realloc(ctx->cache->paths, sizeof(NVGpath)*numPaths);
+        memcpy(ctx->userCachedPaths, cacheEntry.paths.data(), numPaths * sizeof(NVGpath));
+        ctx->cache->cachedPaths = ctx->userCachedPaths;
         ctx->cache->npaths = numPaths;
-        memcpy(ctx->cache->paths, cacheEntry.paths.data(), ctx->cache->npaths * sizeof(NVGpath));
         
         for (int i = 0; i < numPaths; i++) {
         
-          auto& p = ctx->cache->paths[i];
-          auto cachedPath = cacheEntry.paths[i];
-            
+          auto& p = ctx->cache->cachedPaths[i];
+          auto& cachedPath = cacheEntry.paths[i];
+          
           // Duplicate path data
-          p.fill = (NVGvertex*) malloc( p.nfill * sizeof(NVGvertex) );
+          p.fill = ctx->cachedVertexBuffer;
           memcpy(p.fill, cachedPath.fill, cachedPath.nfill * sizeof(NVGvertex));
       
-          p.stroke = (NVGvertex*) malloc( p.nstroke * sizeof(NVGvertex) );
+          p.stroke = ctx->cachedVertexBuffer + 256;
           memcpy(p.stroke, cachedPath.stroke, cachedPath.nstroke * sizeof(NVGvertex));
         
-            for(int j = 0; j < p.nfill; j++)
-            {
-                nvgTransformPoint(&p.fill[j].x, &p.fill[j].y, state->xform, p.fill[j].x, p.fill[j].y);
-                nvgTransformPoint(&p.fill[i].u, &p.fill[i].v, state->xform, p.fill[i].u, p.fill[i].v);
-                nvgTransformPoint(&p.fill[i].s, &p.fill[i].t, state->xform, p.fill[i].s, p.fill[i].t);
-            }
-            
-            for(int j = 0; j < p.nstroke; j++)
-            {
-                nvgTransformPoint(&p.stroke[j].x, &p.stroke[j].y, state->xform, p.stroke[j].x, p.stroke[j].y);
-                nvgTransformPoint(&p.stroke[i].u, &p.stroke[i].v, state->xform, p.stroke[i].u, p.stroke[i].v);
-                nvgTransformPoint(&p.stroke[i].s, &p.stroke[i].t, state->xform, p.stroke[i].s, p.stroke[i].t);
-            }
+          for(int j = 0; j < p.nfill; j++)
+          {
+              nvgTransformPoint(&p.fill[j].x, &p.fill[j].y, state->xform, p.fill[j].x, p.fill[j].y);
+              //nvgTransformPoint(&p.fill[i].u, &p.fill[i].v, state->xform, p.fill[i].u, p.fill[i].v);
+              //nvgTransformPoint(&p.fill[i].s, &p.fill[i].t, state->xform, p.fill[i].s, p.fill[i].t);
+          }
+          
+          for(int j = 0; j < p.nstroke; j++)
+          {
+              nvgTransformPoint(&p.stroke[j].x, &p.stroke[j].y, state->xform, p.stroke[j].x, p.stroke[j].y);
+              //nvgTransformPoint(&p.stroke[i].u, &p.stroke[i].v, state->xform, p.stroke[i].u, p.stroke[i].v);
+              //nvgTransformPoint(&p.stroke[i].s, &p.stroke[i].t, state->xform, p.stroke[i].s, p.stroke[i].t);
+          }
         }
         
         ctx->isCached = true;
@@ -2631,7 +2632,7 @@ void nvgFill(NVGcontext* ctx)
     if(ctx->isCached)
     {
         ctx->params.renderFill(ctx->params.userPtr, &fillPaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-                               ctx->cache->bounds, ctx->cache->paths, ctx->cache->npaths);
+                               ctx->cache->bounds, ctx->cache->cachedPaths, ctx->cache->npaths);
             
         // Count triangles
         for (i = 0; i < ctx->cache->npaths; i++) {
@@ -2690,7 +2691,7 @@ void nvgStroke(NVGcontext* ctx)
     if(ctx->isCached)
     {
         ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-                                 strokeWidth, state->lineStyle, ctx->cache->paths, ctx->cache->npaths);
+                                 strokeWidth, state->lineStyle, ctx->cache->cachedPaths, ctx->cache->npaths);
         
         for (i = 0; i < ctx->cache->npaths; i++) {
             path = &ctx->cache->paths[i];
@@ -2700,7 +2701,7 @@ void nvgStroke(NVGcontext* ctx)
         
         return;
     }
-
+    
 	nvg__flattenPaths(ctx);
 
 	if (ctx->params.edgeAntiAlias && state->shapeAntiAlias && state->lineStyle <= 1)
