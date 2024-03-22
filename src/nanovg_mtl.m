@@ -65,6 +65,7 @@ typedef enum MNVGshaderType {
   MNVG_SHADER_DOTS,
   MNVG_SHADER_FAST_ROUNDEDRECT,
   MNVG_SHADER_FILLCOLOR,
+  MNVG_SHADER_DOUBLE_STROKE,
 } MNVGshaderType;
 
 enum MNVGcallType {
@@ -876,7 +877,11 @@ enum MNVGTarget mnvgTarget() {
       frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
       frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
       frag->radius = paint->radius;
-  } else if(paint->dots) {
+  } else if(paint->double_stroke) {
+        frag->type = MNVG_SHADER_DOUBLE_STROKE;
+        nvgTransformInverse(invxform, paint->xform);
+  }
+  else if(paint->dots) {
       frag->type = MNVG_SHADER_DOTS;
       frag->feather = paint->feather;
       frag->patternSize = paint->dot_pattern_size;

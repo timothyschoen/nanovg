@@ -88,6 +88,7 @@ struct NVGpaint {
     int dots;
     float dot_pattern_size;
     int rounded_rect;
+    int double_stroke;
 };
 typedef struct NVGpaint NVGpaint;
 
@@ -478,6 +479,9 @@ NVGpaint nvgImagePattern(NVGcontext* ctx, float ox, float oy, float ex, float ey
 
 // Creates a dot pattern, that is rendered on shader (used for plugdata canvas background)
 NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patternSize, float dotRadius, float feather);
+
+// Creates a double-stroked line with rounded caps (used for plugdata connection cords)
+NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol);
 
 void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius);
 //

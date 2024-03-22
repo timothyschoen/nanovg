@@ -97,6 +97,11 @@ float glow(float2 uv) {
   return smoothstep(0.0, 1.0, 1.0 - 2.0 * abs(uv.x));
 }
 
+float capAlpha(float dist) {
+  // Replace with your smoothstep function (consider basing it on line thickness)
+  return smoothstep(0.4, 0.6, dist);
+}
+
 float circleDist(float2 p, float2 center, float d) {
   return distance(center, p) - d;
 }
@@ -225,10 +230,32 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   if (uniforms.lineStyle > 1 && strokeAlpha < uniforms.strokeThr) {
      discard_fragment();
   }
-  if(uniforms.lineStyle == 2) strokeAlpha*=dashed(in.uv, uniforms.radius);
+
+  //if(uniforms.lineStyle == 2) strokeAlpha*=dashed(in.uv, uniforms.radius);
   if(uniforms.lineStyle == 3) strokeAlpha*=dotted(in.uv);
   if(uniforms.lineStyle == 4) strokeAlpha*=glow(in.uv);
 
+  if(uniforms.type == 6) { // MNVG_SHADER_DOUBLE_STROKE
+    float scale = step(0.55, 1.0 - 2.0 * abs(in.uv.x));
+    float4 icol = uniforms.innerCol;
+    float4 ocol = uniforms.outerCol;
+
+    if(in.uv.y < 0.5)
+    {
+        float cap1 = 1.0 - step(1.0, distance(1.0 - 2.0 * in.uv, float2(1.0, 0.0)));
+        float cap2 = 1.0 - step(0.5, distance(1.0 - 2.0 * in.uv, float2(1.0, 0.0)));
+        icol *= cap2;
+        //ocol *= cap1;
+        return icol * strokeAlpha * scissor;
+    }
+
+    if(in.uv.y < 0.0)  return float4(0, 1, 1, 1) * strokeAlpha * scissor;
+    if(in.uv.y > 16.0)  return float4(0, 0, 1, 1) * strokeAlpha * scissor;
+    if(in.uv.y > 1.5)  return float4(0, 1, 0, 1) * strokeAlpha * scissor;
+    if(in.uv.y > 0.8)  return float4(1, 0, 0, 1) * strokeAlpha * scissor;
+
+    return (scale ? icol : ocol) * strokeAlpha * scissor;
+  }
   if(uniforms.type == 5) { // MNVG_SHADER_FILLCOLOR
       return uniforms.innerCol * strokeAlpha * scissor;
   }

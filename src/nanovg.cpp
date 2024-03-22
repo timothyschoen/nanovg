@@ -950,6 +950,20 @@ NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patt
     return p;
 }
 
+NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol)
+{
+    NVGpaint p;
+    NVG_NOTUSED(ctx);
+    memset(&p, 0, sizeof(p));
+
+    nvgTransformIdentity(p.xform);
+    p.double_stroke = 1;
+    p.innerColor = icol;
+    p.outerColor = ocol;
+    return p;
+}
+
+
 void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
 {
     NVGpaint p;
