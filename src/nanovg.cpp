@@ -2549,7 +2549,7 @@ void nvgDebugDumpPathCache(NVGcontext* ctx)
 void nvgSavePath(NVGcontext* ctx, uint32_t pathId)
 {
     if(ctx->ncommands < 3 || ctx->cache->npaths > 3) {
-      return NULL;
+      return;
     }
     
     NVGstate* state = nvg__getState(ctx);
