@@ -128,6 +128,7 @@ enum GLNVGshaderType {
 	NSVG_SHADER_DOTS,
 	NSVG_SHADER_FAST_ROUNDEDRECT,
 	NSVG_SHADER_FILLCOLOR,
+    NSVG_DOUBLE_STROKE
 };
 
 #if NANOVG_GL_USE_UNIFORMBUFFER
@@ -208,6 +209,7 @@ struct GLNVGfragUniforms {
 		int texType;
 		int type;
         float scissorRadius;
+        float lineLength;
 	#else
 		// note: after modifying layout or size of uniform array,
 		// don't forget to also update the fragment shader source!
@@ -230,7 +232,7 @@ struct GLNVGfragUniforms {
 				float texType;
 				float type;
 				float scissorRadius;
-				float unused1;
+				float lineLength;
 			};
 			float uniformArray[NANOVG_GL_UNIFORMARRAY_SIZE][4];
 		};
@@ -592,6 +594,7 @@ static int glnvg__renderCreate(void* uptr)
 		"		int texType;\n"
 		"		int type;\n"
         "       float scissorRadius;\n"
+        "       float lineLength;\n"
 		"	};\n"
 		"#else\n" // NANOVG_GL3 && !USE_UNIFORMBUFFER
 		"	uniform vec4 frag[UNIFORMARRAY_SIZE];\n"
@@ -624,11 +627,8 @@ static int glnvg__renderCreate(void* uptr)
 		"	#define lineStyle int(frag[10].w)\n"
 		"	#define texType int(frag[11].x)\n"
 		"	#define type int(frag[11].y)\n"
-		/*
-		"	#define lineStyle int(frag[10].z)\n"
-		"	#define texType int(frag[10].w)\n"
-		"	#define type int(frag[11].x)\n"          TODO: ??? */
-		"   #define scissorRadius frag[12].x\n"
+		"   #define scissorRadius frag[11].z\n"
+		"   #define lineLength frag[11].w\n"
 		"#endif\n"
 		"\n"
 		"float sdroundrect(vec2 pt, vec2 ext, float rad) {\n"
@@ -726,9 +726,36 @@ static int glnvg__renderCreate(void* uptr)
 		"#else\n"
 			"if (lineStyle > 1 && strokeAlpha < strokeThr) discard;\n"
 		"#endif\n"
-        "    if(type == 6) {            // fill color\n"
+        "   if(type == 6) {            // fill color\n"
         "      result = innerCol * strokeAlpha * scissor;\n"
         "   }"
+        "if(type == 7) { // double stroke with rounded caps, for plugdata connections\n"
+        "    float scale = smoothstep(0.45, 0.55, 1.0 - 2.0 * abs(uv.x));\n"
+        "    vec4 icol = innerCol;\n"
+        "    vec4 ocol = outerCol;\n"
+        "    if (uv.y < 0.5) {\n"
+        "        float dist = distance(1.0 - 2.0 * uv, vec2(1.0, 0.0));\n"
+        "        float cap1 = 1.0f - step(1.0, dist);\n"
+        "        float cap2 = 1.0f - step(0.5, dist);\n"
+        "        icol *= cap2;\n"
+        "        ocol *= cap1;\n"
+        "        if(dist > 0.5) result = ocol * strokeAlpha * scissor;\n"
+        "        else result = mix(ocol, icol, scale) * strokeAlpha * scissor;\n"
+        "    }\n"
+        "    else if (uv.y > (lineLength - 0.5)) {\n"
+        "        vec2 capStart = vec2(uv.x, (lineLength - uv.y));\n"
+        "        float dist = distance(1.0 - 2.0 * capStart, vec2(1.0, 0.0));\n"
+        "        float cap1 = 1.0 - step(1.0, dist);\n"
+        "        float cap2 = 1.0 - step(0.5, dist);\n"
+        "        icol *= cap2;\n"
+        "        ocol *= cap1;\n"
+        "        if(dist > 0.5) result = ocol * strokeAlpha * scissor;\n"
+        "        else result = mix(ocol, icol, scale) * strokeAlpha * scissor;\n"
+        "    }\n"
+        "    else {\n"
+        "       result = mix(ocol, icol, scale) * strokeAlpha * scissor;\n"
+        "     }\n"
+        "   }\n"
 		"	if (type == 0) {			// Gradient\n"
 		"		// Calculate gradient color using box gradient\n"
 		"		vec2 pt = (paintMat * vec3(fpos,1.0f)).xy;\n"
@@ -1021,7 +1048,7 @@ static NVGcolor glnvg__premulColor(NVGcolor c)
 }
 
 static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpaint* paint,
-							   NVGscissor* scissor, float width, float fringe, float strokeThr, int lineStyle)
+							   NVGscissor* scissor, float width, float fringe, float strokeThr, float lineLength, int lineStyle)
 {
 	GLNVGtexture* tex = NULL;
 	float invxform[6];
@@ -1093,6 +1120,11 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
         frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
         frag->radius = paint->radius;
+    } else if(paint->double_stroke)
+    {
+        frag->type = NSVG_DOUBLE_STROKE;
+        frag->lineLength = lineLength;
+        nvgTransformInverse(invxform, paint->xform);
     }
     else if(paint->dots) {
 	   frag->type = NSVG_SHADER_DOTS;
@@ -1240,8 +1272,6 @@ static void glnvg__stroke(GLNVGcontext* gl, GLNVGcall* call)
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 		glDisable(GL_STENCIL_TEST);
-
-//		glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset + gl->fragSize), paint, scissor, strokeWidth, fringe, 1.0f - 0.5f/255.0f);
 
 	} else {
 		glnvg__setUniforms(gl, call->uniformOffset, call->image);
@@ -1561,13 +1591,13 @@ static void glnvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperation
         frag->strokeThr = -1.0f;
         frag->type = NSVG_SHADER_SIMPLE;
         // Fill shader
-        glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset + gl->fragSize), paint, scissor, fringe, fringe, -1.0f, 0);
+        glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset + gl->fragSize), paint, scissor, fringe, fringe, -1.0f, 0.0f, 0);
     } else {
         call->uniformOffset = glnvg__allocFragUniforms(gl, 1);
         if (call->uniformOffset == -1) goto error;
         // Fill shader
         frag = nvg__fragUniformPtr(gl, call->uniformOffset);
-        glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset), paint, scissor, fringe, fringe, -1.0f, 0);
+        glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset), paint, scissor, fringe, fringe, -1.0f, 0.0f, 0);
     }
 
     if(paint->rounded_rect)
@@ -1587,7 +1617,7 @@ error:
 }
 
 static void glnvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe,
-								float strokeWidth, int lineStyle, const NVGpath* paths, int npaths)
+								float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths, int npaths)
 {
 	GLNVGcontext* gl = (GLNVGcontext*)uptr;
 	GLNVGcall* call = glnvg__allocCall(gl);
@@ -1624,14 +1654,14 @@ static void glnvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperati
 		call->uniformOffset = glnvg__allocFragUniforms(gl, 2);
 		if (call->uniformOffset == -1) goto error;
 
-		glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset), paint, scissor, strokeWidth, fringe, -1.0f, lineStyle);
-		glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset + gl->fragSize), paint, scissor, strokeWidth, fringe, 1.0f - 0.5f/255.0f, lineStyle);
+		glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset), paint, scissor, strokeWidth, fringe, -1.0f, lineLength, lineStyle);
+		glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset + gl->fragSize), paint, scissor, strokeWidth, fringe, 1.0f - 0.5f/255.0f, lineLength, lineStyle);
 
 	} else {
 		// Fill shader
 		call->uniformOffset = glnvg__allocFragUniforms(gl, 1);
 		if (call->uniformOffset == -1) goto error;
-		glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset), paint, scissor, strokeWidth, fringe, -1.0f, lineStyle);
+		glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset), paint, scissor, strokeWidth, fringe, -1.0f, lineLength, lineStyle);
 	}
 
 	return;
@@ -1666,7 +1696,7 @@ static void glnvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOper
 	call->uniformOffset = glnvg__allocFragUniforms(gl, 1);
 	if (call->uniformOffset == -1) goto error;
 	frag = nvg__fragUniformPtr(gl, call->uniformOffset);
-	glnvg__convertPaint(gl, frag, paint, scissor, 1.0f, fringe, -1.0f, 0);
+	glnvg__convertPaint(gl, frag, paint, scissor, 1.0f, fringe, -1.0f, 0.0f, 0);
 	frag->type = NSVG_SHADER_IMG;
 
 	return;

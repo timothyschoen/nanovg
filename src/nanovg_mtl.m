@@ -117,6 +117,7 @@ struct MNVGfragUniforms {
   float scissorRadius;
   float patternSize;
   int lineStyle;
+  float lineLength;
 };
 typedef struct MNVGfragUniforms MNVGfragUniforms;
 
@@ -241,6 +242,7 @@ typedef struct MNVGfragUniforms MNVGfragUniforms;
                        fringe:(float)fringe
                   strokeWidth:(float)strokeWidth
                     lineStyle:(int)lineStyle
+                    lineLength:(float)lineLength
                         paths:(const NVGpath*)paths
                        npaths:(int)npaths;
 
@@ -401,7 +403,7 @@ static int mtlnvg__renderGetTextureSize(void* uptr, int image, int* w, int* h) {
 static void mtlnvg__renderStroke(void* uptr, NVGpaint* paint,
                                  NVGcompositeOperationState compositeOperation,
                                  NVGscissor* scissor, float fringe,
-                                 float strokeWidth, int lineStyle, const NVGpath* paths,
+                                 float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths,
                                  int npaths) {
   MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
   [mtl renderStrokeWithPaint:paint
@@ -410,6 +412,7 @@ static void mtlnvg__renderStroke(void* uptr, NVGpaint* paint,
                       fringe:fringe
                  strokeWidth:strokeWidth
                    lineStyle:lineStyle
+                   lineLength:lineLength
                        paths:paths
                       npaths:npaths];
 }
@@ -813,6 +816,7 @@ enum MNVGTarget mnvgTarget() {
                      width:(float)width
                     fringe:(float)fringe
                  lineStyle:(int)lineStyle
+                lineLength:(float)lineLength
                  strokeThr:(float)strokeThr {
   MNVGtexture* tex = nil;
   float invxform[6];
@@ -879,6 +883,7 @@ enum MNVGTarget mnvgTarget() {
       frag->radius = paint->radius;
   } else if(paint->double_stroke) {
         frag->type = MNVG_SHADER_DOUBLE_STROKE;
+        frag->lineLength = lineLength;
         nvgTransformInverse(invxform, paint->xform);
   }
   else if(paint->dots) {
@@ -1474,6 +1479,7 @@ enum MNVGTarget mnvgTarget() {
                       width:fringe
                      fringe:fringe
                      lineStyle:NVG_LINE_SOLID
+                     lineLength:0.0f
                   strokeThr:-1.0f];
   return;
 
@@ -1587,6 +1593,7 @@ error:
                        fringe:(float)fringe
                   strokeWidth:(float)strokeWidth
                     lineStyle: (int)lineStyle
+                    lineLength: (float)lineLength
                         paths:(const NVGpath*)paths
                        npaths:(int)npaths {
   MNVGcall* call = [self allocCall];
@@ -1629,6 +1636,7 @@ error:
                         width:strokeWidth
                        fringe:fringe
                     lineStyle:lineStyle
+                    lineLength:lineLength
                     strokeThr:-1.0f];
     MNVGfragUniforms* frag = [self
         fragUniformAtIndex:call->uniformOffset + _fragSize];
@@ -1638,6 +1646,7 @@ error:
                         width:strokeWidth
                        fringe:fringe
                        lineStyle:lineStyle
+                       lineLength:lineLength
                     strokeThr:(1.0f - 0.5f / 255.0f)];
   } else {
     // Fill shader
@@ -1649,6 +1658,7 @@ error:
                         width:strokeWidth
                        fringe:fringe
                     lineStyle:lineStyle
+                    lineLength:lineLength
                     strokeThr:-1.0f];
   }
 
@@ -1693,6 +1703,7 @@ error:
                       width:1.0f
                      fringe:fringe
                     lineStyle:NVG_LINE_SOLID
+                    lineLength:0.0f
                   strokeThr:-1.0f];
   frag->type = MNVG_SHADER_IMG;
 

@@ -55,6 +55,7 @@ typedef struct  {
   float scissorRadius;
   float patternSize;
   int lineStyle;
+  float lineLength;
 } Uniforms;
 
 float roundedScissorMask(constant Uniforms& uniforms, float2 p);
@@ -236,25 +237,31 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   if(uniforms.lineStyle == 4) strokeAlpha*=glow(in.uv);
 
   if(uniforms.type == 6) { // MNVG_SHADER_DOUBLE_STROKE
-    float scale = step(0.55, 1.0 - 2.0 * abs(in.uv.x));
+    float scale = smoothstep(0.45, 0.55, 1.0 - 2.0 * abs(in.uv.x));
     float4 icol = uniforms.innerCol;
     float4 ocol = uniforms.outerCol;
 
-    if(in.uv.y < 0.5)
+    if (in.uv.y < 0.5)
     {
-        float cap1 = 1.0 - step(1.0, distance(1.0 - 2.0 * in.uv, float2(1.0, 0.0)));
-        float cap2 = 1.0 - step(0.5, distance(1.0 - 2.0 * in.uv, float2(1.0, 0.0)));
+        float dist = distance(1.0 - 2.0 * in.uv, float2(1.0, 0.0));
+        float cap1 = 1.0f - step(1.0, dist);
+        float cap2 = 1.0f - step(0.5, dist);
         icol *= cap2;
-        //ocol *= cap1;
-        return icol * strokeAlpha * scissor;
+        ocol *= cap1;
+        if(dist > 0.5) return ocol * strokeAlpha * scissor;
+    }
+    if (in.uv.y > (uniforms.lineLength - 0.5))
+    {
+        float2 capStart = float2(in.uv.x, (uniforms.lineLength - in.uv.y));
+        float dist = distance(1.0 - 2.0 * capStart, float2(1.0, 0.0));
+        float cap1 = 1.0 - step(1.0, dist);
+        float cap2 = 1.0 - step(0.5, dist);
+        icol *= cap2;
+        ocol *= cap1;
+        if(dist > 0.5) return ocol * strokeAlpha * scissor;
     }
 
-    if(in.uv.y < 0.0)  return float4(0, 1, 1, 1) * strokeAlpha * scissor;
-    if(in.uv.y > 16.0)  return float4(0, 0, 1, 1) * strokeAlpha * scissor;
-    if(in.uv.y > 1.5)  return float4(0, 1, 0, 1) * strokeAlpha * scissor;
-    if(in.uv.y > 0.8)  return float4(1, 0, 0, 1) * strokeAlpha * scissor;
-
-    return (scale ? icol : ocol) * strokeAlpha * scissor;
+    return mix(ocol, icol, scale) * strokeAlpha * scissor;
   }
   if(uniforms.type == 5) { // MNVG_SHADER_FILLCOLOR
       return uniforms.innerCol * strokeAlpha * scissor;

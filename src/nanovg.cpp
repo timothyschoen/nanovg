@@ -95,6 +95,7 @@ struct NVGstate {
 	float lineHeight;
 	float fontBlur;
 	float fontDilate;
+    float lineLength;
 	int textAlign;
 	int fontId;
 };
@@ -143,6 +144,7 @@ struct BezierCacheLine {
   
   struct StrokeCacheLine {
     std::vector<NVGpath> paths;
+    float lineLength;
   };
   
 using StrokeCache = std::map<uint32_t, StrokeCacheLine>;
@@ -159,6 +161,7 @@ struct NVGcontext {
 	float tessTol;
 	float distTol;
 	float fringeWidth;
+    float currentLineLength;
 	float devicePxRatio;
 	struct FONScontext* fs;
 	int fontImages[NVG_MAX_FONTIMAGES];
@@ -170,7 +173,7 @@ struct NVGcontext {
     struct NVGscissorBounds scissor;
     int isCached;
     NVGpath userCachedPaths[4];
-    NVGvertex cachedVertexBuffer[512];
+    NVGvertex cachedVertexBuffer[1<<14];
     StrokeCache* strokeCache;
 };
 
@@ -960,6 +963,9 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol)
     p.double_stroke = 1;
     p.innerColor = icol;
     p.outerColor = ocol;
+    
+    NVGstate* state = nvg__getState(ctx);
+    state->lineStyle = NVG_DOUBLE_STROKE;
     return p;
 }
 
@@ -2110,6 +2116,8 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			else if (lineCap == NVG_ROUND)
 				dst = nvg__roundCapStart(dst, p0, dx, dy, w, ncap, aa, u0, u1, t, dir);
 		}
+        ctx->currentLineLength = 0;
+        
 		for (j = s; j < e; ++j) {
 			if(lineStyle > 1){
 				dx = p1->x - p0->x;
@@ -2117,6 +2125,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 				float dt=nvg__normalize(&dx, &dy);
 				dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
 				t+=dir*dt*invStrokeWidth;
+                ctx->currentLineLength+= dt*invStrokeWidth*0.5f;
 				dst = nvg_insertSpacer(dst, p1, dx, dy, w, u0, u1, t);
 			}
 			if ((p1->flags & (NVG_PT_BEVEL | NVG_PR_INNERBEVEL)) != 0) {
@@ -2143,6 +2152,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			if(lineStyle > 1){
 				dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
 				t+=dir*dt*invStrokeWidth;
+                ctx->currentLineLength+= dt*invStrokeWidth*0.5f;
 				dst = nvg_insertSpacer(dst, p1, dx, dy, w, u0, u1, t);
 			}
 			// Add cap
@@ -2156,7 +2166,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 		path->nstroke = (int)(dst - verts);
 		verts = dst;
 	}
-
+    
 	return 1;
 }
 
@@ -2548,10 +2558,12 @@ void nvgSavePath(NVGcontext* ctx, uint32_t pathId)
     float invxform[6];
     nvgTransformInverse(invxform, state->xform);
         
+    cacheEntry.lineLength = ctx->currentLineLength;
+    
     for (int i = 0; i < ctx->cache->npaths; i++) {
       
       auto& p = ctx->cache->paths[i];
-      if(p.nfill > 255 || p.nstroke > 255) return;
+        if(p.nfill > (1<<13) || p.nstroke > (1<<13)) return;
         
       NVGpath pathCopy = p;
         
@@ -2565,15 +2577,15 @@ void nvgSavePath(NVGcontext* ctx, uint32_t pathId)
       for(int j = 0; j < p.nfill; j++)
       {
           nvgTransformPoint(&pathCopy.fill[j].x, &pathCopy.fill[j].y, invxform, pathCopy.fill[j].x, pathCopy.fill[j].y);
-          nvgTransformPoint(&p.fill[i].u, &p.fill[i].v, invxform, p.fill[i].u, p.fill[i].v);
-          nvgTransformPoint(&p.fill[i].s, &p.fill[i].t, invxform, p.fill[i].s, p.fill[i].t);
+          //nvgTransformPoint(&p.fill[i].u, &p.fill[i].v, invxform, p.fill[i].u, p.fill[i].v);
+          //nvgTransformPoint(&p.fill[i].s, &p.fill[i].t, invxform, p.fill[i].s, p.fill[i].t);
       }
         
       for(int j = 0; j < p.nstroke; j++)
       {
           nvgTransformPoint(&pathCopy.stroke[j].x, &pathCopy.stroke[j].y, invxform, pathCopy.stroke[j].x, pathCopy.stroke[j].y);
-          nvgTransformPoint(&p.stroke[i].u, &p.stroke[i].v, invxform, p.stroke[i].u, p.stroke[i].v);
-          nvgTransformPoint(&p.stroke[i].s, &p.stroke[i].t, invxform, p.stroke[i].s, p.stroke[i].t);
+          //nvgTransformPoint(&p.stroke[i].u, &p.stroke[i].v, invxform, p.stroke[i].u, p.stroke[i].v);
+          //nvgTransformPoint(&p.stroke[i].s, &p.stroke[i].t, invxform, p.stroke[i].s, p.stroke[i].t);
       }
         
       cacheEntry.paths.push_back(pathCopy);
@@ -2601,6 +2613,7 @@ int nvgLoadPath(NVGcontext* ctx, uint32_t pathId)
         memcpy(ctx->userCachedPaths, cacheEntry.paths.data(), numPaths * sizeof(NVGpath));
         ctx->cache->cachedPaths = ctx->userCachedPaths;
         ctx->cache->npaths = numPaths;
+        ctx->currentLineLength = cacheEntry.lineLength;
         
         for (int i = 0; i < numPaths; i++) {
         
@@ -2611,7 +2624,7 @@ int nvgLoadPath(NVGcontext* ctx, uint32_t pathId)
           p.fill = ctx->cachedVertexBuffer;
           memcpy(p.fill, cachedPath.fill, cachedPath.nfill * sizeof(NVGvertex));
       
-          p.stroke = ctx->cachedVertexBuffer + 256;
+          p.stroke = ctx->cachedVertexBuffer + (1<<13);
           memcpy(p.stroke, cachedPath.stroke, cachedPath.nstroke * sizeof(NVGvertex));
         
           for(int j = 0; j < p.nfill; j++)
@@ -2705,7 +2718,7 @@ void nvgStroke(NVGcontext* ctx)
     if(ctx->isCached)
     {
         ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-                                 strokeWidth, state->lineStyle, ctx->cache->cachedPaths, ctx->cache->npaths);
+                                 strokeWidth, state->lineStyle, ctx->currentLineLength, ctx->cache->cachedPaths, ctx->cache->npaths);
         
         for (i = 0; i < ctx->cache->npaths; i++) {
             path = &ctx->cache->paths[i];
@@ -2724,7 +2737,7 @@ void nvgStroke(NVGcontext* ctx)
 		nvg__expandStroke(ctx, strokeWidth*0.5f, 0.0f, state->lineCap, state->lineJoin, state->lineStyle, state->miterLimit);
 
 	ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-							 strokeWidth, state->lineStyle, ctx->cache->paths, ctx->cache->npaths);
+							 strokeWidth, state->lineStyle, ctx->currentLineLength, ctx->cache->paths, ctx->cache->npaths);
 
 	// Count triangles
 	for (i = 0; i < ctx->cache->npaths; i++) {
