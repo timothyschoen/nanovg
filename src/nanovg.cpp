@@ -966,7 +966,7 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol)
     p.outerColor = ocol;
     
     NVGstate* state = nvg__getState(ctx);
-    state->lineStyle = NVG_DOUBLE_STROKE;
+    //state->lineStyle = NVG_DOUBLE_STROKE;
     return p;
 }
 
@@ -2075,7 +2075,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 				p1 = &pts[1];
 			}
 		}
-
+        
 		if (loop == 0) {
 			// Add cap
 			dx = p1->x - p0->x;
@@ -2088,16 +2088,17 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			else if (lineCap == NVG_ROUND)
 				dst = nvg__roundCapStart(dst, p0, dx, dy, w, ncap, aa, u0, u1, t, dir);
 		}
+        
         ctx->currentLineLength = 0;
         
 		for (j = s; j < e; ++j) {
-			if(lineStyle > 1){
-				dx = p1->x - p0->x;
-				dy = p1->y - p0->y;
-				float dt=nvg__normalize(&dx, &dy);
+            dx = p1->x - p0->x;
+            dy = p1->y - p0->y;
+            float dt=nvg__normalize(&dx, &dy);
+            
+            if(lineStyle > 1){
 				dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
-				t+=dir*dt*invStrokeWidth;
-                ctx->currentLineLength+= dt*invStrokeWidth*0.5f;
+                t+=dir*dt*invStrokeWidth;
 				dst = nvg_insertSpacer(dst, p1, dx, dy, w, u0, u1, t);
 			}
 			if ((p1->flags & (NVG_PT_BEVEL | NVG_PR_INNERBEVEL)) != 0) {
@@ -2107,12 +2108,21 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 					dst = nvg__bevelJoin(dst, p0, p1, w, w, u0, u1, aa, t);
 				}
 			} else {
+                if(path->reversed) {
+                    ctx->currentLineLength += dt*invStrokeWidth*0.5;
+                    t+=dir*dt*invStrokeWidth;
+                }
 				nvg__vset(dst, p1->x + (p1->dmx * w), p1->y + (p1->dmy * w), u0, 1, -1, t); dst++;
 				nvg__vset(dst, p1->x - (p1->dmx * w), p1->y - (p1->dmy * w), u1, 1, 1, t); dst++;
+                if(!path->reversed) {
+                    ctx->currentLineLength += dt*invStrokeWidth*0.5;
+                    t+=dir*dt*invStrokeWidth;
+                }
 			}
 			p0 = p1++;
 		}
 
+        
 		if (loop) {
 			// Loop it
 			nvg__vset(dst, verts[0].x, verts[0].y, u0, 1, -1, t); dst++;
@@ -2121,12 +2131,16 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			dx = p1->x - p0->x;
 			dy = p1->y - p0->y;
 			float dt = nvg__normalize(&dx, &dy);
-			if(lineStyle > 1){
+            if(lineStyle > 1){
 				dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
 				t+=dir*dt*invStrokeWidth;
-                ctx->currentLineLength+= dt*invStrokeWidth*0.5f;
 				dst = nvg_insertSpacer(dst, p1, dx, dy, w, u0, u1, t);
 			}
+            else
+            {
+                t += dir*dt*invStrokeWidth;
+                //ctx->currentLineLength += dt*invStrokeWidth*0.5;
+            }
 			// Add cap
 			if (lineCap == NVG_BUTT)
 				dst = nvg__buttCapEnd(dst, p1, dx, dy, w, -aa*0.5f, aa, u0, u1, t, dir);

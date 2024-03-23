@@ -90,8 +90,7 @@ float sdroundrect2(float2 pt, float2 ext, float rad) {
 }
 
 float strokeMask(constant Uniforms& uniforms, float2 ftcoord) {
-  return min(1.0, (1.0 - abs(ftcoord.x * 2.0 - 1.0)) * uniforms.strokeMult) \
-         * min(1.0, ftcoord.y);
+  return min(1.0, (1.0 - abs(ftcoord.x * 2.0 - 1.0)) * uniforms.strokeMult) * min(1.0, ftcoord.y);
 }
 
 float glow(float2 uv) {
@@ -237,7 +236,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   if(uniforms.lineStyle == 4) strokeAlpha*=glow(in.uv);
 
   if(uniforms.type == 6) { // MNVG_SHADER_DOUBLE_STROKE
-    float scale = smoothstep(0.45, 0.55, 1.0 - 2.0 * abs(in.uv.x));
+    float scale = smoothstep(0.25, 0.75, 1.0 - 2.0 * abs(in.uv.x));
     float4 icol = uniforms.innerCol;
     float4 ocol = uniforms.outerCol;
 
@@ -248,7 +247,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         float cap2 = 1.0f - step(0.5, dist);
         icol *= cap2;
         ocol *= cap1;
-        if(dist > 0.5) return ocol * strokeAlpha * scissor;
+        if(dist > 0.5) scale = 0.0;
     }
     if (in.uv.y > (uniforms.lineLength - 0.5))
     {
@@ -258,7 +257,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         float cap2 = 1.0 - step(0.5, dist);
         icol *= cap2;
         ocol *= cap1;
-        if(dist > 0.5) return ocol * strokeAlpha * scissor;
+        if(dist > 0.5) scale = 0.0;
     }
 
     return mix(ocol, icol, scale) * strokeAlpha * scissor;
