@@ -970,35 +970,6 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol)
     return p;
 }
 
-
-void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
-{
-    NVGpaint p;
-    memset(&p, 0, sizeof(p));
-
-    nvgBeginPath(ctx);
-    nvgRect(ctx, x - 0.5f, y - 0.5f, w + 1.0f, h + 1.0f);
-
-    x += 0.5f;
-    y += 0.5f;
-    w -= 1.0f;
-    h -= 1.0f;
-
-	nvgTransformIdentity(p.xform);
-	p.xform[4] = x+w*0.5f;
-	p.xform[5] = y+h*0.5f;
-
-    p.rounded_rect = 1;
-    p.radius = radius;
-	p.innerColor = icol;
-    p.outerColor = ocol;
-	p.extent[0] = w * 0.5f;
-	p.extent[1] = h * 0.5f;
-
-    nvgFillPaint(ctx, p);
-    nvgFill(ctx);
-}
-
 NVGpaint nvgLinearGradient(NVGcontext* ctx,
 								  float sx, float sy, float ex, float ey,
 								  NVGcolor icol, NVGcolor ocol)
@@ -2746,6 +2717,71 @@ void nvgStroke(NVGcontext* ctx)
 		ctx->strokeTriCount += path->nstroke-2;
 		ctx->drawCallCount++;
 	}
+}
+
+void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
+{
+    nvg__clearPathCache(ctx);
+    
+    NVGpaint p;
+    memset(&p, 0, sizeof(p));
+    
+    float edgeX = x - 0.5f;
+    float edgeY = y - 0.5f;
+    float edgeRight = x + w + 1.0f;
+    float edgeBottom = y + h + 1.0f;
+    
+    nvg__addPath(ctx);
+    NVGpath* path = nvg__lastPath(ctx);
+    nvg__addPoint(ctx, edgeX, edgeY, NVG_PT_CORNER);
+    nvg__addPoint(ctx, edgeX, edgeBottom, NVG_PT_CORNER);
+    nvg__addPoint(ctx, edgeRight, edgeBottom, NVG_PT_CORNER);
+    nvg__addPoint(ctx, edgeRight, edgeY, NVG_PT_CORNER);
+    path->closed = 1;
+    
+    NVGstate* state = nvg__getState(ctx);
+    NVGvertex vertices[4];
+    
+    for(int i = 0; i < 4; i++)
+    {
+        nvgTransformPoint(&ctx->cache->points[i].x, &ctx->cache->points[i].y, state->xform, ctx->cache->points[i].x, ctx->cache->points[i].y);
+        nvg__vset(&vertices[i], ctx->cache->points[i].x, ctx->cache->points[i].y, 0.5f, 1, 0, 0);
+    }
+
+    ctx->cache->bounds[0] = vertices[0].x;
+    ctx->cache->bounds[1] = vertices[0].y;
+    ctx->cache->bounds[2] = vertices[2].x;
+    ctx->cache->bounds[3] = vertices[2].y;
+    
+    path->fill = vertices;
+    path->nfill = 4;
+
+    x += 0.5f;
+    y += 0.5f;
+    w -= 1.0f;
+    h -= 1.0f;
+
+    nvgTransformIdentity(p.xform);
+    p.xform[4] = x+w*0.5f;
+    p.xform[5] = y+h*0.5f;
+
+    p.rounded_rect = 1;
+    p.radius = radius;
+    p.innerColor = icol;
+    p.outerColor = ocol;
+    p.extent[0] = w * 0.5f;
+    p.extent[1] = h * 0.5f;
+    
+    nvgTransformMultiply(p.xform, state->xform);
+    
+    ctx->params.renderFill(ctx->params.userPtr, &p, state->compositeOperation, &state->scissor, ctx->fringeWidth,
+                           ctx->cache->bounds, path, 1);
+
+    for (int i = 0; i < ctx->cache->npaths; i++) {
+        path = &ctx->cache->paths[i];
+        ctx->fillTriCount += path->nfill-2;
+        ctx->drawCallCount += 2;
+    }
 }
 
 // Add fonts
