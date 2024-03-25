@@ -24,6 +24,7 @@
 #include <limits.h>
 #include <map>
 #include <vector>
+#include <iostream>
 
 #include "nanovg.h"
 #define FONTSTASH_IMPLEMENTATION
@@ -966,7 +967,7 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol)
     p.outerColor = ocol;
     
     NVGstate* state = nvg__getState(ctx);
-    //state->lineStyle = NVG_DOUBLE_STROKE;
+    state->lineStyle = NVG_DOUBLE_STROKE;
     return p;
 }
 
@@ -1997,7 +1998,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 	}
 
 	// Force round join to minimize distortion
-	if(lineStyle > 1) lineJoin = NVG_ROUND;
+	if(lineStyle > 1 && lineStyle != 5) lineJoin = NVG_ROUND;
 
 	nvg__calculateJoins(ctx, w, lineJoin, miterLimit);
 	// Calculate max vertex usage.
@@ -2010,7 +2011,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 		} else {
 			cverts += (path->count + path->nbevel*5 + 1) * 2; // plus one for loop
 		}
-		if(lineStyle > 1) cverts += 4 * path->count; // extra vertices for spacers
+		if(lineStyle > 1 && lineStyle != 5) cverts += 4 * path->count; // extra vertices for spacers
 		if (loop == 0) {
 			// space for caps
 			if (lineCap == NVG_ROUND) {
@@ -2057,7 +2058,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 		t = 0;
 
 		int dir = 1;
-		if(lineStyle > 1 && path->reversed) {
+		if(lineStyle > 1 && lineStyle != 5 && path->reversed) {
 			dir = -1;
 			for (j = s; j < path->count; ++j) {
 				dx = p1->x - p0->x;
@@ -2089,17 +2090,15 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 				dst = nvg__roundCapStart(dst, p0, dx, dy, w, ncap, aa, u0, u1, t, dir);
 		}
         
-        ctx->currentLineLength = 0;
-        
 		for (j = s; j < e; ++j) {
             dx = p1->x - p0->x;
             dy = p1->y - p0->y;
             float dt=nvg__normalize(&dx, &dy);
             
             if(lineStyle > 1){
-				dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
+				if(lineStyle != 5) dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
                 t+=dir*dt*invStrokeWidth;
-				dst = nvg_insertSpacer(dst, p1, dx, dy, w, u0, u1, t);
+                if(lineStyle != 5) dst = nvg_insertSpacer(dst, p1, dx, dy, w, u0, u1, t);
 			}
 			if ((p1->flags & (NVG_PT_BEVEL | NVG_PR_INNERBEVEL)) != 0) {
 				if (lineJoin == NVG_ROUND) {
@@ -2108,20 +2107,11 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 					dst = nvg__bevelJoin(dst, p0, p1, w, w, u0, u1, aa, t);
 				}
 			} else {
-                if(path->reversed) {
-                    ctx->currentLineLength += dt*invStrokeWidth*0.5;
-                    t+=dir*dt*invStrokeWidth;
-                }
 				nvg__vset(dst, p1->x + (p1->dmx * w), p1->y + (p1->dmy * w), u0, 1, -1, t); dst++;
 				nvg__vset(dst, p1->x - (p1->dmx * w), p1->y - (p1->dmy * w), u1, 1, 1, t); dst++;
-                if(!path->reversed) {
-                    ctx->currentLineLength += dt*invStrokeWidth*0.5;
-                    t+=dir*dt*invStrokeWidth;
-                }
 			}
 			p0 = p1++;
 		}
-
         
 		if (loop) {
 			// Loop it
@@ -2132,15 +2122,10 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			dy = p1->y - p0->y;
 			float dt = nvg__normalize(&dx, &dy);
             if(lineStyle > 1){
-				dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
+                if(lineStyle != 5) dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
 				t+=dir*dt*invStrokeWidth;
-				dst = nvg_insertSpacer(dst, p1, dx, dy, w, u0, u1, t);
+                if(lineStyle != 5) dst = nvg_insertSpacer(dst, p1, dx, dy, w, u0, u1, t);
 			}
-            else
-            {
-                t += dir*dt*invStrokeWidth;
-                //ctx->currentLineLength += dt*invStrokeWidth*0.5;
-            }
 			// Add cap
 			if (lineCap == NVG_BUTT)
 				dst = nvg__buttCapEnd(dst, p1, dx, dy, w, -aa*0.5f, aa, u0, u1, t, dir);
@@ -2149,6 +2134,8 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			else if (lineCap == NVG_ROUND)
 				dst = nvg__roundCapEnd(dst, p1, dx, dy, w, ncap, aa, u0, u1, t, dir);
 		}
+        
+        ctx->currentLineLength = fabsf(t) * 0.5;
 		path->nstroke = (int)(dst - verts);
 		verts = dst;
 	}

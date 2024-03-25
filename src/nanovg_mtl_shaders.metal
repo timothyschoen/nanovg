@@ -231,36 +231,33 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
      discard_fragment();
   }
 
-  //if(uniforms.lineStyle == 2) strokeAlpha*=dashed(in.uv, uniforms.radius);
+  if(uniforms.lineStyle == 2) strokeAlpha*=dashed(in.uv, uniforms.radius);
   if(uniforms.lineStyle == 3) strokeAlpha*=dotted(in.uv);
   if(uniforms.lineStyle == 4) strokeAlpha*=glow(in.uv);
 
   if(uniforms.type == 6) { // MNVG_SHADER_DOUBLE_STROKE
-    float scale = smoothstep(0.25, 0.75, 1.0 - 2.0 * abs(in.uv.x));
+    float colorMix = 1.0 - 2.0 * abs(in.uv.x);
     float4 icol = uniforms.innerCol;
     float4 ocol = uniforms.outerCol;
+    float outerCap = 1.0f;
 
     if (in.uv.y < 0.5)
     {
         float dist = distance(1.0 - 2.0 * in.uv, float2(1.0, 0.0));
-        float cap1 = 1.0f - step(1.0, dist);
-        float cap2 = 1.0f - step(0.5, dist);
-        icol *= cap2;
-        ocol *= cap1;
-        if(dist > 0.5) scale = 0.0;
+        outerCap = 1.0 - step(1.0, dist);
+        float innerCap = 1.0 - smoothstep(0.33, 0.66, dist-0.1);
+        icol = mix(ocol, icol, innerCap);
     }
     if (in.uv.y > (uniforms.lineLength - 0.5))
     {
         float2 capStart = float2(in.uv.x, (uniforms.lineLength - in.uv.y));
         float dist = distance(1.0 - 2.0 * capStart, float2(1.0, 0.0));
-        float cap1 = 1.0 - step(1.0, dist);
-        float cap2 = 1.0 - step(0.5, dist);
-        icol *= cap2;
-        ocol *= cap1;
-        if(dist > 0.5) scale = 0.0;
+        outerCap = 1.0 - step(1.0, dist);
+        float innerCap = 1.0 - smoothstep(0.33, 0.66, dist-0.1);
+        icol = mix(ocol, icol, innerCap);
     }
 
-    return mix(ocol, icol, scale) * strokeAlpha * scissor;
+    return mix(ocol, icol, smoothstep(0.33, 0.66, clamp(colorMix, 0.0, 1.0))) * strokeAlpha * scissor * outerCap;
   }
   if(uniforms.type == 5) { // MNVG_SHADER_FILLCOLOR
       return uniforms.innerCol * strokeAlpha * scissor;
