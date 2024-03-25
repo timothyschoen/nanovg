@@ -241,19 +241,19 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     float4 ocol = uniforms.outerCol;
     float outerCap = 1.0f;
 
-    if (in.uv.y < 0.5)
+    if (in.uv.y < 0.0)
     {
-        float dist = distance(1.0 - 2.0 * in.uv, float2(1.0, 0.0));
+        float dist = distance(2.0 * in.uv, float2(0.0, 0.0));
         outerCap = 1.0 - step(1.0, dist);
-        float innerCap = 1.0 - smoothstep(0.33, 0.66, dist-0.1);
+        float innerCap = 1.0 - smoothstep(0.33, 0.66, dist);
         icol = mix(ocol, icol, innerCap);
     }
-    if (in.uv.y > (uniforms.lineLength - 0.5))
+    if (in.uv.y > uniforms.lineLength)
     {
         float2 capStart = float2(in.uv.x, (uniforms.lineLength - in.uv.y));
-        float dist = distance(1.0 - 2.0 * capStart, float2(1.0, 0.0));
+        float dist = distance(2.0 * capStart, float2(0.0, 0.0));
         outerCap = 1.0 - step(1.0, dist);
-        float innerCap = 1.0 - smoothstep(0.33, 0.66, dist-0.1);
+        float innerCap = 1.0 - smoothstep(0.33, 0.66, dist);
         icol = mix(ocol, icol, innerCap);
     }
 
