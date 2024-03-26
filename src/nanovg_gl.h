@@ -731,21 +731,23 @@ static int glnvg__renderCreate(void* uptr)
         "   }"
         "if (type == 7) { // double stroke with rounded caps, for  plugdata connections\n"
         "    float colorMix = (1.0 - 2.15 * abs(uv.x));\n"
+        "    float smoothStart = 1.0f - feather;\n"
+        "    float smoothEnd = feather;\n"
         "    vec4 icol = innerCol;\n"
         "    if (uv.y < 0.0) {\n"
         "        float dist = distance(2.0 * uv, vec2(0.0, 0.0));\n"
         "        strokeAlpha *= 1.0 - step(1.0, dist);\n"
-        "        float innerCap = 1.0 - smoothstep(0.33, 0.66, dist);\n"
+        "        float innerCap = 1.0 - smoothstep(smoothStart, smoothEnd, dist);\n"
         "        icol = mix(outerCol, icol, innerCap);\n"
         "    }\n"
         "    if (uv.y > lineLength) {\n"
         "        vec2 capStart = vec2(uv.x, (lineLength - uv.y));\n"
         "        float dist = distance(2.0 * capStart, vec2(0.0, 0.0));\n"
         "        strokeAlpha *= 1.0 - step(1.0, dist);\n"
-        "        float innerCap = 1.0 - smoothstep(0.33, 0.66, dist);\n"
+        "        float innerCap = 1.0 - smoothstep(smoothStart, smoothEnd, dist);\n"
         "        icol = mix(outerCol, icol, innerCap);\n"
         "    }\n"
-        "    result = mix(outerCol, icol, smoothstep(0.2, 0.8, clamp(colorMix, 0.0, 1.0))) * strokeAlpha * scissor;"
+        "    result = mix(outerCol, icol, smoothstep(smoothStart, smoothEnd, clamp(colorMix, 0.0, 1.0))) * strokeAlpha * scissor;"
         "}\n"
 		"	if (type == 0) {			// Gradient\n"
 		"		// Calculate gradient color using box gradient\n"
@@ -1115,6 +1117,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
     {
         frag->type = NSVG_DOUBLE_STROKE;
         frag->lineLength = lineLength;
+        frag->feather = paint->feather;
         nvgTransformInverse(invxform, paint->xform);
     }
     else if(paint->dots) {

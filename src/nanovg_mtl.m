@@ -884,6 +884,7 @@ enum MNVGTarget mnvgTarget() {
   } else if(paint->double_stroke) {
         frag->type = MNVG_SHADER_DOUBLE_STROKE;
         frag->lineLength = lineLength;
+        frag->feather = paint->feather;
         nvgTransformInverse(invxform, paint->xform);
   }
   else if(paint->dots) {
