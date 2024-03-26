@@ -236,11 +236,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   if(uniforms.lineStyle == 4) strokeAlpha*=glow(in.uv);
 
   if(uniforms.type == 6) { // MNVG_SHADER_DOUBLE_STROKE
-    float distToCenterX = abs(in.uv.x);
-    float lineThickness = 0.25;
-    float antiAliasFactor = distToCenterX - lineThickness * 0.5;
-    float colorMix = 1.0 - smoothstep(0.0, lineThickness, antiAliasFactor);
-
+    float colorMix = 1.0 - 2.0 * abs(in.uv.x);
     float4 icol = uniforms.innerCol;
     float outerCap = 1.0f;
 
