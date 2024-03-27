@@ -174,6 +174,7 @@ struct NVGcontext {
 	int textTriCount;
     struct NVGscissorBounds scissor;
     int isCached;
+    int numCached;
     NVGpath userCachedPaths[4];
     NVGvertex cachedVertexBuffer[1<<14];
     StrokeCache* strokeCache;
@@ -348,7 +349,8 @@ NVGcontext* nvgCreateInternal(NVGparams* params)
 	if (!ctx->commands) goto error;
 	ctx->ncommands = 0;
 	ctx->ccommands = NVG_INIT_COMMANDS_SIZE;
-
+    ctx->numCached = 0;
+    
 	ctx->cache = nvg__allocPathCache();
 	if (ctx->cache == NULL) goto error;
 
@@ -2557,7 +2559,7 @@ void nvgDebugDumpPathCache(NVGcontext* ctx)
 	}
 }
 
-void nvgSavePath(NVGcontext* ctx, uint32_t pathId)
+int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
 {
     if(ctx->ncommands < 3 || ctx->cache->npaths > 3) {
       return;
@@ -2602,7 +2604,13 @@ void nvgSavePath(NVGcontext* ctx, uint32_t pathId)
       cacheEntry.paths.push_back(pathCopy);
     }
     
+    if(pathId == -1)
+    {
+        pathId = ctx->numCached++;
+    }
+    
     CACHE[pathId] = cacheEntry;
+    return pathId;
 }
 
 
