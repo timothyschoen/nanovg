@@ -53,6 +53,7 @@ extern "C" {
   #define nvgCreateFramebuffer(ctx, w, h, flags) mnvgCreateFramebuffer(ctx, w, h, flags)
   #define nvgDeleteFramebuffer(fb) mnvgDeleteFramebuffer(fb)
   #define nvgViewport(x, y, w, h)
+  #define nvgClear(nvg) mnvgClearWithColor(nvg, nvgRGBA(0, 0, 0, 0))
   #define NVGframebuffer MNVGframebuffer
 #endif
 #if defined NANOVG_GL_IMPLEMENTATION
@@ -60,6 +61,8 @@ extern "C" {
 #define nvgCreateFramebuffer(ctx, w, h, flags) nvgluCreateFramebuffer(ctx, w, h, flags)
 #define nvgDeleteFramebuffer(fb) nvgluDeleteFramebuffer(fb)
 #define nvgViewport(x, y, w, h) glViewport(x, y, w, h)
+#define nvgClear(nvg) glClearColor (colour.getFloatRed(), colour.getFloatGreen(), colour.getFloatBlue(), colour.getFloatAlpha()); \
+                      glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
 #define NVGframebuffer NVGLUframebuffer
 #endif
 
