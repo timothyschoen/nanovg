@@ -2576,7 +2576,7 @@ int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
     for (int i = 0; i < ctx->cache->npaths; i++) {
       
       auto& p = ctx->cache->paths[i];
-        if(p.nfill > (1<<13) || p.nstroke > (1<<13)) return;
+        if(p.nfill > (1<<13) || p.nstroke > (1<<13)) return -1;
         
       NVGpath pathCopy = p;
         
