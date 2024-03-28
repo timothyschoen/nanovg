@@ -2132,12 +2132,20 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
             dx = p1->x - p0->x;
             dy = p1->y - p0->y;
             float dt=nvg__normalize(&dx, &dy);
-            
-            if(lineStyle > 1){
-				if(lineStyle != 5) dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
+            if(lineStyle == 5)
+            {
                 t+=dir*dt*invStrokeWidth;
-                if(lineStyle != 5) dst = nvg_insertSpacer(dst, p1, dx, dy, w, u0, u1, t);
-			}
+                nvg__vset(dst, p1->x + (p1->dmx * w), p1->y + (p1->dmy * w), u0, 1, -1, t); dst++;
+                nvg__vset(dst, p1->x - (p1->dmx * w), p1->y - (p1->dmy * w), u1, 1, 1, t); dst++;
+                p0 = p1++;
+                continue;
+            }
+        
+            if(lineStyle > 1){
+                dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
+                t+=dir*dt*invStrokeWidth;
+                dst = nvg_insertSpacer(dst, p1, dx, dy, w, u0, u1, t);
+            }
 			if ((p1->flags & (NVG_PT_BEVEL | NVG_PR_INNERBEVEL)) != 0) {
 				if (lineJoin == NVG_ROUND) {
 					dst = nvg__roundJoin(dst, p0, p1, w, w, u0, u1, ncap, aa, t);
