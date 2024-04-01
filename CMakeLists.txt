@@ -16,7 +16,7 @@ file(GLOB HDRS ${SRC_DIR}/*.h)
 
 add_library(${PROJECT_NAME} ${SRCS})
 
-target_compile_options(nanovg PUBLIC "-fobjc-arc")
+target_compile_options(nanovg PRIVATE "-fobjc-arc")
 set_target_properties(
     nanovg
     PROPERTIES
