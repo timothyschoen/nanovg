@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #include "nanovg_mtl.h"
 #import <Metal/Metal.h>
@@ -134,25 +135,25 @@ typedef struct MNVGfragUniforms MNVGfragUniforms;
 @interface MNVGbuffers : NSObject
 
 @property (nonatomic, strong) id<MTLCommandBuffer> commandBuffer;
-@property (nonatomic, assign) BOOL isBusy;
+@property (nonatomic, assign) atomic_int isBusy;
 @property (nonatomic, assign) int image;
 @property (nonatomic, strong) id<MTLBuffer> viewSizeBuffer;
 @property (nonatomic, strong) id<MTLTexture> stencilTexture;
 @property (nonatomic, assign) MNVGcall* calls;
-@property (nonatomic, assign) int ccalls;
-@property (nonatomic, assign) int ncalls;
+@property (nonatomic, assign) atomic_int ccalls;
+@property (nonatomic, assign) atomic_int ncalls;
 @property (nonatomic, strong) id<MTLBuffer> indexBuffer;
 @property (nonatomic, assign) uint32_t* indexes;
-@property (nonatomic, assign) int cindexes;
-@property (nonatomic, assign) int nindexes;
+@property (nonatomic, assign) atomic_int cindexes;
+@property (nonatomic, assign) atomic_int nindexes;
 @property (nonatomic, strong) id<MTLBuffer> vertBuffer;
 @property (nonatomic, assign) struct NVGvertex* verts;
-@property (nonatomic, assign) int cverts;
-@property (nonatomic, assign) int nverts;
+@property (nonatomic, assign) atomic_int cverts;
+@property (nonatomic, assign) atomic_int nverts;
 @property (nonatomic, strong) id<MTLBuffer> uniformBuffer;
 @property (nonatomic, assign) unsigned char* uniforms;
-@property (nonatomic, assign) int cuniforms;
-@property (nonatomic, assign) int nuniforms;
+@property (nonatomic, assign) atomic_int cuniforms;
+@property (nonatomic, assign) atomic_int nuniforms;
 
 @end
 
