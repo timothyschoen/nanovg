@@ -127,28 +127,11 @@ struct NVGpathCache {
 };
 typedef struct NVGpathCache NVGpathCache;
 
-typedef struct {
-  
-  float x1; float y1; float x2; float y2;
-  float x3; float y3; float x4; float y4;
-  
-} NVGbezierPath;
-
-struct BezierCacheLine {
-  NVGbezierPath path;
-  std::vector<float> pts;
-  std::vector<int> flags;
-  int npts = 0;
-  int lastFrame = 0;
+struct StrokeCacheLine {
+std::vector<NVGpath> paths;
+float lineLength;
 };
-  
-  using BezierCache = std::vector< std::vector<BezierCacheLine> >;
-  
-  struct StrokeCacheLine {
-    std::vector<NVGpath> paths;
-    float lineLength;
-  };
-  
+
 using StrokeCache = std::map<uint32_t, StrokeCacheLine>;
 
 struct NVGcontext {
@@ -334,9 +317,8 @@ static NVGstate* nvg__getState(NVGcontext* ctx)
 
 NVGcontext* nvgCreateInternal(NVGparams* params)
 {
-  printf("NVGcontext size: %lu\n", sizeof(NVGcontext));
 	FONSparams fontParams;
-  NVGcontext* ctx = (NVGcontext*) malloc(sizeof(NVGcontext));
+    NVGcontext* ctx = (NVGcontext*) malloc(sizeof(NVGcontext));
 	int i;
 	if (ctx == NULL) goto error;
 	memset(ctx, 0, sizeof(NVGcontext));
@@ -423,7 +405,7 @@ void nvgDeleteInternal(NVGcontext* ctx)
 	if (ctx->params.renderDelete != NULL)
 		ctx->params.renderDelete(ctx->params.userPtr);
   
-  free(ctx);;
+    free(ctx);
 }
 
 void nvgBeginFrame(NVGcontext* ctx, float windowWidth, float windowHeight, float devicePixelRatio)
@@ -454,7 +436,6 @@ void nvgCancelFrame(NVGcontext* ctx)
 
 void nvgEndFrame(NVGcontext* ctx)
 {
-  //printf("endFrame\n");
 	ctx->params.renderFlush(ctx->params.userPtr);
 	if (ctx->fontImageIdx != 0) {
 		int fontImage = ctx->fontImages[ctx->fontImageIdx];
@@ -1483,10 +1464,6 @@ void nvg__tesselateBezierAFD(NVGcontext* ctx, float x1, float y1, float x2, floa
   float dddx = 6*ax;
   float dddy = 6*ay;
 
-  //printf("dx: %f, dy: %f\n", dx, dy);
-  //printf("ddx: %f, ddy: %f\n", ddx, ddy);
-  //printf("dddx: %f, dddy: %f\n", dddx, dddy);
-
 #define ONE (1<<10)
 
   int t = 0;
@@ -1499,14 +1476,9 @@ void nvg__tesselateBezierAFD(NVGcontext* ctx, float x1, float y1, float x2, floa
     // Flatness measure. XXX: guessing
     float d = ddx*ddx + ddy*ddy + dddx*dddx + dddy*dddy;
 
-    // printf("d: %f, th: %f\n", d, th);
-
     // Go to higher resolution if we're moving a lot
     // or overshooting the end.
-    while( (d > tol && dt > 1) || (t+dt > ONE) ) {
-
-      // printf("up\n");
-
+      while( (d > tol && dt > 1) || (t+dt > ONE) ) {
       // Apply L to the curve. Increase curve resolution.
       dx = .5 * dx - (1.0/8.0)*ddx + (1.0/16.0)*dddx;
       dy = .5 * dy - (1.0/8.0)*ddy + (1.0/16.0)*dddy;
@@ -1527,9 +1499,6 @@ void nvg__tesselateBezierAFD(NVGcontext* ctx, float x1, float y1, float x2, floa
     // and we aren't going to overshoot the end.
     // XXX: tol/32 is just a guess for when we are too flat.
     while ( (d > 0 && d < tol/32.0f && dt < ONE) && (t+2*dt <= ONE) ) {
-
-      // printf("down\n");
-
       // Apply L^(-1) to the curve. Decrease curve resolution.
       dx = 2 * dx + ddx;
       dy = 2 * dy + ddy;
@@ -1569,7 +1538,6 @@ void nvg__tesselateBezierAFD(NVGcontext* ctx, float x1, float y1, float x2, floa
 static void nvg__flattenPaths(NVGcontext* ctx)
 {
 	NVGpathCache* cache = ctx->cache;
-	// NVGstate* state = nvg__getState(ctx);
 	NVGpoint* last;
 	NVGpoint* p0;
 	NVGpoint* p1;
@@ -1642,6 +1610,7 @@ static void nvg__flattenPaths(NVGcontext* ctx)
 		}
 
 		// Enforce winding.
+        path->reversed = 0;
 		if (path->count > 2) {
 			area = nvg__polyArea(pts, path->count);
 			if (path->winding == NVG_CCW && area < 0.0f) {
