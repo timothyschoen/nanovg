@@ -16,12 +16,14 @@ file(GLOB HDRS ${SRC_DIR}/*.h)
 
 add_library(${PROJECT_NAME} ${SRCS})
 
+if(NANOVG_METAL_IMPLEMENTATION)
 target_compile_options(nanovg PRIVATE "-fobjc-arc")
 set_target_properties(
     nanovg
     PROPERTIES
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES
 )
+endif()
 
 install(TARGETS ${PROJECT_NAME}
         LIBRARY DESTINATION lib
