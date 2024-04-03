@@ -210,10 +210,11 @@ struct GLNVGfragUniforms {
 		int type;
         float scissorRadius;
         float lineLength;
+        float offset;
 	#else
 		// note: after modifying layout or size of uniform array,
 		// don't forget to also update the fragment shader source!
-		#define NANOVG_GL_UNIFORMARRAY_SIZE 12
+		#define NANOVG_GL_UNIFORMARRAY_SIZE 13
 		union {
 			struct {
 				float scissorMat[12]; // matrices are actually 3 vec4s
@@ -233,6 +234,7 @@ struct GLNVGfragUniforms {
 				float type;
 				float scissorRadius;
 				float lineLength;
+                float offset;
 			};
 			float uniformArray[NANOVG_GL_UNIFORMARRAY_SIZE][4];
 		};
@@ -596,6 +598,7 @@ static int glnvg__renderCreate(void* uptr)
 				int type;
 				float scissorRadius;
 				float lineLength;
+                float offset;
 			};
 		#else // NANOVG_GL3 && !USE_UNIFORMBUFFER
 			uniform vec4 frag[UNIFORMARRAY_SIZE];
@@ -630,6 +633,7 @@ static int glnvg__renderCreate(void* uptr)
 			#define type int(frag[11].y)
 			#define scissorRadius frag[11].z
 			#define lineLength frag[11].w
+            #define offset frag[12].x
 		#endif
 
 		float sdroundrect(vec2 pt, vec2 ext, float rad) {
@@ -656,7 +660,8 @@ static int glnvg__renderCreate(void* uptr)
 			 return distance(center, p) - d;
 		}
 		float dashed(vec2 uv){
-			float fy = fract(uv.y / radius);
+            vec2 UV = vec2(uv.x, uv.y - offset);
+			float fy = fract(UV.y / radius);
 			float w = step(fy, (radius / 8.0f));
 			fy *= (radius * 0.75);
 			if(fy >= (radius / 2.666f)) {
@@ -666,7 +671,7 @@ static int glnvg__renderCreate(void* uptr)
 			} else {
 				fy = 0.0f;
 			}
-			w *= smoothstep(0.0f, 1.0f, (radius * 1.5f) * (0.25f - (uv.x * uv.x  + fy * fy)));
+			w *= smoothstep(0.0f, 1.0f, (radius * 1.5f) * (0.25f - (UV.x * UV.x  + fy * fy)));
 			return w;
 		}
 		float dotted(vec2 uv){
@@ -1054,6 +1059,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
 	frag->outerCol = glnvg__premulColor(paint->outerColor);
 	frag->lineStyle = lineStyle;
 	frag->radius = paint->radius;
+	frag->offset = paint->offset * paint->radius;
 	if (scissor->extent[0] < -0.5f || scissor->extent[1] < -0.5f) {
 		memset(frag->scissorMat, 0, sizeof(frag->scissorMat));
 		frag->scissorExt[0] = 1.0f;

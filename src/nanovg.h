@@ -90,6 +90,7 @@ struct NVGpaint {
 	int image;
     int dots;
     float dot_pattern_size;
+    float offset;
     int rounded_rect;
     int double_stroke;
 };
@@ -320,6 +321,9 @@ void nvgLineStyle(NVGcontext* ctx, int lineStyle);
 
 // Set line dash length if NVG_LINE_DASHED is active
 void nvgDashLength(NVGcontext* ctx, float length);
+
+// Set dash offset from start of line (for message activity movement animation)
+void nvgDashPhaseOffset(NVGcontext* ctx, float offset);
 
 // Sets how the end of the line (cap) is drawn,
 // Can be one of: NVG_BUTT (default), NVG_ROUND, NVG_SQUARE.
