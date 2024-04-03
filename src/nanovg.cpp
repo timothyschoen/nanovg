@@ -764,6 +764,13 @@ void nvgDashLength(NVGcontext* ctx, float length)
     state->stroke.radius = length;
 }
 
+// Set the dash offset (offset is 0..1.0f)
+void nvgDashPhaseOffset(NVGcontext* ctx, float offset)
+{
+    NVGstate* state = nvg__getState(ctx);
+    state->stroke.offset = offset;
+}
+
 
 void nvgLineCap(NVGcontext* ctx, int cap)
 {
