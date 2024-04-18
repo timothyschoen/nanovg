@@ -117,6 +117,7 @@ struct MNVGfragUniforms {
   MNVGshaderType type;
   float scissorRadius;
   float patternSize;
+  float offset;
   int lineStyle;
   float lineLength;
 };
@@ -829,6 +830,7 @@ enum MNVGTarget mnvgTarget() {
   frag->outerCol = mtlnvg__premulColor(paint->outerColor);
   frag->lineStyle = lineStyle;
   frag->radius = paint->radius;
+  frag->offset = paint->offset * paint->radius;
 
   if (scissor->extent[0] < -0.5f || scissor->extent[1] < -0.5f) {
     frag->scissorMat = matrix_from_rows((vector_float3){0, 0, 0},
@@ -1563,12 +1565,13 @@ error:
 
 #if TARGET_OS_OSX
   // Makes mnvgReadPixels() work as expected on Mac.
+    /*
   if (s_framebuffer != NULL) {
     id<MTLBlitCommandEncoder> blitCommandEncoder = [_buffers.commandBuffer
         blitCommandEncoder];
     [blitCommandEncoder synchronizeResource:colorTexture];
     [blitCommandEncoder endEncoding];
-  }
+  } */
 #endif  // TARGET_OS_OSX
 
   [_buffers.commandBuffer commit];

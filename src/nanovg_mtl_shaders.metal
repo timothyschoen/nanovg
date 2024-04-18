@@ -54,6 +54,7 @@ typedef struct  {
   int type;
   float scissorRadius;
   float patternSize;
+  float offset;
   int lineStyle;
   float lineLength;
 } Uniforms;
@@ -106,8 +107,9 @@ float circleDist(float2 p, float2 center, float d) {
   return distance(center, p) - d;
 }
 
-float dashed(float2 uv, float rad) {
-  float fy = fract(uv.y / rad);
+float dashed(float2 uv, float rad, float offset) {
+  float2 offset_uv = float2(uv.x, uv.y - offset);
+  float fy = fract(offset_uv.y / rad);
   float w = step(fy, rad / 8.0);
   fy *= rad * 0.75;
 
@@ -119,7 +121,7 @@ float dashed(float2 uv, float rad) {
     fy = 0.0;
   }
 
-  w *= smoothstep(0.0f, 1.0f, (rad * 1.5f) * (0.25f - (uv.x * uv.x  + fy * fy)));
+  w *= smoothstep(0.0f, 1.0f, (rad * 1.5f) * (0.25f - (offset_uv.x * offset_uv.x  + fy * fy)));
   return w;
 }
 
@@ -151,7 +153,7 @@ fragment float4 fragmentShader(RasterizerData in [[stage_in]],
      discard_fragment();
 
   float strokeAlpha = 1.0f;
-  if(uniforms.lineStyle == 2) strokeAlpha*=dashed(in.uv, uniforms.radius);
+  if(uniforms.lineStyle == 2) strokeAlpha*=dashed(in.uv, uniforms.radius, uniforms.offset);
   if(uniforms.lineStyle == 3) strokeAlpha*=dotted(in.uv);
   if(uniforms.lineStyle == 4) strokeAlpha*=glow(in.uv);
 
@@ -231,7 +233,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
      discard_fragment();
   }
 
-  if(uniforms.lineStyle == 2) strokeAlpha*=dashed(in.uv, uniforms.radius);
+  if(uniforms.lineStyle == 2) strokeAlpha*=dashed(in.uv, uniforms.radius, uniforms.offset);
   if(uniforms.lineStyle == 3) strokeAlpha*=dotted(in.uv);
   if(uniforms.lineStyle == 4) strokeAlpha*=glow(in.uv);
 
