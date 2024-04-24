@@ -282,7 +282,7 @@ void nvgRestore(NVGcontext* ctx);
 void nvgReset(NVGcontext* ctx);
 
 // Gets the current scissor bounds
-struct NVGscissorBounds nvgCurrentScissor(NVGcontext* ctx);
+void nvgCurrentScissor(NVGcontext* ctx, float* x, float* y, float* w, float* h);
 
 //
 // Render styles
@@ -744,10 +744,10 @@ struct NVGscissor {
 typedef struct NVGscissor NVGscissor;
 
 struct NVGscissorBounds {
-	float x;
-	float y;
-	float w;
-	float h;
+    float x;
+    float y;
+    float w;
+    float h;
 };
 typedef struct NVGscissorBounds NVGscissorBounds;
 

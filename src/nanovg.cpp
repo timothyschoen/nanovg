@@ -381,8 +381,11 @@ NVGparams* nvgInternalParams(NVGcontext* ctx)
     return &ctx->params;
 }
 
-struct NVGscissorBounds nvgCurrentScissor(NVGcontext* ctx) {
-	return ctx->scissor;
+void nvgCurrentScissor(NVGcontext* ctx, float* x, float* y, float* w, float* h) {
+    *x = ctx->scissor.x;
+    *y = ctx->scissor.y;
+    *w = ctx->scissor.w;
+    *h = ctx->scissor.h;
 }
 
 void nvgDeleteInternal(NVGcontext* ctx)
@@ -2615,7 +2618,7 @@ int nvgLoadPath(NVGcontext* ctx, uint32_t pathId)
         
         memcpy(ctx->userCachedPaths, cacheEntry.paths.data(), numPaths * sizeof(NVGpath));
         ctx->cache->cachedPaths = ctx->userCachedPaths;
-        ctx->cache->npaths = numPaths;
+        ctx->cache->npaths = (int)numPaths;
         ctx->currentLineLength = cacheEntry.lineLength;
         
         for (int i = 0; i < numPaths; i++) {
