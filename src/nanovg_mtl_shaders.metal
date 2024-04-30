@@ -166,7 +166,7 @@ fragment float4 fragmentShader(RasterizerData in [[stage_in]],
     float alias = 0.5 * length(max(abs(dx), abs(dy)));
     float outerRoundedRectAlpha = 1.0 - (smoothstep(0.0, alias, outerD) * smoothstep(1.0 - alias, 1.0, outerD));
     float innerRoundedRectAlpha = 1.0 - (smoothstep(0.0, alias, innerD) * smoothstep(1.0 - alias, 1.0, innerD));
-    float4 result = float4(mix(uniforms.outerCol.rgb, uniforms.innerCol.rgb, innerRoundedRectAlpha).rgb * outerRoundedRectAlpha, outerRoundedRectAlpha) * scissor;
+    float4 result = float4(mix(uniforms.outerCol.rgba, uniforms.innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
     return result * strokeAlpha;
   }
   else if (uniforms.type == 0) {  // MNVG_SHADER_FILLGRAD
@@ -224,7 +224,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     float alias = 0.5 * length(max(abs(dx), abs(dy)));
     float outerRoundedRectAlpha = 1.0 - (smoothstep(0.0, alias, outerD) * smoothstep(1.0 - alias, 1.0, outerD));
     float innerRoundedRectAlpha = 1.0 - (smoothstep(0.0, alias, innerD) * smoothstep(1.0 - alias, 1.0, innerD));
-    float4 result = float4(mix(uniforms.outerCol.rgb, uniforms.innerCol.rgb, innerRoundedRectAlpha).rgb * outerRoundedRectAlpha, outerRoundedRectAlpha) * scissor;
+    float4 result = float4(mix(uniforms.outerCol.rgba, uniforms.innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
     return result;
   }
 

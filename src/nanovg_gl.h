@@ -718,7 +718,7 @@ static int glnvg__renderCreate(void* uptr)
 				float alias = 0.5f * length(max(abs(dx), abs(dy)));
 				float outerRoundedRectAlpha = 1.0f - (smoothstep(0.0f, alias, outerD) * smoothstep(1.0f - alias, 1.0f, outerD));
 				float innerRoundedRectAlpha = 1.0f - (smoothstep(0.0f, alias, innerD) * smoothstep(1.0f - alias, 1.0f, innerD));
-				result = vec4(mix(outerCol.rgb, innerCol.rgb, innerRoundedRectAlpha).rgb * outerRoundedRectAlpha, outerRoundedRectAlpha) * scissor;
+				result = vec4(mix(outerCol.rgba, innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
 		#ifdef NANOVG_GL3
 				outColor = result;
 		#else

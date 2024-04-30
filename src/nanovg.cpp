@@ -132,7 +132,7 @@ std::vector<NVGpath> paths;
 float lineLength;
 };
 
-using StrokeCache = std::map<uint32_t, StrokeCacheLine>;
+using StrokeCache = std::unordered_map<uint32_t, StrokeCacheLine>;
 
 struct NVGcontext {
 	NVGparams params;
@@ -2563,14 +2563,14 @@ int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
     for (int i = 0; i < ctx->cache->npaths; i++) {
       
       auto& p = ctx->cache->paths[i];
-        if(p.nfill > (1<<13) || p.nstroke > (1<<13)) return -1;
+      if(p.nfill > (1<<13) || p.nstroke > (1<<13)) return -1;
         
       NVGpath pathCopy = p;
         
       // Duplicate path data
       pathCopy.fill = (NVGvertex*) malloc( p.nfill * sizeof(NVGvertex) );
       memcpy(pathCopy.fill, p.fill, p.nfill * sizeof(NVGvertex));
-  
+    
       pathCopy.stroke = (NVGvertex*) malloc( p.nstroke * sizeof(NVGvertex) );
       memcpy(pathCopy.stroke, p.stroke, p.nstroke * sizeof(NVGvertex));
     
@@ -2603,6 +2603,12 @@ int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
 
 void nvgDeletePath(NVGcontext* ctx, uint32_t pathId)
 {
+    for(auto& path : CACHE[pathId].paths)
+    {
+        free(path.stroke);
+        free(path.fill);
+    }
+    
     CACHE.erase(pathId);
 }
 
