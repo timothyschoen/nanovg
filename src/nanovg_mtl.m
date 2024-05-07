@@ -136,8 +136,8 @@ typedef struct MNVGfragUniforms MNVGfragUniforms;
 @interface MNVGbuffers : NSObject
 
 @property (nonatomic, strong) id<MTLCommandBuffer> commandBuffer;
-@property (nonatomic, assign) atomic_int isBusy;
-@property (nonatomic, assign) int image;
+@property (nonatomic, assign) atomic_bool isBusy;
+@property (nonatomic, assign) atomic_int image;
 @property (nonatomic, strong) id<MTLBuffer> viewSizeBuffer;
 @property (nonatomic, strong) id<MTLTexture> stencilTexture;
 @property (nonatomic, assign) MNVGcall* calls;
@@ -467,7 +467,6 @@ NVGcontext* mnvgSetViewBounds(void* view, int width, int height) {
 NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     CAMetalLayer *metalLayer = (CAMetalLayer*)[(__bridge UIView*)view layer];
     metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    metalLayer.device = MTLCreateSystemDefaultDevice();
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
     return nvgCreateMTL((__bridge void*)metalLayer, flags);
 }
@@ -481,8 +480,6 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     ((__bridge NSView*) view).layer = [CAMetalLayer new];
 
     [(CAMetalLayer*)[((__bridge NSView*) view) layer] setPixelFormat:MTLPixelFormatBGRA8Unorm];
-    ((CAMetalLayer*) ((__bridge NSView*) view).layer).device = MTLCreateSystemDefaultDevice();
-
     [(CAMetalLayer*)[(__bridge NSView*)view layer] setDrawableSize:CGSizeMake(width, height)];
 
     return nvgCreateMTL((__bridge void*)((__bridge NSView*) view).layer, flags);
@@ -1346,6 +1343,11 @@ enum MNVGTarget mnvgTarget() {
 }
 
 - (void)renderDelete {
+  for(int i = 0; i < _maxBuffers; i++)
+  {
+      dispatch_semaphore_signal(_semaphore);
+  }
+
   for (MNVGbuffers* buffers in _cbuffers) {
     buffers.commandBuffer = nil;
     buffers.viewSizeBuffer = nil;
@@ -1506,16 +1508,23 @@ error:
 
   _buffers.commandBuffer = commandBuffer;
   __block MNVGbuffers* buffers = _buffers;
+  __weak id weakSelf = self;
+  __weak id weakBuffers = buffers;
+  
   [commandBuffer enqueue];
   [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-      buffers.isBusy = NO;
-      buffers.commandBuffer = nil;
-      buffers.image = 0;
-      buffers.nindexes = 0;
-      buffers.nverts = 0;
-      buffers.ncalls = 0;
-      buffers.nuniforms = 0;
-      dispatch_semaphore_signal(self.semaphore);
+      if(weakBuffers) {
+          [weakBuffers setIsBusy:NO];
+          [weakBuffers setCommandBuffer:nil];
+          [(MNVGbuffers*)weakBuffers setImage:0];
+          [weakBuffers setNindexes:0];
+          [weakBuffers setNverts:0];
+          [weakBuffers setNcalls:0];
+          [weakBuffers setNuniforms:0];
+      }
+      if (weakSelf) {
+          dispatch_semaphore_signal([weakSelf semaphore]);
+      }
   }];
 
   if (s_framebuffer == NULL ||
@@ -1565,13 +1574,12 @@ error:
 
 #if TARGET_OS_OSX
   // Makes mnvgReadPixels() work as expected on Mac.
-    /*
   if (s_framebuffer != NULL) {
     id<MTLBlitCommandEncoder> blitCommandEncoder = [_buffers.commandBuffer
         blitCommandEncoder];
     [blitCommandEncoder synchronizeResource:colorTexture];
     [blitCommandEncoder endEncoding];
-  } */
+  }
 #endif  // TARGET_OS_OSX
 
   [_buffers.commandBuffer commit];
