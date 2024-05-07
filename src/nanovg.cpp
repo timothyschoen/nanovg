@@ -1825,7 +1825,6 @@ static NVGvertex* nvg__doubleStrokeCapStart(NVGvertex* dst, NVGpoint* p,
     float py = p->y - dy*d;
     float dlx = dy;
     float dly = -dx;
-    float dt = nvg__normalize(&dx, &dy);
     nvg__vset(dst, px + dlx*w - dx*aa, py + dly*w - dy*aa, u0,0, -1, t); dst++;
     nvg__vset(dst, px - dlx*w - dx*aa, py - dly*w - dy*aa, u1,0, 1, t); dst++;
     nvg__vset(dst, px + dlx*w, py + dly*w, u0,1, -1, t - 1.0f); dst++;
