@@ -333,7 +333,7 @@ NVGcontext* nvgCreateInternal(NVGparams* params)
 	ctx->ncommands = 0;
 	ctx->ccommands = NVG_INIT_COMMANDS_SIZE;
     ctx->numCached = 0;
-    
+
 	ctx->cache = nvg__allocPathCache();
 	if (ctx->cache == NULL) goto error;
 
@@ -362,9 +362,9 @@ NVGcontext* nvgCreateInternal(NVGparams* params)
 	if (ctx->fontImages[0] == 0) goto error;
 	ctx->fontImageIdx = 0;
     ctx->scissor = {0.0f, 0.0f, -1.0f, -1.0f};
-  
+
     ctx->strokeCache = new StrokeCache();
-    
+
 	return ctx;
 
 error:
@@ -408,7 +408,7 @@ void nvgDeleteInternal(NVGcontext* ctx)
 
 	if (ctx->params.renderDelete != NULL)
 		ctx->params.renderDelete(ctx->params.userPtr);
-  
+
     free(ctx);
 }
 
@@ -960,7 +960,7 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol)
     p.innerColor = icol;
     p.outerColor = ocol;
     p.feather = ctx->devicePxRatio < 2.0f ? 0.8 : 0.6;
-    
+
     NVGstate* state = nvg__getState(ctx);
     state->lineStyle = NVG_DOUBLE_STROKE;
     return p;
@@ -1247,9 +1247,6 @@ static float nvg__distPtSeg(float x, float y, float px, float py, float qx, floa
 
 static void nvg__appendCommands(NVGcontext* ctx, float* vals, int nvals)
 {
-	NVGstate* state = nvg__getState(ctx);
-	int i;
-
 	if (ctx->ncommands+nvals > ctx->ccommands) {
 		float* commands;
 		int ccommands = ctx->ncommands+nvals + ctx->ccommands/2;
@@ -1264,7 +1261,7 @@ static void nvg__appendCommands(NVGcontext* ctx, float* vals, int nvals)
 		ctx->commandy = vals[nvals-1];
 	}
 
-	// transform commands
+	/*
 	i = 0;
 	while (i < nvals) {
 		int cmd = (int)vals[i];
@@ -1291,8 +1288,8 @@ static void nvg__appendCommands(NVGcontext* ctx, float* vals, int nvals)
 			break;
 		default:
 			i++;
-		}
-	}
+			}
+	}*/
 
 	memcpy(&ctx->commands[ctx->ncommands], vals, nvals*sizeof(float));
 
@@ -2091,7 +2088,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 				p1 = &pts[1];
 			}
 		}
-        
+
 		if (loop == 0) {
 			// Add cap
 			dx = p1->x - p0->x;
@@ -2106,7 +2103,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			else if (lineCap == NVG_ROUND)
 				dst = nvg__roundCapStart(dst, p0, dx, dy, w, ncap, aa, u0, u1, t, dir);
 		}
-        
+
 		for (j = s; j < e; ++j) {
             dx = p1->x - p0->x;
             dy = p1->y - p0->y;
@@ -2119,7 +2116,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
                 p0 = p1++;
                 continue;
             }
-        
+
             if(lineStyle > 1){
                 dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
                 t+=dir*dt*invStrokeWidth;
@@ -2137,7 +2134,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			}
 			p0 = p1++;
 		}
-        
+
 		if (loop) {
 			// Loop it
 			nvg__vset(dst, verts[0].x, verts[0].y, u0, 1, -1, t); dst++;
@@ -2161,12 +2158,12 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			else if (lineCap == NVG_ROUND)
 				dst = nvg__roundCapEnd(dst, p1, dx, dy, w, ncap, aa, u0, u1, t, dir);
 		}
-        
+
         ctx->currentLineLength = fabsf(t) * 0.5;
 		path->nstroke = (int)(dst - verts);
 		verts = dst;
 	}
-    
+
 	return 1;
 }
 
@@ -2551,51 +2548,51 @@ int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
     if(ctx->ncommands < 3 || ctx->cache->npaths > 3) {
       return -1;
     }
-    
+
     NVGstate* state = nvg__getState(ctx);
     auto cacheEntry = StrokeCacheLine();
-    
+
     float invxform[6];
     nvgTransformInverse(invxform, state->xform);
-        
+
     cacheEntry.lineLength = ctx->currentLineLength;
-    
+
     for (int i = 0; i < ctx->cache->npaths; i++) {
-      
+
       auto& p = ctx->cache->paths[i];
       if(p.nfill > (1<<13) || p.nstroke > (1<<13)) return -1;
-        
+
       NVGpath pathCopy = p;
-        
+
       // Duplicate path data
       pathCopy.fill = (NVGvertex*) malloc( p.nfill * sizeof(NVGvertex) );
       memcpy(pathCopy.fill, p.fill, p.nfill * sizeof(NVGvertex));
-    
+
       pathCopy.stroke = (NVGvertex*) malloc( p.nstroke * sizeof(NVGvertex) );
       memcpy(pathCopy.stroke, p.stroke, p.nstroke * sizeof(NVGvertex));
-    
+
       for(int j = 0; j < p.nfill; j++)
       {
-          nvgTransformPoint(&pathCopy.fill[j].x, &pathCopy.fill[j].y, invxform, pathCopy.fill[j].x, pathCopy.fill[j].y);
+          //nvgTransformPoint(&pathCopy.fill[j].x, &pathCopy.fill[j].y, invxform, pathCopy.fill[j].x, pathCopy.fill[j].y);
           //nvgTransformPoint(&p.fill[i].u, &p.fill[i].v, invxform, p.fill[i].u, p.fill[i].v);
           //nvgTransformPoint(&p.fill[i].s, &p.fill[i].t, invxform, p.fill[i].s, p.fill[i].t);
       }
-        
+
       for(int j = 0; j < p.nstroke; j++)
       {
-          nvgTransformPoint(&pathCopy.stroke[j].x, &pathCopy.stroke[j].y, invxform, pathCopy.stroke[j].x, pathCopy.stroke[j].y);
+          //nvgTransformPoint(&pathCopy.stroke[j].x, &pathCopy.stroke[j].y, invxform, pathCopy.stroke[j].x, pathCopy.stroke[j].y);
           //nvgTransformPoint(&p.stroke[i].u, &p.stroke[i].v, invxform, p.stroke[i].u, p.stroke[i].v);
           //nvgTransformPoint(&p.stroke[i].s, &p.stroke[i].t, invxform, p.stroke[i].s, p.stroke[i].t);
       }
-        
+
       cacheEntry.paths.push_back(pathCopy);
     }
-    
+
     if(pathId == -1)
     {
         pathId = ctx->numCached++;
     }
-    
+
     CACHE[pathId] = cacheEntry;
     return pathId;
 }
@@ -2608,7 +2605,7 @@ void nvgDeletePath(NVGcontext* ctx, uint32_t pathId)
         free(path.stroke);
         free(path.fill);
     }
-    
+
     CACHE.erase(pathId);
 }
 
@@ -2618,42 +2615,42 @@ int nvgLoadPath(NVGcontext* ctx, uint32_t pathId)
     {
         NVGstate* state = nvg__getState(ctx);
         nvgBeginPath(ctx);
-        
+
         auto& cacheEntry = CACHE[pathId];
         auto numPaths = cacheEntry.paths.size();
-        
+
         memcpy(ctx->userCachedPaths, cacheEntry.paths.data(), numPaths * sizeof(NVGpath));
         ctx->cache->cachedPaths = ctx->userCachedPaths;
         ctx->cache->npaths = (int)numPaths;
         ctx->currentLineLength = cacheEntry.lineLength;
-        
+
         for (int i = 0; i < numPaths; i++) {
-        
+
           auto& p = ctx->cache->cachedPaths[i];
           auto& cachedPath = cacheEntry.paths[i];
-          
+
           // Duplicate path data
           p.fill = ctx->cachedVertexBuffer;
           memcpy(p.fill, cachedPath.fill, cachedPath.nfill * sizeof(NVGvertex));
-      
+
           p.stroke = ctx->cachedVertexBuffer + (1<<13);
           memcpy(p.stroke, cachedPath.stroke, cachedPath.nstroke * sizeof(NVGvertex));
-        
+
           for(int j = 0; j < p.nfill; j++)
           {
-              nvgTransformPoint(&p.fill[j].x, &p.fill[j].y, state->xform, p.fill[j].x, p.fill[j].y);
+              //nvgTransformPoint(&p.fill[j].x, &p.fill[j].y, state->xform, p.fill[j].x, p.fill[j].y);
               //nvgTransformPoint(&p.fill[i].u, &p.fill[i].v, state->xform, p.fill[i].u, p.fill[i].v);
               //nvgTransformPoint(&p.fill[i].s, &p.fill[i].t, state->xform, p.fill[i].s, p.fill[i].t);
           }
-          
+
           for(int j = 0; j < p.nstroke; j++)
           {
-              nvgTransformPoint(&p.stroke[j].x, &p.stroke[j].y, state->xform, p.stroke[j].x, p.stroke[j].y);
+              //nvgTransformPoint(&p.stroke[j].x, &p.stroke[j].y, state->xform, p.stroke[j].x, p.stroke[j].y);
               //nvgTransformPoint(&p.stroke[i].u, &p.stroke[i].v, state->xform, p.stroke[i].u, p.stroke[i].v);
               //nvgTransformPoint(&p.stroke[i].s, &p.stroke[i].t, state->xform, p.stroke[i].s, p.stroke[i].t);
           }
         }
-        
+
         ctx->isCached = true;
         return 1;
     }
@@ -2667,12 +2664,11 @@ void nvgFill(NVGcontext* ctx)
 	const NVGpath* path;
 	NVGpaint fillPaint = state->fill;
 	int i;
-    
+
     if(ctx->isCached)
     {
-        ctx->params.renderFill(ctx->params.userPtr, &fillPaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-                               ctx->cache->bounds, ctx->cache->cachedPaths, ctx->cache->npaths);
-            
+        ctx->params.renderFill(ctx->params.userPtr, &fillPaint, state->compositeOperation, &state->scissor, state->xform, ctx->fringeWidth, ctx->cache->bounds, ctx->cache->cachedPaths, ctx->cache->npaths);
+
         // Count triangles
         for (i = 0; i < ctx->cache->npaths; i++) {
             path = &ctx->cache->paths[i];
@@ -2693,9 +2689,15 @@ void nvgFill(NVGcontext* ctx)
 	fillPaint.innerColor.a *= state->alpha;
 	fillPaint.outerColor.a *= state->alpha;
 
-	ctx->params.renderFill(ctx->params.userPtr, &fillPaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-						   ctx->cache->bounds, ctx->cache->paths, ctx->cache->npaths);
-    
+	const float * xform = state->xform;
+	float invxform[6];
+	NVGscissor scissor = state->scissor;
+	nvgTransformInverse(invxform, xform);
+	nvgTransformMultiply(scissor.xform, invxform);
+	nvgTransformMultiply(fillPaint.xform, invxform);
+
+	ctx->params.renderFill(ctx->params.userPtr, &fillPaint, state->compositeOperation, &scissor, xform, ctx->fringeWidth, ctx->cache->bounds, ctx->cache->paths, ctx->cache->npaths);
+
 	// Count triangles
 	for (i = 0; i < ctx->cache->npaths; i++) {
 		path = &ctx->cache->paths[i];
@@ -2704,7 +2706,7 @@ void nvgFill(NVGcontext* ctx)
 		ctx->drawCallCount += 2;
 	}
 }
-  
+
 void nvgStroke(NVGcontext* ctx)
 {
 	NVGstate* state = nvg__getState(ctx);
@@ -2714,6 +2716,14 @@ void nvgStroke(NVGcontext* ctx)
 	const NVGpath* path;
 	int i;
     
+    const float * xform = state->xform;
+    float invxform[6];
+    NVGscissor scissor = state->scissor;
+    //scissor and paint need to be inverse transformed.
+    nvgTransformInverse(invxform, xform);
+    nvgTransformMultiply(scissor.xform, invxform);
+    nvgTransformMultiply(strokePaint.xform, invxform);
+
     if (strokeWidth < ctx->fringeWidth) {
         // If the stroke width is less than pixel size, use alpha to emulate coverage.
         // Since coverage is area, scale by alpha*alpha.
@@ -2722,25 +2732,25 @@ void nvgStroke(NVGcontext* ctx)
         strokePaint.outerColor.a *= alpha*alpha;
         strokeWidth = ctx->fringeWidth;
     }
-    
+
     // Apply global alpha
     strokePaint.innerColor.a *= state->alpha;
     strokePaint.outerColor.a *= state->alpha;
 
     if(ctx->isCached)
     {
-        ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
+        ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, state->compositeOperation, &scissor, xform, ctx->fringeWidth,
                                  strokeWidth, state->lineStyle, ctx->currentLineLength, ctx->cache->cachedPaths, ctx->cache->npaths);
-        
+
         for (i = 0; i < ctx->cache->npaths; i++) {
             path = &ctx->cache->paths[i];
             ctx->strokeTriCount += path->nstroke-2;
             ctx->drawCallCount++;
         }
-        
+
         return;
     }
-    
+
 	nvg__flattenPaths(ctx);
 
 	if (ctx->params.edgeAntiAlias && state->shapeAntiAlias && (state->lineStyle <= 1 || state->lineStyle == 5))
@@ -2748,8 +2758,7 @@ void nvgStroke(NVGcontext* ctx)
 	else
 		nvg__expandStroke(ctx, strokeWidth*0.5f, 0.0f, state->lineCap, state->lineJoin, state->lineStyle, state->miterLimit);
 
-	ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-							 strokeWidth, state->lineStyle, ctx->currentLineLength, ctx->cache->paths, ctx->cache->npaths);
+	ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, state->compositeOperation, &scissor, xform, ctx->fringeWidth, strokeWidth, state->lineStyle, ctx->currentLineLength, ctx->cache->paths, ctx->cache->npaths);
 
 	// Count triangles
 	for (i = 0; i < ctx->cache->npaths; i++) {
@@ -2762,15 +2771,15 @@ void nvgStroke(NVGcontext* ctx)
 void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
 {
     nvg__clearPathCache(ctx);
-    
+
     NVGpaint p;
     memset(&p, 0, sizeof(p));
-    
+
     float edgeX = x - 0.5f;
     float edgeY = y - 0.5f;
     float edgeRight = x + w + 1.0f;
     float edgeBottom = y + h + 1.0f;
-    
+
     nvg__addPath(ctx);
     NVGpath* path = nvg__lastPath(ctx);
     nvg__addPoint(ctx, edgeX, edgeY, NVG_PT_CORNER);
@@ -2778,13 +2787,13 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
     nvg__addPoint(ctx, edgeRight, edgeBottom, NVG_PT_CORNER);
     nvg__addPoint(ctx, edgeRight, edgeY, NVG_PT_CORNER);
     path->closed = 1;
-    
+
     NVGstate* state = nvg__getState(ctx);
     NVGvertex vertices[4];
-    
+
     for(int i = 0; i < 4; i++)
     {
-        nvgTransformPoint(&ctx->cache->points[i].x, &ctx->cache->points[i].y, state->xform, ctx->cache->points[i].x, ctx->cache->points[i].y);
+        //nvgTransformPoint(&ctx->cache->points[i].x, &ctx->cache->points[i].y, state->xform, ctx->cache->points[i].x, ctx->cache->points[i].y);
         nvg__vset(&vertices[i], ctx->cache->points[i].x, ctx->cache->points[i].y, 0.5f, 1, 0, 0);
     }
 
@@ -2792,7 +2801,7 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
     ctx->cache->bounds[1] = vertices[0].y;
     ctx->cache->bounds[2] = vertices[2].x;
     ctx->cache->bounds[3] = vertices[2].y;
-    
+
     path->fill = vertices;
     path->nfill = 4;
 
@@ -2811,11 +2820,11 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
     p.outerColor = ocol;
     p.extent[0] = w * 0.5f;
     p.extent[1] = h * 0.5f;
-    
+
     nvgTransformMultiply(p.xform, state->xform);
-    
-    ctx->params.renderFill(ctx->params.userPtr, &p, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-                           ctx->cache->bounds, path, 1);
+
+    // TODO: this is definitely incorrect!
+    ctx->params.renderFill(ctx->params.userPtr, &p, state->compositeOperation, &state->scissor, p.xform, ctx->fringeWidth, ctx->cache->bounds, path, 1);
 
     for (int i = 0; i < ctx->cache->npaths; i++) {
         path = &ctx->cache->paths[i];
@@ -2986,8 +2995,16 @@ static void nvg__renderText(NVGcontext* ctx, NVGvertex* verts, int nverts)
 	// Apply global alpha
 	paint.innerColor.a *= state->alpha;
 	paint.outerColor.a *= state->alpha;
+    
+    const float * xform = state->xform;
+    float invxform[6];
+    NVGscissor scissor = state->scissor;
 
-	ctx->params.renderTriangles(ctx->params.userPtr, &paint, state->compositeOperation, &state->scissor, verts, nverts, ctx->fringeWidth);
+    nvgTransformInverse(invxform, xform);
+    nvgTransformMultiply(scissor.xform, invxform);
+    //nvgTransformMultiply(paint.xform, invxform);
+
+	ctx->params.renderTriangles(ctx->params.userPtr, &paint, state->compositeOperation, &scissor, xform, verts, nverts, ctx->fringeWidth);
 
 	ctx->drawCallCount++;
 	ctx->textTriCount += nverts/3;
@@ -3051,10 +3068,11 @@ float nvgText(NVGcontext* ctx, float x, float y, const char* string, const char*
 			tmp = q.t0; q.t0 = q.t1; q.t1 = tmp;
 		}
 		// Transform corners.
-		nvgTransformPoint(&c[0],&c[1], state->xform, q.x0*invscale + x, q.y0*invscale + y);
-		nvgTransformPoint(&c[2],&c[3], state->xform, q.x1*invscale + x, q.y0*invscale + y);
-		nvgTransformPoint(&c[4],&c[5], state->xform, q.x1*invscale + x, q.y1*invscale + y);
-		nvgTransformPoint(&c[6],&c[7], state->xform, q.x0*invscale + x, q.y1*invscale + y);
+        c[0] = q.x0*invscale; c[1] = q.y0*invscale;
+        c[2] = q.x1*invscale; c[3] = q.y0*invscale;
+        c[4] = q.x1*invscale; c[5] = q.y1*invscale;
+        c[6] = q.x0*invscale; c[7] = q.y1*invscale;
+        
 		// Create triangles
 		if (nverts+6 <= cverts) {
 			nvg__vset(&verts[nverts], c[0], c[1], q.s0, q.t0, 0, 0); nverts++;
@@ -3493,7 +3511,7 @@ void nvgTextMetrics(NVGcontext* ctx, float* ascender, float* descender, float* l
 	if (lineh != NULL)
 		*lineh *= invscale;
 }
-  
+
 } // extern "C"
 
 // vim: ft=c nu noet ts=4
