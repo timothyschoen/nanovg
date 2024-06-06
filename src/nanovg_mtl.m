@@ -253,7 +253,8 @@ typedef struct MNVGfragUniforms MNVGfragUniforms;
                          scissor:(NVGscissor*)scissor
                            verts:(const NVGvertex*)verts
                           nverts:(int)nverts
-                          fringe:(float)fringe;
+                          fringe:(float)fringe
+                          text:(int)text;
 
 - (int)renderUpdateTextureWithImage:(int)image
                                   x:(int)x
@@ -421,14 +422,15 @@ static void mtlnvg__renderStroke(void* uptr, NVGpaint* paint,
 
 static void mtlnvg__renderTriangles(
     void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation,
-    NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe) {
+    NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe, int text) {
   MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
   [mtl renderTrianglesWithPaint:paint
              compositeOperation:compositeOperation
                         scissor:scissor
                           verts:verts
                          nverts:nverts
-                         fringe:fringe];
+                         fringe:fringe
+                         text:text];
 }
 
 static int mtlnvg__renderUpdateTexture(void* uptr, int image, int x, int y,
@@ -1680,7 +1682,8 @@ error:
                          scissor:(NVGscissor*)scissor
                            verts:(const NVGvertex*)verts
                           nverts:(int)nverts
-                          fringe:(float)fringe {
+                          fringe:(float)fringe
+                          text:(int)text {
   MNVGcall* call = [self allocCall];
   MNVGfragUniforms* frag;
 
@@ -1710,7 +1713,10 @@ error:
                     lineStyle:NVG_LINE_SOLID
                     lineLength:0.0f
                   strokeThr:-1.0f];
-  frag->type = MNVG_SHADER_IMG;
+
+    if(text) {
+        frag->type = MNVG_SHADER_IMG;
+    }
 
   return;
 

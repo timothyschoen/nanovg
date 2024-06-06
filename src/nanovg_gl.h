@@ -1675,7 +1675,7 @@ error:
 }
 
 static void glnvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor,
-								   const NVGvertex* verts, int nverts, float fringe)
+								   const NVGvertex* verts, int nverts, float fringe, int text)
 {
 	GLNVGcontext* gl = (GLNVGcontext*)uptr;
 	GLNVGcall* call = glnvg__allocCall(gl);
@@ -1699,7 +1699,9 @@ static void glnvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOper
 	if (call->uniformOffset == -1) goto error;
 	frag = nvg__fragUniformPtr(gl, call->uniformOffset);
 	glnvg__convertPaint(gl, frag, paint, scissor, 1.0f, fringe, -1.0f, 0.0f, 0);
-	frag->type = NSVG_SHADER_IMG;
+	if(text) {
+	   frag->type = NSVG_SHADER_IMG;
+	}
 
 	return;
 

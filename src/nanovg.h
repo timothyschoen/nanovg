@@ -491,7 +491,15 @@ NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patt
 // Creates a double-stroked line with rounded caps (used for plugdata connection cords)
 NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol);
 
+// Fills a rectangle directly, bypassing paths system
+void nvgFillRect(NVGcontext* ctx, float x1, float y1, float w, float h);
+
+// Strokes a rectangle directly, bypassing paths system
+void nvgStrokeRect(NVGcontext* ctx, float x1, float y1, float w, float h);
+
+// Fills and strokes a rounded rectangle using rounded rectangle shader, also bypassing paths system
 void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius);
+
 //
 // Scissoring
 //
@@ -785,7 +793,7 @@ struct NVGparams {
 	void (*renderFlush)(void* uptr);
 	void (*renderFill)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, const float* bounds, const NVGpath* paths, int npaths);
 	void (*renderStroke)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths, int npaths);
-	void (*renderTriangles)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe);
+	void (*renderTriangles)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe, int text);
 	void (*renderDelete)(void* uptr);
 };
 typedef struct NVGparams NVGparams;

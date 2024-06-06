@@ -152,10 +152,12 @@ struct NVGcontext {
 	struct FONScontext* fs;
 	int fontImages[NVG_MAX_FONTIMAGES];
 	int fontImageIdx;
+#if DEBUG
 	int drawCallCount;
 	int fillTriCount;
 	int strokeTriCount;
 	int textTriCount;
+#endif
     struct NVGscissorBounds scissor;
     int isCached;
     int numCached;
@@ -426,11 +428,13 @@ void nvgBeginFrame(NVGcontext* ctx, float windowWidth, float windowHeight, float
 
 	ctx->params.renderViewport(ctx->params.userPtr, windowWidth, windowHeight, devicePixelRatio);
 
+#if DEBUG
 	ctx->drawCallCount = 0;
 	ctx->fillTriCount = 0;
 	ctx->strokeTriCount = 0;
 	ctx->textTriCount = 0;
     ctx->isCached = 0;
+#endif
 }
 
 void nvgCancelFrame(NVGcontext* ctx)
@@ -2478,6 +2482,7 @@ void nvgRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, float r
 	nvgRoundedRectVarying(ctx, x, y, w, h, r, r, r, r);
 }
 
+
 void nvgRoundedRectVarying(NVGcontext* ctx, float x, float y, float w, float h, float radTopLeft, float radTopRight, float radBottomRight, float radBottomLeft)
 {
 	if(radTopLeft < 0.1f && radTopRight < 0.1f && radBottomRight < 0.1f && radBottomLeft < 0.1f) {
@@ -2676,9 +2681,11 @@ void nvgFill(NVGcontext* ctx)
         // Count triangles
         for (i = 0; i < ctx->cache->npaths; i++) {
             path = &ctx->cache->paths[i];
+#if DEBUG
             ctx->fillTriCount += path->nfill-2;
             ctx->fillTriCount += path->nstroke-2;
             ctx->drawCallCount += 2;
+#endif
         }
         return;
     }
@@ -2699,9 +2706,11 @@ void nvgFill(NVGcontext* ctx)
 	// Count triangles
 	for (i = 0; i < ctx->cache->npaths; i++) {
 		path = &ctx->cache->paths[i];
+#if DEBUG
 		ctx->fillTriCount += path->nfill-2;
 		ctx->fillTriCount += path->nstroke-2;
 		ctx->drawCallCount += 2;
+#endif
 	}
 }
   
@@ -2734,8 +2743,10 @@ void nvgStroke(NVGcontext* ctx)
         
         for (i = 0; i < ctx->cache->npaths; i++) {
             path = &ctx->cache->paths[i];
+#if DEBUG
             ctx->strokeTriCount += path->nstroke-2;
             ctx->drawCallCount++;
+#endif
         }
         
         return;
@@ -2754,53 +2765,116 @@ void nvgStroke(NVGcontext* ctx)
 	// Count triangles
 	for (i = 0; i < ctx->cache->npaths; i++) {
 		path = &ctx->cache->paths[i];
+#if DEBUG
 		ctx->strokeTriCount += path->nstroke-2;
 		ctx->drawCallCount++;
+#endif
 	}
+}
+
+static void nvg__renderTrianglesSimple(NVGcontext* ctx, const float* bounds,
+                                       const NVGvertex* verts, int nverts, const NVGpaint* fillPaint)
+{
+    NVGstate* state = nvg__getState(ctx);
+    
+    NVGpaint paint = *fillPaint;
+    NVGscissor scissor = state->scissor;
+
+    // Apply global alpha
+    paint.innerColor.a *= state->alpha;
+    paint.outerColor.a *= state->alpha;
+
+    ctx->params.renderTriangles(ctx->params.userPtr, &paint, state->compositeOperation, &scissor, verts, nverts, ctx->fringeWidth, 0);
+
+#if DEBUG
+    ctx->drawCallCount++;
+    ctx->textTriCount += nverts/3;
+#endif
+}
+
+void nvgFillRect(NVGcontext* ctx, float x1, float y1, float w, float h)
+{
+    NVGstate* state = nvg__getState(ctx);
+    
+    float x2 = x1 + w, y2 = y1 + h;
+    
+    assert(w >= 0 && h >= 0);
+
+    nvgBeginPath(ctx);
+    nvgTransformPoint(&x1, &y1, state->xform, x1, y1);
+    nvgTransformPoint(&x2, &y2, state->xform, x2, y2);
+
+    const float t[] = { 0.5f, 1.0f, 0.5f, 1.0f };
+    const float bounds[] = {x1, y1, x2, y2};
+
+    NVGvertex verts[] =
+    {
+        {x1, y1, t[0], t[1]},
+        {x2, y2, t[2], t[3]},
+        {x2, y1, t[2], t[1]},
+
+        {x1, y1, t[0], t[1]},
+        {x1, y2, t[0], t[3]},
+        {x2, y2, t[2], t[3]}
+    };
+
+    nvg__renderTrianglesSimple(ctx, bounds, verts, NVG_COUNTOF(verts), &state->fill);
+}
+
+
+void nvgStrokeRect(NVGcontext* ctx, float x1, float y1, float w, float h)
+{
+    NVGstate* state = nvg__getState(ctx);
+
+    float x2 = x1 + w, y2 = y1 + h;
+    
+    assert(w >= 0 && h >= 0);
+
+    nvgBeginPath(ctx);
+    nvgTransformPoint(&x1, &y1, state->xform, x1, y1);
+    nvgTransformPoint(&x2, &y2, state->xform, x2, y2);
+    
+    // TODO: this still has some aliasing problems!
+    float l = (state->strokeWidth + ctx->fringeWidth) * nvg__getAverageScale(state->xform);
+    
+    const float bounds[] = {x1, y1, x2, y2};
+    
+    const float t[] = { 0.5f, 1.0f, 0.5f, 1.0f };
+    const float sx = l / w, sy = l / h;
+
+    const float iV[] = { x1+l, y1+l, x2-l, y2-l };
+    const float iT[] = { t[0]+sx, t[1]+sy, t[2]-sx, t[3]-sy };
+
+    NVGvertex verts[] =
+    {
+        //top
+        {x1, y1, t[0], t[1]}, {iV[2], iV[1], iT[2], iT[1]}, {x2, y1, t[2], t[1]},
+        {x1, y1, t[0], t[1]}, {iV[0], iV[1], iT[0], iT[1]}, {iV[2], iV[1], iT[2], iT[1]},
+        //right
+        {iV[2], iV[1], iT[2], iT[1]}, {x2, y2, t[2], t[3]}, {x2, y1, t[2], t[1]},
+        {iV[2], iV[1], iT[2], iT[1]}, {iV[2], iV[3], iT[2], iT[3]},    {x2, y2, t[2], t[3]},
+        //bottom
+        {iV[0], iV[3], iT[0], iT[3]}, {x2, y2, t[2], t[3]}, {iV[2], iV[3], iT[2], iT[3]},
+        {iV[0], iV[3], iT[0], iT[3]}, {x1, y2, t[0], t[3]}, {x2, y2, t[2], t[3]},
+        //left
+        {x1, y1, t[0], t[1]}, {iV[0], iV[3], iT[0], iT[3]},    {iV[0], iV[1], iT[0], iT[1]},
+        {x1, y1, t[0], t[1]}, {x1, y2, t[0], t[3]}, {iV[0], iV[3], iT[0], iT[3]}
+    };
+    
+    nvg__renderTrianglesSimple(ctx, bounds, verts, NVG_COUNTOF(verts), &state->stroke);
 }
 
 void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
 {
-    nvg__clearPathCache(ctx);
+    NVGstate* state = nvg__getState(ctx);
+    
+    x -= 0.5f;
+    y -= 0.5f;
+    w += 1.0f;
+    h += 1.0f;
     
     NVGpaint p;
     memset(&p, 0, sizeof(p));
-    
-    float edgeX = x - 0.5f;
-    float edgeY = y - 0.5f;
-    float edgeRight = x + w + 1.0f;
-    float edgeBottom = y + h + 1.0f;
-    
-    nvg__addPath(ctx);
-    NVGpath* path = nvg__lastPath(ctx);
-    nvg__addPoint(ctx, edgeX, edgeY, NVG_PT_CORNER);
-    nvg__addPoint(ctx, edgeX, edgeBottom, NVG_PT_CORNER);
-    nvg__addPoint(ctx, edgeRight, edgeBottom, NVG_PT_CORNER);
-    nvg__addPoint(ctx, edgeRight, edgeY, NVG_PT_CORNER);
-    path->closed = 1;
-    
-    NVGstate* state = nvg__getState(ctx);
-    NVGvertex vertices[4];
-    
-    for(int i = 0; i < 4; i++)
-    {
-        nvgTransformPoint(&ctx->cache->points[i].x, &ctx->cache->points[i].y, state->xform, ctx->cache->points[i].x, ctx->cache->points[i].y);
-        nvg__vset(&vertices[i], ctx->cache->points[i].x, ctx->cache->points[i].y, 0.5f, 1, 0, 0);
-    }
-
-    ctx->cache->bounds[0] = vertices[0].x;
-    ctx->cache->bounds[1] = vertices[0].y;
-    ctx->cache->bounds[2] = vertices[2].x;
-    ctx->cache->bounds[3] = vertices[2].y;
-    
-    path->fill = vertices;
-    path->nfill = 4;
-
-    x += 0.5f;
-    y += 0.5f;
-    w -= 1.0f;
-    h -= 1.0f;
-
     nvgTransformIdentity(p.xform);
     p.xform[4] = x+w*0.5f;
     p.xform[5] = y+h*0.5f;
@@ -2809,19 +2883,11 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
     p.radius = radius;
     p.innerColor = icol;
     p.outerColor = ocol;
-    p.extent[0] = w * 0.5f;
-    p.extent[1] = h * 0.5f;
+    p.extent[0] = (w * 0.5f) - 1.0f;
+    p.extent[1] = (h * 0.5f) - 1.0f;
     
-    nvgTransformMultiply(p.xform, state->xform);
-    
-    ctx->params.renderFill(ctx->params.userPtr, &p, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-                           ctx->cache->bounds, path, 1);
-
-    for (int i = 0; i < ctx->cache->npaths; i++) {
-        path = &ctx->cache->paths[i];
-        ctx->fillTriCount += path->nfill-2;
-        ctx->drawCallCount += 2;
-    }
+    nvgFillPaint(ctx, p);
+    nvgFillRect(ctx, x, y, w, h);
 }
 
 // Add fonts
@@ -2987,10 +3053,12 @@ static void nvg__renderText(NVGcontext* ctx, NVGvertex* verts, int nverts)
 	paint.innerColor.a *= state->alpha;
 	paint.outerColor.a *= state->alpha;
 
-	ctx->params.renderTriangles(ctx->params.userPtr, &paint, state->compositeOperation, &state->scissor, verts, nverts, ctx->fringeWidth);
+	ctx->params.renderTriangles(ctx->params.userPtr, &paint, state->compositeOperation, &state->scissor, verts, nverts, ctx->fringeWidth, 1);
 
+#if DEBUG
 	ctx->drawCallCount++;
 	ctx->textTriCount += nverts/3;
+#endif
 }
 
 static int nvg__isTransformFlipped(const float *xform)
