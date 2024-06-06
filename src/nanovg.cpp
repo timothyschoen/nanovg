@@ -2868,10 +2868,10 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
 {
     NVGstate* state = nvg__getState(ctx);
     
-    x -= 0.5f;
-    y -= 0.5f;
-    w += 1.0f;
-    h += 1.0f;
+    x -= 0.75f;
+    y -= 0.75f;
+    w += 1.5f;
+    h += 1.5f;
     
     NVGpaint p;
     memset(&p, 0, sizeof(p));
@@ -2883,8 +2883,8 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
     p.radius = radius;
     p.innerColor = icol;
     p.outerColor = ocol;
-    p.extent[0] = (w * 0.5f) - 1.0f;
-    p.extent[1] = (h * 0.5f) - 1.0f;
+    p.extent[0] = (w * 0.5f) - 1.5f;
+    p.extent[1] = (h * 0.5f) - 1.5f;
     
     nvgFillPaint(ctx, p);
     nvgFillRect(ctx, x, y, w, h);
