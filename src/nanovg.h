@@ -23,6 +23,8 @@
 extern "C" {
 #endif
 
+#define NVG_NOTUSED(v) for (;;) { (void)(1 ? (void)0 : ( (void)(v) ) ); break; }
+
 #define NVG_PI 3.14159265358979323846264338327f
 
 #ifdef _MSC_VER
@@ -52,7 +54,7 @@ extern "C" {
   #define nvgBindFramebuffer(fb) mnvgBindFramebuffer(fb)
   #define nvgCreateFramebuffer(ctx, w, h, flags) mnvgCreateFramebuffer(ctx, w, h, flags)
   #define nvgDeleteFramebuffer(fb) mnvgDeleteFramebuffer(fb)
-  #define nvgViewport(x, y, w, h)
+  #define nvgViewport(x, y, w, h) NVG_NOTUSED(x); NVG_NOTUSED(y); NVG_NOTUSED(w); NVG_NOTUSED(h);
   #define nvgClear(nvg) mnvgClearWithColor(nvg, nvgRGBA(0, 0, 0, 0))
   #define NVGframebuffer MNVGframebuffer
 #endif
@@ -810,8 +812,6 @@ void nvgDebugDumpPathCache(NVGcontext* ctx);
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
-
-#define NVG_NOTUSED(v) for (;;) { (void)(1 ? (void)0 : ( (void)(v) ) ); break; }
 
 #ifdef __cplusplus
 }
