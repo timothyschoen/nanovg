@@ -2669,7 +2669,6 @@ int nvgLoadPath(NVGcontext* ctx, uint32_t pathId)
 void nvgFill(NVGcontext* ctx)
 {
 	NVGstate* state = nvg__getState(ctx);
-	const NVGpath* path;
 	NVGpaint fillPaint = state->fill;
 	int i;
     
@@ -2679,14 +2678,14 @@ void nvgFill(NVGcontext* ctx)
                                ctx->cache->bounds, ctx->cache->cachedPaths, ctx->cache->npaths);
             
         // Count triangles
-        for (i = 0; i < ctx->cache->npaths; i++) {
-            path = &ctx->cache->paths[i];
 #if DEBUG
+        for (i = 0; i < ctx->cache->npaths; i++) {
+            const NVGpath* path = &ctx->cache->paths[i];
             ctx->fillTriCount += path->nfill-2;
             ctx->fillTriCount += path->nstroke-2;
             ctx->drawCallCount += 2;
-#endif
         }
+#endif
         return;
     }
 
@@ -2704,14 +2703,14 @@ void nvgFill(NVGcontext* ctx)
 						   ctx->cache->bounds, ctx->cache->paths, ctx->cache->npaths);
     
 	// Count triangles
-	for (i = 0; i < ctx->cache->npaths; i++) {
-		path = &ctx->cache->paths[i];
 #if DEBUG
+	for (i = 0; i < ctx->cache->npaths; i++) {
+        const NVGpath* path = &ctx->cache->paths[i];
 		ctx->fillTriCount += path->nfill-2;
 		ctx->fillTriCount += path->nstroke-2;
 		ctx->drawCallCount += 2;
-#endif
 	}
+#endif
 }
   
 void nvgStroke(NVGcontext* ctx)
@@ -2720,7 +2719,6 @@ void nvgStroke(NVGcontext* ctx)
 	const float scale = nvg__getAverageScale(state->xform);
 	float strokeWidth = nvg__clampf(state->strokeWidth * scale, 0.0f, 1000.0f);
 	NVGpaint strokePaint = state->stroke;
-	const NVGpath* path;
 	int i;
     
     if (strokeWidth < ctx->fringeWidth) {
@@ -2741,13 +2739,13 @@ void nvgStroke(NVGcontext* ctx)
         ctx->params.renderStroke(ctx->params.userPtr, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
                                  strokeWidth, state->lineStyle, ctx->currentLineLength, ctx->cache->cachedPaths, ctx->cache->npaths);
         
-        for (i = 0; i < ctx->cache->npaths; i++) {
-            path = &ctx->cache->paths[i];
 #if DEBUG
+        for (i = 0; i < ctx->cache->npaths; i++) {
+            const NVGpath* path = &ctx->cache->paths[i];
             ctx->strokeTriCount += path->nstroke-2;
             ctx->drawCallCount++;
-#endif
         }
+#endif
         
         return;
     }
@@ -2763,13 +2761,13 @@ void nvgStroke(NVGcontext* ctx)
 							 strokeWidth, state->lineStyle, ctx->currentLineLength, ctx->cache->paths, ctx->cache->npaths);
 
 	// Count triangles
-	for (i = 0; i < ctx->cache->npaths; i++) {
-		path = &ctx->cache->paths[i];
 #if DEBUG
+	for (i = 0; i < ctx->cache->npaths; i++) {
+		const NVGPath* path = &ctx->cache->paths[i];
 		ctx->strokeTriCount += path->nstroke-2;
 		ctx->drawCallCount++;
-#endif
 	}
+#endif
 }
 
 static void nvg__renderTrianglesSimple(NVGcontext* ctx, const float* bounds,
@@ -2866,8 +2864,6 @@ void nvgStrokeRect(NVGcontext* ctx, float x1, float y1, float w, float h)
 
 void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
 {
-    NVGstate* state = nvg__getState(ctx);
-    
     x -= 0.75f;
     y -= 0.75f;
     w += 1.5f;
