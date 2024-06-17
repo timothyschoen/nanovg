@@ -25,6 +25,8 @@ set_target_properties(
 )
 endif()
 
+set_target_properties(nanovg PROPERTIES CXX_VISIBILITY_PRESET hidden)
+
 install(TARGETS ${PROJECT_NAME}
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib
