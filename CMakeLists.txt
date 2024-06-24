@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.1.0)
+cmake_policy(SET CMP0063 NEW)
 
 set(PROJECT_NAME nanovg)
 
