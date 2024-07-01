@@ -518,11 +518,12 @@ NVGcontext* nvgCreateMTL(void* metalLayer, int flags) {
   params.edgeAntiAlias = flags & NVG_ANTIALIAS ? 1 : 0;
 
   mtl.flags = flags;
-#if TARGET_OS_SIMULATOR
-    mtl.fragSize = 256;
+#if __aarch64__
+    mtl.fragSize = sizeof(MNVGfragUniforms);
 #else
-  mtl.fragSize = sizeof(MNVGfragUniforms);
+    mtl.fragSize = 256;
 #endif
+    
   mtl.indexSize = 4;  // MTLIndexTypeUInt32
   mtl.metalLayer = (__bridge CAMetalLayer*)metalLayer;
 
