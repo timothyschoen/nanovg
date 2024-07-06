@@ -653,9 +653,9 @@ static int glnvg__renderCreate(void* uptr)
 		// Calculate scissor path with rounded corners
 		float roundedScissorMask(vec2 p, float rad) {
 			vec2 sc = (abs((scissorMat * vec3(p,1.0f)).xy));
-			float sc2 = sdroundrect(sc, scissorExt + vec2(0.5f), rad);
+			float sc2 = sdroundrect(sc, scissorExt + vec2(0.5f), rad) - 0.04f;
             float sc3 = fwidth(sc2) * 0.5;
-			return clamp(inverseLerp(sc3, -sc3, sc2), 0.0, 1.0);
+			return clamp(inverseLerp(sc3, -sc3, sc2), 0.0f, 1.0f);
 		}
 		float glow(vec2 uv){
 			return smoothstep(0.0f, 1.0f, 1.0f - 2.0f * abs(uv.x));
@@ -715,14 +715,14 @@ static int glnvg__renderCreate(void* uptr)
 			if (type == 5) { //rounded rect fill+stroke
 				// Calculate distance to edge.
 				vec2 pt = (paintMat * vec3(fpos,1.0f)).xy;
-                float oD = sdroundrect(pt, extent + vec2(1.5f), radius);
+                float oD = sdroundrect(pt, extent + vec2(1.5f), radius) - 0.04f;
 				float outerD = fwidth(oD) * 0.5f;
-				float iD = sdroundrect(pt, extent + vec2(0.5f), radius - 1.0f);
+				float iD = sdroundrect(pt, extent + vec2(0.5f), radius - 1.0f) - 0.04f;
                 float innerD = fwidth(iD) * 0.5f;
 				vec2 dx = dFdx(pt);
 				vec2 dy = dFdy(pt);
-				float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0, 1.0);
-                float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0, 1.0);
+				float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
+                float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
 				result = vec4(mix(outerCol.rgba, innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
 		#ifdef NANOVG_GL3
 				outColor = result;
