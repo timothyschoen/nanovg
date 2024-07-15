@@ -2864,10 +2864,10 @@ void nvgStrokeRect(NVGcontext* ctx, float x1, float y1, float w, float h)
 
 void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
 {
-    x -= 0.75f;
-    y -= 0.75f;
-    w += 1.5f;
-    h += 1.5f;
+    x -= 0.5f;
+    y -= 0.5f;
+    w += 1.0f;
+    h += 1.0f;
     
     NVGpaint p;
     memset(&p, 0, sizeof(p));

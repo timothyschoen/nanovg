@@ -82,11 +82,10 @@ float scissorMask(constant Uniforms& uniforms, float2 p) {
 }
 
 float sdroundrect(float2 pt, float2 ext, float rad) {
-	float2 ext2 = ext - float2(rad);
+	float2 ext2 = ext - float2(rad, rad);
 	float2 d = abs(pt) - ext2;
 	return min(max(d.x,d.y),0.0) + length(max(d,0.0)) - rad;
 }
-
 
 float strokeMask(constant Uniforms& uniforms, float2 ftcoord) {
   return min(1.0, (1.0 - abs(ftcoord.x * 2.0 - 1.0)) * uniforms.strokeMult) * min(1.0, ftcoord.y);
@@ -212,27 +211,25 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     return color * uniforms.innerCol;
   }
 
-  if (uniforms.type == 4) {  // MNVG_SHADER_FAST_ROUNDEDRECT
-    float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
-    float outerD = clamp((sdroundrect(pt, uniforms.extent + float2(0.5), uniforms.radius) + 1.5 * 0.5) / 1.5, 0.0, 1.0);
-    float innerD = clamp((sdroundrect(pt, uniforms.extent - float2(0.5), uniforms.radius - 1.0) + 1.5 * 0.5) / 1.5, 0.0, 1.0);
-    float2 dx = dfdx(pt);
-    float2 dy = dfdy(pt);
-    float alias = 0.5 * length(max(abs(dx), abs(dy)));
-    float outerRoundedRectAlpha = 1.0 - (smoothstep(0.0, alias, outerD) * smoothstep(1.0 - alias, 1.0, outerD));
-    float innerRoundedRectAlpha = 1.0 - (smoothstep(0.0, alias, innerD) * smoothstep(1.0 - alias, 1.0, innerD));
-    float4 result = float4(mix(uniforms.outerCol.rgba, uniforms.innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
-    return result;
-  }
-
   float strokeAlpha = strokeMask(uniforms, in.ftcoord);
   if (uniforms.lineStyle > 1 && strokeAlpha < uniforms.strokeThr) {
      discard_fragment();
   }
-
   if(uniforms.lineStyle == 2) strokeAlpha*=dashed(in.uv, uniforms.radius, uniforms.offset);
   if(uniforms.lineStyle == 3) strokeAlpha*=dotted(in.uv);
   if(uniforms.lineStyle == 4) strokeAlpha*=glow(in.uv);
+
+  if (uniforms.type == 4) {  // MNVG_SHADER_FAST_ROUNDEDRECT
+    float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
+    float oD = sdroundrect(pt, uniforms.extent + float2(1.5f), uniforms.radius) - 0.04f;
+	float outerD = fwidth(oD) * 0.5f;
+	float iD = sdroundrect(pt, uniforms.extent + float2(0.5f), uniforms.radius - 1.0f) - 0.04f;
+    float innerD = fwidth(iD) * 0.5f;
+	float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
+    float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
+    float4 result = float4(mix(uniforms.outerCol.rgba, uniforms.innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
+    return result * strokeAlpha;
+  }
 
   if(uniforms.type == 6) { // MNVG_SHADER_DOUBLE_STROKE
     float colorMix = 1.0 - 2.15 * abs(in.uv.x);
