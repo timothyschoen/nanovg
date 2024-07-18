@@ -653,7 +653,7 @@ static int glnvg__renderCreate(void* uptr)
 		// Calculate scissor path with rounded corners
 		float roundedScissorMask(vec2 p, float rad) {
 			vec2 sc = (abs((scissorMat * vec3(p,1.0f)).xy));
-			float sc2 = sdroundrect(sc, scissorExt + vec2(0.5f), rad) - 0.04f;
+			float sc2 = sdroundrect(sc, scissorExt, rad) - 0.04f;
             float sc3 = fwidth(sc2) * 0.5;
 			return clamp(inverseLerp(sc3, -sc3, sc2), 0.0f, 1.0f);
 		}
@@ -715,9 +715,9 @@ static int glnvg__renderCreate(void* uptr)
 			if (type == 5) { //rounded rect fill+stroke
 				// Calculate distance to edge.
 				vec2 pt = (paintMat * vec3(fpos,1.0f)).xy;
-                float oD = sdroundrect(pt, extent + vec2(1.5f), radius) - 0.04f;
+                float oD = sdroundrect(pt, extent, radius) - 0.04f;
 				float outerD = fwidth(oD) * 0.5f;
-				float iD = sdroundrect(pt, extent + vec2(0.5f), radius - 1.0f) - 0.04f;
+				float iD = sdroundrect(pt, extent - vec2(1.0f), radius - 1.0f) - 0.04f;
                 float innerD = fwidth(iD) * 0.5f;
 				vec2 dx = dFdx(pt);
 				vec2 dy = dFdy(pt);
