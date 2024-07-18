@@ -68,7 +68,7 @@ float inverseLerp(float a, float b, float value) {
 
 float roundedScissorMask(constant Uniforms& uniforms, float2 p, float rad) {
   float2 sc = (abs((uniforms.scissorMat * float3(p,1.0f)).xy));
-  float sc2 = sdroundrect(sc, uniforms.scissorExt + float2(0.5f), rad) - 0.04f;
+  float sc2 = sdroundrect(sc, uniforms.scissorExt, rad) - 0.04f;
   float sc3 = fwidth(sc2) * 0.5;
   return clamp(inverseLerp(sc3, -sc3, sc2), 0.0f, 1.0f);
 }
@@ -156,9 +156,9 @@ fragment float4 fragmentShader(RasterizerData in [[stage_in]],
 
   if (uniforms.type == 4) {  // MNVG_SHADER_FAST_ROUNDEDRECT
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
-    float oD = sdroundrect(pt, uniforms.extent + float2(1.5f), uniforms.radius) - 0.04f;
+    float oD = sdroundrect(pt, uniforms.extent, uniforms.radius) - 0.04f;
 	float outerD = fwidth(oD) * 0.5f;
-	float iD = sdroundrect(pt, uniforms.extent + float2(0.5f), uniforms.radius - 1.0f) - 0.04f;
+	float iD = sdroundrect(pt, uniforms.extent - float2(1.0f), uniforms.radius - 1.0f) - 0.04f;
     float innerD = fwidth(iD) * 0.5f;
 	float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
     float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
@@ -221,9 +221,9 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
 
   if (uniforms.type == 4) {  // MNVG_SHADER_FAST_ROUNDEDRECT
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
-    float oD = sdroundrect(pt, uniforms.extent + float2(1.5f), uniforms.radius) - 0.04f;
+    float oD = sdroundrect(pt, uniforms.extent, uniforms.radius) - 0.04f;
 	float outerD = fwidth(oD) * 0.5f;
-	float iD = sdroundrect(pt, uniforms.extent + float2(0.5f), uniforms.radius - 1.0f) - 0.04f;
+	float iD = sdroundrect(pt, uniforms.extent - float2(1.0f), uniforms.radius - 1.0f) - 0.04f;
     float innerD = fwidth(iD) * 0.5f;
 	float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
     float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
