@@ -26,8 +26,8 @@
 #include <unordered_map>
 #include <vector>
 #include <iostream>
-
 #include "nanovg.h"
+
 #define FONTSTASH_IMPLEMENTATION
 #include "fontstash.h"
 
@@ -1451,10 +1451,11 @@ static void nvg__vset(NVGvertex* vtx, float x, float y, float u, float v, float 
 {
 	vtx->x = x;
 	vtx->y = y;
-	vtx->u = u;
-	vtx->v = v;
-	vtx->s = s; // Normalized line width [-1, 1]
-	vtx->t = t; // Path length normalized by stroke width
+    
+	vtx->u = fp16_ieee_from_fp32_value(u);
+	vtx->v = fp16_ieee_from_fp32_value(v);
+	vtx->s = fp16_ieee_from_fp32_value(s); // Normalized line width [-1, 1]
+	vtx->t = fp16_ieee_from_fp32_value(t); // Path length normalized by stroke width
 }
 
 // Adaptive forward differencing for bezier tesselation.
@@ -2802,7 +2803,7 @@ void nvgFillRect(NVGcontext* ctx, float x1, float y1, float w, float h)
     nvgTransformPoint(&x1, &y1, state->xform, x1, y1);
     nvgTransformPoint(&x2, &y2, state->xform, x2, y2);
 
-    const float t[] = { 0.5f, 1.0f, 0.5f, 1.0f };
+    const uint16_t t[] = { fp16_ieee_from_fp32_value(0.5f), fp16_ieee_from_fp32_value(1.0f), fp16_ieee_from_fp32_value(0.5f), fp16_ieee_from_fp32_value(1.0f) };
     const float bounds[] = {x1, y1, x2, y2};
 
     NVGvertex verts[] =
@@ -2837,11 +2838,11 @@ void nvgStrokeRect(NVGcontext* ctx, float x1, float y1, float w, float h)
     
     const float bounds[] = {x1, y1, x2, y2};
     
-    const float t[] = { 0.5f, 1.0f, 0.5f, 1.0f };
+    const uint16_t t[] = { fp16_ieee_from_fp32_value(0.5f), fp16_ieee_from_fp32_value(1.0f), fp16_ieee_from_fp32_value(0.5f), fp16_ieee_from_fp32_value(1.0f) };
     const float sx = l / w, sy = l / h;
 
     const float iV[] = { x1+l, y1+l, x2-l, y2-l };
-    const float iT[] = { t[0]+sx, t[1]+sy, t[2]-sx, t[3]-sy };
+    const uint16_t iT[] = { fp16_ieee_from_fp32_value(t[0]+sx), fp16_ieee_from_fp32_value(t[1]+sy), fp16_ieee_from_fp32_value(t[2]-sx), fp16_ieee_from_fp32_value(t[3]-sy) };
 
     NVGvertex verts[] =
     {

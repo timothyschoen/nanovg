@@ -23,6 +23,10 @@
 extern "C" {
 #endif
 
+#define FP16_USE_NATIVE_CONVERSION 1
+#include "fp16/fp16.h"
+
+
 #define NVG_NOTUSED(v) for (;;) { (void)(1 ? (void)0 : ( (void)(v) ) ); break; }
 
 #define NVG_PI 3.14159265358979323846264338327f
@@ -762,7 +766,8 @@ struct NVGscissorBounds {
 typedef struct NVGscissorBounds NVGscissorBounds;
 
 struct NVGvertex {
-	float x,y,u,v,s,t;
+    float x,y;
+    uint16_t u,v,s,t;
 };
 typedef struct NVGvertex NVGvertex;
 

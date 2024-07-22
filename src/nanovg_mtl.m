@@ -540,8 +540,8 @@ error:
 static void mtlnvg__vset(NVGvertex* vtx, float x, float y, float u, float v) {
   vtx->x = x;
   vtx->y = y;
-  vtx->u = u;
-  vtx->v = v;
+  vtx->u = fp16_ieee_from_fp32_value(u);
+  vtx->v = fp16_ieee_from_fp32_value(v);
 }
 
 void nvgDeleteMTL(NVGcontext* ctx) {
@@ -1118,7 +1118,7 @@ enum MNVGTarget mnvgTarget() {
   _vertexDescriptor.attributes[0].bufferIndex = 0;
   _vertexDescriptor.attributes[0].offset = offsetof(NVGvertex, x);
 
-  _vertexDescriptor.attributes[1].format = MTLVertexFormatFloat4;
+  _vertexDescriptor.attributes[1].format = MTLVertexFormatHalf4;
   _vertexDescriptor.attributes[1].bufferIndex = 0;
   _vertexDescriptor.attributes[1].offset = offsetof(NVGvertex, u);
 
