@@ -73,8 +73,7 @@ typedef struct MNVGframebuffer MNVGframebuffer;
 NVGcontext* nvgCreateMTL(void* metalLayer, int flags);
 
 NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height);
-
-NVGcontext* mnvgSetViewBounds(void* view, int width, int height);
+void mnvgSetViewBounds(void* view, int width, int height);
 
 // Deletes the specified NanoVG context.
 void nvgDeleteMTL(NVGcontext* ctx);

@@ -461,8 +461,7 @@ static void mtlnvg__xformToMat3x3(matrix_float3x3* m3, float* t) {
 
 #if TARGET_OS_IPHONE
 
-
-NVGcontext* mnvgSetViewBounds(void* view, int width, int height) {
+void mnvgSetViewBounds(void* view, int width, int height) {
     [(CAMetalLayer*)[(__bridge UIView*)view layer] setDrawableSize:CGSizeMake(width, height)];
 }
 
@@ -474,7 +473,7 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     return nvgCreateMTL((__bridge void*)metalLayer, flags);
 }
 #else
-NVGcontext* mnvgSetViewBounds(void* view, int width, int height) {
+void mnvgSetViewBounds(void* view, int width, int height) {
     [(CAMetalLayer*)[(__bridge NSView*)view layer] setDrawableSize:CGSizeMake(width, height)];
 }
 
@@ -518,7 +517,7 @@ NVGcontext* nvgCreateMTL(void* metalLayer, int flags) {
   params.edgeAntiAlias = flags & NVG_ANTIALIAS ? 1 : 0;
 
   mtl.flags = flags;
-#if __aarch64__
+#if __aarch64__ && !TARGET_OS_SIMULATOR
     mtl.fragSize = sizeof(MNVGfragUniforms);
 #else
     mtl.fragSize = 256;
@@ -538,10 +537,11 @@ error:
 }
 
 static void mtlnvg__vset(NVGvertex* vtx, float x, float y, float u, float v) {
+  int16_t scaling_factor = 1 << 14;
   vtx->x = x;
   vtx->y = y;
-  vtx->u = u;
-  vtx->v = v;
+  vtx->u = u * scaling_factor;
+  vtx->v = v * scaling_factor;
 }
 
 void nvgDeleteMTL(NVGcontext* ctx) {
@@ -906,6 +906,7 @@ enum MNVGTarget mnvgTarget() {
     frag->type = MNVG_SHADER_FILLGRAD;
     frag->radius = paint->radius;
     frag->feather = paint->feather;
+    frag->lineLength = lineLength;
     nvgTransformInverse(invxform, paint->xform);
   }
 
@@ -1118,7 +1119,7 @@ enum MNVGTarget mnvgTarget() {
   _vertexDescriptor.attributes[0].bufferIndex = 0;
   _vertexDescriptor.attributes[0].offset = offsetof(NVGvertex, x);
 
-  _vertexDescriptor.attributes[1].format = MTLVertexFormatFloat4;
+    _vertexDescriptor.attributes[1].format = MTLVertexFormatShort4;
   _vertexDescriptor.attributes[1].bufferIndex = 0;
   _vertexDescriptor.attributes[1].offset = offsetof(NVGvertex, u);
 

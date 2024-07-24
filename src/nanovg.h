@@ -762,7 +762,8 @@ struct NVGscissorBounds {
 typedef struct NVGscissorBounds NVGscissorBounds;
 
 struct NVGvertex {
-	float x,y,u,v,s,t;
+    float x,y;
+    int16_t u,v,s,t;
 };
 typedef struct NVGvertex NVGvertex;
 

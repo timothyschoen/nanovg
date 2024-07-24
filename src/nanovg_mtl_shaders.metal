@@ -28,7 +28,7 @@ using namespace metal;
 
 typedef struct {
   float2 pos [[attribute(0)]];
-  float4 tcoord [[attribute(1)]];
+  short4 tcoord [[attribute(1)]];
 } Vertex;
 
 typedef struct {
@@ -131,8 +131,10 @@ float dotted(float2 uv) {
 vertex RasterizerData vertexShader(Vertex vert [[stage_in]],
                                    constant float2& viewSize [[buffer(1)]]) {
   RasterizerData out;
-  out.ftcoord = vert.tcoord.xy;
-  out.uv = 0.5f * vert.tcoord.zw;
+
+  float2 scaling_factor = float2(1.0 / (1 << 14), 1.0 / (1 << 14));
+  out.ftcoord = (float2)vert.tcoord.xy * scaling_factor;
+  out.uv = 0.5f * ((float2)vert.tcoord.zw * scaling_factor);
   out.fpos = vert.pos;
   out.pos = float4(2.0 * vert.pos.x / viewSize.x - 1.0,
                    1.0 - 2.0 * vert.pos.y / viewSize.y,
@@ -215,7 +217,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   if (uniforms.lineStyle > 1 && strokeAlpha < uniforms.strokeThr) {
      discard_fragment();
   }
-  if(uniforms.lineStyle == 2) strokeAlpha*=dashed(in.uv, uniforms.radius, uniforms.offset);
+  if(uniforms.lineStyle == 2) strokeAlpha*=dashed(float2(in.uv.x, in.uv.y * uniforms.lineLength), uniforms.radius, uniforms.offset);
   if(uniforms.lineStyle == 3) strokeAlpha*=dotted(in.uv);
   if(uniforms.lineStyle == 4) strokeAlpha*=glow(in.uv);
 
@@ -238,14 +240,15 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     float smoothEnd = uniforms.feather;
     if (in.uv.y < 0.0)
     {
+        in.uv.y *= uniforms.lineLength;
         float dist = distance(2.0 * in.uv, float2(0.0, 0.0));
         strokeAlpha *= 1.0 - step(1.0, dist);
         float innerCap = 1.0 - smoothstep(smoothStart, smoothEnd, dist);
         icol = mix(uniforms.outerCol, icol, innerCap);
     }
-    if (in.uv.y > uniforms.lineLength)
+    if (in.uv.y > 0.5)
     {
-        float2 capStart = float2(in.uv.x, (uniforms.lineLength - in.uv.y));
+        float2 capStart = float2(in.uv.x, (0.5 - in.uv.y) * uniforms.lineLength);
         float dist = distance(2.0 * capStart, float2(0.0, 0.0));
         strokeAlpha *= 1.0 - step(1.0, dist);
         float innerCap = 1.0 - smoothstep(smoothStart, smoothEnd, dist);

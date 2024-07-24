@@ -563,8 +563,8 @@ static int glnvg__renderCreate(void* uptr)
 			varying vec2 uv;
 		#endif
 		void main(void) {
-			ftcoord = tcoord.xy;
-			uv = 0.5f * tcoord.zw;
+			ftcoord = tcoord.xy * 2.0f;
+			uv = tcoord.zw;
 			fpos = vertex;
 			gl_Position = vec4(2.0f*vertex.x/viewSize.x - 1.0f, 1.0f - 2.0f*vertex.y/viewSize.y, 0.f, 1.f);
 		}
@@ -686,7 +686,7 @@ static int glnvg__renderCreate(void* uptr)
 		// Stroke - from [0..1] to clipped pyramid, where the slope is 1px.
 		float strokeMask() {
 			float mask = min(1.0f, (1.0f-abs(ftcoord.x*2.0f-1.0f))*strokeMult) * min(1.0f, ftcoord.y);
-			if(lineStyle == 2) mask*=dashed(uv);
+			if(lineStyle == 2) mask*=dashed(vec2(uv.x, uv.y * lineLength));
 			if(lineStyle == 3) mask*=dotted(uv);
 			if(lineStyle == 4) mask*=glow(uv);
 			return mask;
@@ -694,7 +694,7 @@ static int glnvg__renderCreate(void* uptr)
 		#else
 		float strokeMask() {
 			float mask = 1.0f;
-			if(lineStyle == 2) mask*=dashed(uv);
+			if(lineStyle == 2) mask*=dashed(vec2(uv.x, uv.y * lineLength));
 			if(lineStyle == 3) mask*=dotted(uv);
 			if(lineStyle == 4) mask*=glow(uv);
 			return mask;
@@ -746,13 +746,13 @@ static int glnvg__renderCreate(void* uptr)
 				float smoothEnd = feather;
 				vec4 icol = innerCol;
 				if (uv.y < 0.0) {
-					float dist = distance(2.0 * uv, vec2(0.0, 0.0));
+					float dist = distance(vec2(uv.x * 2.0, uv.y * lineLength * 2.0), vec2(0.0, 0.0));
 					strokeAlpha *= 1.0 - step(1.0, dist);
 					float innerCap = 1.0 - smoothstep(smoothStart, smoothEnd, dist);
 					icol = mix(outerCol, icol, innerCap);
 				}
-				if (uv.y > lineLength) {
-					vec2 capStart = vec2(uv.x, (lineLength - uv.y));
+				if (uv.y > 0.5) {
+					vec2 capStart = vec2(uv.x, (0.5 - uv.y) * lineLength);
 					float dist = distance(2.0 * capStart, vec2(0.0, 0.0));
 					strokeAlpha *= 1.0 - step(1.0, dist);
 					float innerCap = 1.0 - smoothstep(smoothStart, smoothEnd, dist);
@@ -1144,6 +1144,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
     } else {
 		frag->type = NSVG_SHADER_FILLGRAD;
 		frag->feather = paint->feather;
+        frag->lineLength = lineLength;
 		nvgTransformInverse(invxform, paint->xform);
 	}
 
@@ -1402,7 +1403,7 @@ static void glnvg__renderFlush(void* uptr)
 		glEnableVertexAttribArray(0);
 		glEnableVertexAttribArray(1);
 		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(NVGvertex), (const GLvoid*)(size_t)0);
-		glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(NVGvertex), (const GLvoid*)(0 + 2*sizeof(float)));
+		glVertexAttribPointer(1, 4, GL_SHORT, GL_TRUE, sizeof(NVGvertex), (const GLvoid*)(0 + 2*sizeof(float)));
 
 		// Set view and texture just once per frame.
 		glUniform1i(gl->shader.loc[GLNVG_LOC_TEX], 0);
@@ -1524,10 +1525,11 @@ static GLNVGfragUniforms* nvg__fragUniformPtr(GLNVGcontext* gl, int i)
 
 static void glnvg__vset(NVGvertex* vtx, float x, float y, float u, float v)
 {
+    int16_t scaling_factor = 1 << 14;
 	vtx->x = x;
 	vtx->y = y;
-	vtx->u = u;
-	vtx->v = v;
+    vtx->u = u * scaling_factor;
+    vtx->v = v * scaling_factor;
 }
 
 static void glnvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe,
