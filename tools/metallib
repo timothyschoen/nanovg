@@ -48,6 +48,8 @@ execute_cmd() {
 
   if [ $SDK = "iphoneos" ]; then
     CMD="$CMD -mios-version-min=8.0"
+  elif [ $SDK = "iphonesimulator" ]; then
+    CMD="$CMD -std=metal3.0"
   elif [ $SDK = "macosx" ]; then
     CMD="$CMD -mmacosx-version-min=10.11"
   fi

@@ -1119,7 +1119,7 @@ enum MNVGTarget mnvgTarget() {
   _vertexDescriptor.attributes[0].bufferIndex = 0;
   _vertexDescriptor.attributes[0].offset = offsetof(NVGvertex, x);
 
-    _vertexDescriptor.attributes[1].format = MTLVertexFormatShort4;
+  _vertexDescriptor.attributes[1].format = MTLVertexFormatShort4Normalized;
   _vertexDescriptor.attributes[1].bufferIndex = 0;
   _vertexDescriptor.attributes[1].offset = offsetof(NVGvertex, u);
 

@@ -28,7 +28,7 @@ using namespace metal;
 
 typedef struct {
   float2 pos [[attribute(0)]];
-  short4 tcoord [[attribute(1)]];
+  float4 tcoord [[attribute(1)]];
 } Vertex;
 
 typedef struct {
@@ -132,9 +132,8 @@ vertex RasterizerData vertexShader(Vertex vert [[stage_in]],
                                    constant float2& viewSize [[buffer(1)]]) {
   RasterizerData out;
 
-  float2 scaling_factor = float2(1.0 / (1 << 14), 1.0 / (1 << 14));
-  out.ftcoord = (float2)vert.tcoord.xy * scaling_factor;
-  out.uv = 0.5f * ((float2)vert.tcoord.zw * scaling_factor);
+  out.ftcoord = vert.tcoord.xy * 2.0;
+  out.uv = vert.tcoord.zw;
   out.fpos = vert.pos;
   out.pos = float4(2.0 * vert.pos.x / viewSize.x - 1.0,
                    1.0 - 2.0 * vert.pos.y / viewSize.y,

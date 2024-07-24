@@ -2077,7 +2077,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 		}
 
         float length = 0.0f;
-        for (int i = 0; i < path->count; ++i)
+        for (int i = 0; i < e; ++i)
         {
             dx = pts[i+1].x - pts[i].x;
             dy = pts[i+1].y - pts[i].y;
