@@ -166,23 +166,23 @@ struct NVGcontext {
     StrokeCache* strokeCache;
 };
 
-static float nvg__sqrtf(float a) { return sqrtf(a); }
-static float nvg__modf(float a, float b) { return fmodf(a, b); }
-static float nvg__sinf(float a) { return sinf(a); }
-static float nvg__cosf(float a) { return cosf(a); }
-static float nvg__tanf(float a) { return tanf(a); }
-static float nvg__atan2f(float a,float b) { return atan2f(a, b); }
-static float nvg__acosf(float a) { return acosf(a); }
+static inline float nvg__sqrtf(float a) { return sqrtf(a); }
+static inline float nvg__modf(float a, float b) { return fmodf(a, b); }
+static inline float nvg__sinf(float a) { return sinf(a); }
+static inline float nvg__cosf(float a) { return cosf(a); }
+static inline float nvg__tanf(float a) { return tanf(a); }
+static inline float nvg__atan2f(float a,float b) { return atan2f(a, b); }
+static inline float nvg__acosf(float a) { return acosf(a); }
 
-static int nvg__mini(int a, int b) { return a < b ? a : b; }
-static int nvg__maxi(int a, int b) { return a > b ? a : b; }
-static int nvg__clampi(int a, int mn, int mx) { return a < mn ? mn : (a > mx ? mx : a); }
-static float nvg__minf(float a, float b) { return a < b ? a : b; }
-static float nvg__maxf(float a, float b) { return a > b ? a : b; }
-static float nvg__absf(float a) { return a >= 0.0f ? a : -a; }
-static float nvg__signf(float a) { return a >= 0.0f ? 1.0f : -1.0f; }
-static float nvg__clampf(float a, float mn, float mx) { return a < mn ? mn : (a > mx ? mx : a); }
-static float nvg__cross(float dx0, float dy0, float dx1, float dy1) { return dx1*dy0 - dx0*dy1; }
+static inline int nvg__mini(int a, int b) { return a < b ? a : b; }
+static inline int nvg__maxi(int a, int b) { return a > b ? a : b; }
+static inline int nvg__clampi(int a, int mn, int mx) { return a < mn ? mn : (a > mx ? mx : a); }
+static inline float nvg__minf(float a, float b) { return a < b ? a : b; }
+static inline float nvg__maxf(float a, float b) { return a > b ? a : b; }
+static inline float nvg__absf(float a) { return a >= 0.0f ? a : -a; }
+static inline float nvg__signf(float a) { return a >= 0.0f ? 1.0f : -1.0f; }
+static inline float nvg__clampf(float a, float mn, float mx) { return a < mn ? mn : (a > mx ? mx : a); }
+static inline float nvg__cross(float dx0, float dy0, float dx1, float dy1) { return dx1*dy0 - dx0*dy1; }
 
 static float nvg__normalize(float *x, float* y)
 {
@@ -983,7 +983,7 @@ NVGpaint nvgLinearGradient(NVGcontext* ctx,
 	// Calculate transform aligned to the line
 	dx = ex - sx;
 	dy = ey - sy;
-	d = sqrtf(dx*dx + dy*dy);
+	d = nvg__sqrtf(dx*dx + dy*dy);
 	if (d > 0.0001f) {
 		dx /= d;
 		dy /= d;
@@ -1070,7 +1070,16 @@ NVGpaint nvgImagePattern(NVGcontext* ctx,
 	NVG_NOTUSED(ctx);
 	memset(&p, 0, sizeof(p));
 
-	nvgTransformRotate(p.xform, angle);
+    if (angle == 0) // most likly case (no rotation, identity transform)
+    {
+        p.xform[0] = 1; p.xform[1] = 0;
+        p.xform[2] = 0; p.xform[3] = 1;
+    }
+    else
+    {
+        nvgTransformRotate(p.xform, angle);
+    }
+    
 	p.xform[4] = cx;
 	p.xform[5] = cy;
 
@@ -1392,8 +1401,8 @@ static void nvg__pathWinding(NVGcontext* ctx, int winding)
 
 static float nvg__getAverageScale(float *t)
 {
-	float sx = sqrtf(t[0]*t[0] + t[2]*t[2]);
-	float sy = sqrtf(t[1]*t[1] + t[3]*t[3]);
+	float sx = nvg__sqrtf(t[0]*t[0] + t[2]*t[2]);
+	float sy = nvg__sqrtf(t[1]*t[1] + t[3]*t[3]);
 	return (sx + sy) * 0.5f;
 }
 
@@ -1908,7 +1917,7 @@ static NVGvertex* nvg__roundCapStart(NVGvertex* dst, NVGpoint* p,
 
 static NVGvertex* nvg__roundCapEnd(NVGvertex* dst, NVGpoint* p,
 								   float dx, float dy, float w, int ncap,
-								   float aa, float u0, float u1, float t, int dir)
+								   float aa, float u0, float u1, float t, float invLength)
 {
 	int i;
 	float px = p->x;
@@ -1922,7 +1931,7 @@ static NVGvertex* nvg__roundCapEnd(NVGvertex* dst, NVGpoint* p,
 		float a = i/(float)(ncap-1)*NVG_PI;
 		float ax = cosf(a) * w, ay = sinf(a) * w;
 		nvg__vset(dst, px, py, 0.5f, 1, 0, t); dst++;
-		nvg__vset(dst, px - dlx*ax + dx*ay, py - dly*ax + dy*ay, u0, 1, ax / w, t + dir * ay / w); dst++;
+		nvg__vset(dst, px - dlx*ax + dx*ay, py - dly*ax + dy*ay, u0, 1, ax / w, t + invLength * ay / w); dst++;
 	}
 	return dst;
 }
@@ -2077,15 +2086,19 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 		}
 
         float length = 0.0f;
-        for (int i = 0; i < e; ++i)
-        {
-            dx = pts[i+1].x - pts[i].x;
-            dy = pts[i+1].y - pts[i].y;
-            float dt=nvg__normalize(&dx, &dy);
-            length+=dt*invStrokeWidth;
+        float invLength = 1.0f;
+        if(lineStyle > 1) {
+            for (int i = 0; i < e; ++i)
+            {
+                dx = pts[i+1].x - pts[i].x;
+                dy = pts[i+1].y - pts[i].y;
+                float dt=nvg__normalize(&dx, &dy);
+                length+=dt*invStrokeWidth;
+            }
         }
         length = std::max(length, 1.0f);
-        float invLength = 1.0 / length;
+        invLength = 1.0 / length;
+        ctx->currentLineLength = length;
         
 		t = 0;
 
@@ -2179,7 +2192,6 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 				dst = nvg__roundCapEnd(dst, p1, dx, dy, w, ncap, aa, u0, u1, t, invLength);
 		}
         
-        ctx->currentLineLength = fabsf(length);
 		path->nstroke = (int)(dst - verts);
 		verts = dst;
 	}
