@@ -964,6 +964,10 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol)
     p.innerColor = icol;
     p.outerColor = ocol;
     p.feather = ctx->devicePxRatio < 2.0f ? 0.8 : 0.6;
+    
+    NVGstate* state = nvg__getState(ctx);
+    state->lineStyle = NVG_DOUBLE_STROKE;
+    
     return p;
 }
 

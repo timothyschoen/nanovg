@@ -113,7 +113,8 @@ enum NVGlineStyle {
 	NVG_LINE_SOLID = 1,
 	NVG_LINE_DASHED = 2,
 	NVG_LINE_DOTTED = 3,
-	NVG_GLOW = 4
+	NVG_LINE_GLOW = 4,
+    NVG_DOUBLE_STROKE = 5
 };
 
 enum NVGlineCap {
