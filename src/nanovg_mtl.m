@@ -467,8 +467,8 @@ void mnvgSetViewBounds(void* view, int width, int height) {
 
 NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     CAMetalLayer *metalLayer = (CAMetalLayer*)[(__bridge UIView*)view layer];
-    metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    metalLayer.device = MTLCreateSystemDefaultDevice();
+    [metalLayer setPixelFormat:MTLPixelFormatRGBA8Unorm];
+    [metalLayer setDevice: MTLCreateSystemDefaultDevice()];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
     return nvgCreateMTL((__bridge void*)metalLayer, flags);
 }
@@ -478,14 +478,11 @@ void mnvgSetViewBounds(void* view, int width, int height) {
 }
 
 NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
-
-    ((__bridge NSView*) view).layer = [CAMetalLayer new];
-
-    [(CAMetalLayer*)[((__bridge NSView*) view) layer] setPixelFormat:MTLPixelFormatBGRA8Unorm];
-    ((CAMetalLayer*) ((__bridge NSView*) view).layer).device = MTLCreateSystemDefaultDevice();
-
-    [(CAMetalLayer*)[(__bridge NSView*)view layer] setDrawableSize:CGSizeMake(width, height)];
-
+    CAMetalLayer *metalLayer = [CAMetalLayer new];
+    ((__bridge NSView*) view).layer = metalLayer;
+    [metalLayer setPixelFormat:MTLPixelFormatRGBA8Unorm];
+    [metalLayer setDevice: MTLCreateSystemDefaultDevice()];
+    [metalLayer setDrawableSize:CGSizeMake(width, height)];
     return nvgCreateMTL((__bridge void*)((__bridge NSView*) view).layer, flags);
 }
 #endif
@@ -583,114 +580,6 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
                                      (float)color.b * alpha,
                                      (float)color.a);
   mtl.clearBufferOnFlush = YES;
-}
-
-void* mnvgCommandQueue(NVGcontext* ctx) {
-  MNVGcontext* mtl = (__bridge MNVGcontext*)nvgInternalParams(ctx)->userPtr;
-  return (__bridge void*)mtl.commandQueue;
-}
-
-int mnvgCreateImageFromHandle(NVGcontext* ctx, void* textureId, int imageFlags) {
-  MNVGcontext* mtl = (__bridge MNVGcontext*)nvgInternalParams(ctx)->userPtr;
-  MNVGtexture* tex = [mtl allocTexture];
-
-  if (tex == NULL) return 0;
-
-  tex->type = NVG_TEXTURE_RGBA;
-  tex->tex = (__bridge id<MTLTexture>)textureId;
-  tex->flags = imageFlags;
-
-  return tex->id;
-}
-
-void* mnvgDevice(NVGcontext* ctx) {
-  MNVGcontext* mtl = (__bridge MNVGcontext*)nvgInternalParams(ctx)->userPtr;
-  return (__bridge void*)mtl.metalLayer.device;
-}
-
-void* mnvgImageHandle(NVGcontext* ctx, int image) {
-  MNVGcontext* mtl = (__bridge MNVGcontext*)nvgInternalParams(ctx)->userPtr;
-  MNVGtexture* tex = [mtl findTexture:image];
-  if (tex == nil) return NULL;
-
-  // Makes sure the command execution for the image has been done.
-  for (MNVGbuffers* buffers in mtl.cbuffers) {
-    if (buffers.isBusy && buffers.image == image && buffers.commandBuffer) {
-      id<MTLCommandBuffer> commandBuffer = buffers.commandBuffer;
-      [commandBuffer waitUntilCompleted];
-      break;
-    }
-  }
-
-  return (__bridge void*)tex->tex;
-}
-
-void mnvgReadPixels(NVGcontext* ctx, int image, int x, int y, int width,
-                    int height, void* data) {
-  MNVGcontext* mtl = (__bridge MNVGcontext*)nvgInternalParams(ctx)->userPtr;
-  MNVGtexture* tex = [mtl findTexture:image];
-  if (tex == nil) return;
-
-  NSUInteger bytesPerRow;
-  if (tex->type == NVG_TEXTURE_RGBA) {
-    bytesPerRow = tex->tex.width * 4;
-  } else {
-    bytesPerRow = tex->tex.width;
-  }
-
-  // Makes sure the command execution for the image has been done.
-  for (MNVGbuffers* buffers in mtl.cbuffers) {
-    if (buffers.isBusy && buffers.image == image && buffers.commandBuffer) {
-      id<MTLCommandBuffer> commandBuffer = buffers.commandBuffer;
-      [commandBuffer waitUntilCompleted];
-      break;
-    }
-  }
-
-#if TARGET_OS_SIMULATOR
-  CAMetalLayer* metalLayer = mtl.metalLayer;
-  const NSUInteger kBufferSize = bytesPerRow * height;
-  id<MTLBuffer> buffer = [metalLayer.device
-      newBufferWithLength:kBufferSize
-      options:MTLResourceStorageModeShared];
-
-  id<MTLCommandBuffer> commandBuffer = [mtl.commandQueue commandBuffer];
-  id<MTLBlitCommandEncoder> blitCommandEncoder = [commandBuffer
-      blitCommandEncoder];
-  [blitCommandEncoder copyFromTexture:tex->tex
-      sourceSlice:0
-      sourceLevel:0
-      sourceOrigin:MTLOriginMake(x, y, 0)
-      sourceSize:MTLSizeMake(width, height, 1)
-      toBuffer:buffer
-      destinationOffset:0
-      destinationBytesPerRow:bytesPerRow
-      destinationBytesPerImage:kBufferSize];
-
-  [blitCommandEncoder endEncoding];
-  [commandBuffer commit];
-  [commandBuffer waitUntilCompleted];
-  memcpy(data, [buffer contents], kBufferSize);
-#else
-  [tex->tex getBytes:data
-         bytesPerRow:bytesPerRow
-          fromRegion:MTLRegionMake2D(x, y, width, height)
-         mipmapLevel:0];
-#endif  // TARGET_OS_SIMULATOR
-}
-
-enum MNVGTarget mnvgTarget() {
-#if TARGET_OS_SIMULATOR
-  return MNVG_SIMULATOR;
-#elif TARGET_OS_IOS
-  return MNVG_IOS;
-#elif TARGET_OS_OSX
-  return MNVG_MACOS;
-#elif TARGET_OS_TV
-  return MNVG_TVOS;
-#else
-  return MNVG_UNKNOWN;
-#endif
 }
 
 @implementation MNVGbuffers
