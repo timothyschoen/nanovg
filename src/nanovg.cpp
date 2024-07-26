@@ -964,10 +964,27 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol)
     p.innerColor = icol;
     p.outerColor = ocol;
     p.feather = ctx->devicePxRatio < 2.0f ? 0.8 : 0.6;
-    
-    NVGstate* state = nvg__getState(ctx);
-    state->lineStyle = NVG_DOUBLE_STROKE;
     return p;
+}
+
+void nvgSmoothGlow(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius, float feather)
+{
+    NVGpaint p;
+    memset(&p, 0, sizeof(p));
+    nvgTransformIdentity(p.xform);
+    
+    p.smooth_glow = 1;
+    p.radius = radius;
+    p.feather = feather;
+    p.innerColor = icol;
+    p.outerColor = ocol;
+    p.xform[4] = x+w*0.5f;
+    p.xform[5] = y+h*0.5f;
+    p.extent[0] = (w * 0.5f) - 1.5f;
+    p.extent[1] = (h * 0.5f) - 1.5f;
+
+    nvgFillPaint(ctx, p);
+    nvgFillRect(ctx, x, y, w, h);
 }
 
 NVGpaint nvgLinearGradient(NVGcontext* ctx,

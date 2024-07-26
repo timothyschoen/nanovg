@@ -95,6 +95,7 @@ struct NVGpaint {
     float offset;
     int rounded_rect;
     int double_stroke;
+    int smooth_glow;
 };
 typedef struct NVGpaint NVGpaint;
 
@@ -112,8 +113,7 @@ enum NVGlineStyle {
 	NVG_LINE_SOLID = 1,
 	NVG_LINE_DASHED = 2,
 	NVG_LINE_DOTTED = 3,
-	NVG_LINE_GLOW = 4,
-    NVG_DOUBLE_STROKE = 5
+	NVG_GLOW = 4
 };
 
 enum NVGlineCap {
@@ -504,6 +504,10 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
 
 // Fills a rounded rectangle using rounded rectangle shader, also bypassing paths system. Uses current fill colour
 void nvgFillRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, float radius);
+
+// Fills a rounded rectangle using rounded rectangle shader, also bypassing paths system. Uses current fill colour
+void nvgSmoothGlow(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius, float feather);
+
 
 //
 // Scissoring

@@ -67,6 +67,7 @@ typedef enum MNVGshaderType {
   MNVG_SHADER_FAST_ROUNDEDRECT,
   MNVG_SHADER_FILLCOLOR,
   MNVG_SHADER_DOUBLE_STROKE,
+  MNVG_SHADER_SMOOTH_GLOW
 } MNVGshaderType;
 
 enum MNVGcallType {
@@ -780,6 +781,16 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
         frag->type = MNVG_SHADER_DOUBLE_STROKE;
         frag->lineLength = lineLength;
         frag->feather = paint->feather;
+        nvgTransformInverse(invxform, paint->xform);
+  }
+  else if(paint->smooth_glow) {
+        frag->type = MNVG_SHADER_SMOOTH_GLOW;
+        frag->radius = paint->radius;
+        frag->feather = paint->feather;
+        frag->scissorExt[0] = scissor->extent[0];
+        frag->scissorExt[1] = scissor->extent[1];
+        frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
+        frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
         nvgTransformInverse(invxform, paint->xform);
   }
   else if(paint->dots) {

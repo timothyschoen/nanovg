@@ -128,7 +128,8 @@ enum GLNVGshaderType {
 	NSVG_SHADER_DOTS,
 	NSVG_SHADER_FAST_ROUNDEDRECT,
 	NSVG_SHADER_FILLCOLOR,
-    NSVG_DOUBLE_STROKE
+    NSVG_DOUBLE_STROKE,
+    NSVG_SMOOTH_GLOW
 };
 
 #if NANOVG_GL_USE_UNIFORMBUFFER
@@ -650,6 +651,9 @@ static int glnvg__renderCreate(void* uptr)
 			sc = vec2(0.5f,0.5f) - sc * scissorScale;
 			return clamp(sc.x,0.0f,1.0f) * clamp(sc.y,0.0f,1.0f);
 		}
+		float gradientNoise(vec2 uv){
+            return fract(52.9829189 * fract(dot(uv, vec2(0.06711056, 0.00583715))));
+        }
 		// Calculate scissor path with rounded corners
 		float roundedScissorMask(vec2 p, float rad) {
 			vec2 sc = (abs((scissorMat * vec3(p,1.0f)).xy));
@@ -759,7 +763,15 @@ static int glnvg__renderCreate(void* uptr)
 					icol = mix(outerCol, icol, innerCap);
 				}
 				result = mix(outerCol, icol, smoothstep(smoothStart, smoothEnd, clamp(colorMix, 0.0, 1.0))) * strokeAlpha * scissor;
-				}
+			}
+			if(type == 8) { // NSVG_SHADER_SMOOTH_GLOW
+                vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
+                float roundrect = sdroundrect(pt, extent, radius);
+                float glowFactor = smoothstep(-2.25, feather, -roundrect);
+                vec4 outCol = vec4(mix(outerCol, innerCol, glowFactor * float(glowFactor < 0.75f)));
+                outCol += (1.0f / 25.0f) * gradientNoise(pt) - (0.5f / 25.0f);
+                result = outCol;
+            }
 			if (type == 0) { // Gradient
 				// Calculate gradient color using box gradient
 				vec2 pt = (paintMat * vec3(fpos,1.0f)).xy;
@@ -1126,11 +1138,20 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
         frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
         frag->radius = paint->radius;
-    } else if(paint->double_stroke)
-    {
+    } else if(paint->double_stroke) {
         frag->type = NSVG_DOUBLE_STROKE;
         frag->lineLength = lineLength;
         frag->feather = paint->feather;
+        nvgTransformInverse(invxform, paint->xform);
+    }
+    else if(paint->smooth_glow) {
+        frag->type = NSVG_SMOOTH_GLOW;
+        frag->radius = paint->radius;
+        frag->feather = paint->feather;
+        frag->scissorExt[0] = scissor->extent[0];
+        frag->scissorExt[1] = scissor->extent[1];
+        frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
+        frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
         nvgTransformInverse(invxform, paint->xform);
     }
     else if(paint->dots) {
