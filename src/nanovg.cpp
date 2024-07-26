@@ -2911,6 +2911,11 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
     nvgFillRect(ctx, x, y, w, h);
 }
 
+void nvgFillRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, float radius)
+{
+    nvgDrawRoundedRect(ctx, x, y, w, h, nvg__getState(ctx)->fill.innerColor, nvg__getState(ctx)->fill.innerColor, radius);
+}
+
 // Add fonts
 int nvgCreateFont(NVGcontext* ctx, const char* name, const char* filename)
 {

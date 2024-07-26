@@ -502,6 +502,9 @@ void nvgStrokeRect(NVGcontext* ctx, float x1, float y1, float w, float h);
 // Fills and strokes a rounded rectangle using rounded rectangle shader, also bypassing paths system
 void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius);
 
+// Fills a rounded rectangle using rounded rectangle shader, also bypassing paths system. Uses current fill colour
+void nvgFillRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, float radius);
+
 //
 // Scissoring
 //
