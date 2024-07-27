@@ -108,6 +108,15 @@ float gradientNoise(float2 uv){
     return fract(52.9829189 * fract(dot(uv, float2(0.06711056, 0.00583715))));
 }
 
+float4 normalBlend(float4 src, float4 dst) {
+    float finalAlpha = src.a + dst.a * (1.0 - src.a);
+    return float4((src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / finalAlpha, finalAlpha);
+}
+
+float sigmoid(float t) {
+    return 1.0 / (1.0 + exp(-t));
+}
+
 float dashed(float2 uv, float rad, float offset) {
   float2 offset_uv = float2(uv.x, uv.y - offset);
   float fy = fract(offset_uv.y / rad);
@@ -261,12 +270,13 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     return mix(uniforms.outerCol, icol, smoothstep(smoothStart, smoothEnd, clamp(colorMix, 0.0, 1.0))) * strokeAlpha * scissor;
   }
   if(uniforms.type == 7) { // MNVG_SHADER_SMOOTH_GLOW
-      float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
-      float roundrect = sdroundrect(pt, uniforms.extent, uniforms.radius);
-      float glowFactor = smoothstep(-2.25, uniforms.feather, -roundrect);
-      float4 outCol = float4(mix(uniforms.outerCol, uniforms.innerCol, glowFactor * (glowFactor < 0.75)));
-      outCol += (1.0 / 25.0) * gradientNoise(pt) - (0.5 / 25.0);
-      return outCol;
+        float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
+        float blurRadius = clamp(uniforms.radius, 2.0, 20.0) + uniforms.feather;
+        float distShadow = clamp(sigmoid(sdroundrect(pt, uniforms.extent - float2(blurRadius), blurRadius) / uniforms.feather), 0.0, 1.0);
+        float distRect = clamp(sdroundrect(pt, uniforms.extent - float2(5.5), uniforms.radius), 0.0, 1.0);
+        float4 col = float4(uniforms.innerCol * (1.0 - distShadow));
+        col = mix(float4(0.0), col, distRect);
+        return col;
   }
   if(uniforms.type == 5) { // MNVG_SHADER_FILLCOLOR
       return uniforms.innerCol * strokeAlpha * scissor;

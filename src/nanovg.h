@@ -162,10 +162,10 @@ enum NVGcompositeOperation {
 };
 
 struct NVGcompositeOperationState {
-    NVGblendFactor srcRGB;
-    NVGblendFactor dstRGB;
-    NVGblendFactor srcAlpha;
-    NVGblendFactor dstAlpha;
+    enum NVGblendFactor srcRGB;
+    enum NVGblendFactor dstRGB;
+    enum NVGblendFactor srcAlpha;
+    enum NVGblendFactor dstAlpha;
 };
 typedef struct NVGcompositeOperationState NVGcompositeOperationState;
 
@@ -221,10 +221,10 @@ void nvgEndFrame(NVGcontext* ctx);
 void nvgGlobalCompositeOperation(NVGcontext* ctx, int op);
 
 // Sets the composite operation with custom pixel arithmetic. The parameters should be one of NVGblendFactor.
-void nvgGlobalCompositeBlendFunc(NVGcontext* ctx, NVGblendFactor sfactor, NVGblendFactor dfactor);
+void nvgGlobalCompositeBlendFunc(NVGcontext* ctx, enum NVGblendFactor sfactor, enum NVGblendFactor dfactor);
 
 // Sets the composite operation with custom pixel arithmetic for RGB and alpha components separately. The parameters should be one of NVGblendFactor.
-void nvgGlobalCompositeBlendFuncSeparate(NVGcontext* ctx, NVGblendFactor srcRGB, NVGblendFactor dstRGB, NVGblendFactor srcAlpha, NVGblendFactor dstAlpha);
+void nvgGlobalCompositeBlendFuncSeparate(NVGcontext* ctx, enum NVGblendFactor srcRGB, enum NVGblendFactor dstRGB, enum NVGblendFactor srcAlpha, enum NVGblendFactor dstAlpha);
 
 //
 // Color utils
@@ -571,7 +571,7 @@ void nvgArcTo(NVGcontext* ctx, float x1, float y1, float x2, float y2, float rad
 void nvgClosePath(NVGcontext* ctx);
 
 // Sets the current sub-path winding, see NVGwinding and NVGsolidity.
-void nvgPathWinding(NVGcontext* ctx, NVGwinding dir);
+void nvgPathWinding(NVGcontext* ctx, enum NVGwinding dir);
 
 // Creates new circle arc shaped sub-path. The arc center is at cx,cy, the arc radius is r,
 // and the arc is drawn from angle a0 to a1, and swept in direction dir (NVG_CCW, or NVG_CW).
@@ -780,7 +780,7 @@ struct NVGpath {
 	int nstroke;
     bool reversed : 1;
     bool closed : 1;
-    NVGwinding winding : 1;
+    enum NVGwinding winding : 1;
 	bool convex : 1;
 };
 typedef struct NVGpath NVGpath;
