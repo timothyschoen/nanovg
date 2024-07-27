@@ -654,6 +654,13 @@ static int glnvg__renderCreate(void* uptr)
 		float gradientNoise(vec2 uv){
             return fract(52.9829189 * fract(dot(uv, vec2(0.06711056, 0.00583715))));
         }
+        vec4 normalBlend(vec4 src, vec4 dst) {
+            float finalAlpha = src.a + dst.a * (1.0 - src.a);
+            return vec4((src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / finalAlpha, finalAlpha);
+        }
+        float sigmoid(float t) {
+            return 1.0 / (1.0 + exp(-t));
+        }
 		// Calculate scissor path with rounded corners
 		float roundedScissorMask(vec2 p, float rad) {
 			vec2 sc = (abs((scissorMat * vec3(p,1.0f)).xy));
@@ -766,11 +773,12 @@ static int glnvg__renderCreate(void* uptr)
 			}
 			if(type == 8) { // NSVG_SHADER_SMOOTH_GLOW
                 vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
-                float roundrect = sdroundrect(pt, extent, radius);
-                float glowFactor = smoothstep(-2.25, feather, -roundrect);
-                vec4 outCol = vec4(mix(outerCol, innerCol, glowFactor * float(glowFactor < 0.75f)));
-                outCol += (1.0f / 25.0f) * gradientNoise(pt) - (0.5f / 25.0f);
-                result = outCol;
+                float blurRadius = clamp(radius, 2.0f, 20.0f) + feather;
+                float distShadow = clamp(sigmoid(sdroundrect(pt, extent - vec2(blurRadius), blurRadius) / feather), 0.0f, 1.0f);
+                float distRect = clamp(sdroundrect(pt, extent - vec2(5.5f), radius), 0.0f, 1.0f);
+                vec4 col = vec4(innerCol * (1.0f - distShadow));
+                col = mix(vec4(0.0f), col, distRect);
+                result = normalBlend(vec4(0.0f), col);
             }
 			if (type == 0) { // Gradient
 				// Calculate gradient color using box gradient
