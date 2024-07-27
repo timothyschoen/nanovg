@@ -82,25 +82,23 @@ enum NVGpointFlags
 
 struct NVGstate {
 	NVGcompositeOperationState compositeOperation;
-	int shapeAntiAlias;
 	NVGpaint fill;
 	NVGpaint stroke;
+    NVGscissor scissor;
 	float strokeWidth;
 	float miterLimit;
-	int lineJoin;
-	int lineCap;
-	int lineStyle;
 	float alpha;
 	float xform[6];
-	NVGscissor scissor;
 	float fontSize;
 	float letterSpacing;
 	float lineHeight;
-	float fontBlur;
-	float fontDilate;
     float lineLength;
-	int textAlign;
-	int fontId;
+    uint8_t lineJoin;
+    uint8_t lineCap;
+    uint8_t lineStyle;
+    uint8_t textAlign;
+    uint8_t fontId;
+    bool shapeAntiAlias;
 };
 typedef struct NVGstate NVGstate;
 
@@ -119,8 +117,8 @@ struct NVGpathCache {
 	int cpoints;
 	NVGpath* paths;
     NVGpath* cachedPaths;
-	int npaths;
-	int cpaths;
+	uint16_t npaths;
+    uint16_t cpaths;
 	NVGvertex* verts;
 	int nverts;
 	int cverts;
@@ -140,10 +138,10 @@ struct NVGcontext {
 	float* commands;
 	int ccommands;
 	int ncommands;
-	float commandx, commandy;
 	NVGstate states[NVG_MAX_STATES];
 	int nstates;
 	NVGpathCache* cache;
+    float commandx, commandy;
 	float tessTol;
 	float distTol;
 	float fringeWidth;
@@ -151,7 +149,7 @@ struct NVGcontext {
 	float devicePxRatio;
 	struct FONScontext* fs;
 	int fontImages[NVG_MAX_FONTIMAGES];
-	int fontImageIdx;
+    uint8_t fontImageIdx;
 #if DEBUG
 	int drawCallCount;
 	int fillTriCount;
@@ -159,11 +157,11 @@ struct NVGcontext {
 	int textTriCount;
 #endif
     struct NVGscissorBounds scissor;
-    int isCached;
+    bool isCached;
     int numCached;
+    StrokeCache* strokeCache;
     NVGpath userCachedPaths[4];
     NVGvertex cachedVertexBuffer[1<<14];
-    StrokeCache* strokeCache;
 };
 
 static inline float nvg__sqrtf(float a) { return sqrtf(a); }
@@ -242,7 +240,7 @@ static void nvg__setDevicePixelRatio(NVGcontext* ctx, float ratio)
 
 static NVGcompositeOperationState nvg__compositeOperationState(int op)
 {
-	int sfactor, dfactor;
+    NVGblendFactor sfactor, dfactor;
 
 	if (op == NVG_SOURCE_OVER)
 	{
@@ -433,8 +431,8 @@ void nvgBeginFrame(NVGcontext* ctx, float windowWidth, float windowHeight, float
 	ctx->fillTriCount = 0;
 	ctx->strokeTriCount = 0;
 	ctx->textTriCount = 0;
-    ctx->isCached = 0;
 #endif
+    ctx->isCached = false;
 }
 
 void nvgCancelFrame(NVGcontext* ctx)
@@ -716,8 +714,6 @@ void nvgReset(NVGcontext* ctx)
 	state->fontSize = 16.0f;
 	state->letterSpacing = 0.0f;
 	state->lineHeight = 1.0f;
-	state->fontBlur = 0.0f;
-	state->fontDilate = 0.0f;
 	state->textAlign = NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE;
 	state->fontId = 0;
 }
@@ -1238,12 +1234,12 @@ void nvgGlobalCompositeOperation(NVGcontext* ctx, int op)
 	state->compositeOperation = nvg__compositeOperationState(op);
 }
 
-void nvgGlobalCompositeBlendFunc(NVGcontext* ctx, int sfactor, int dfactor)
+void nvgGlobalCompositeBlendFunc(NVGcontext* ctx, NVGblendFactor sfactor, NVGblendFactor dfactor)
 {
 	nvgGlobalCompositeBlendFuncSeparate(ctx, sfactor, dfactor, sfactor, dfactor);
 }
 
-void nvgGlobalCompositeBlendFuncSeparate(NVGcontext* ctx, int srcRGB, int dstRGB, int srcAlpha, int dstAlpha)
+void nvgGlobalCompositeBlendFuncSeparate(NVGcontext* ctx, NVGblendFactor srcRGB, NVGblendFactor dstRGB, NVGblendFactor srcAlpha, NVGblendFactor dstAlpha)
 {
 	NVGcompositeOperationState op;
 	op.srcRGB = srcRGB;
@@ -1361,7 +1357,7 @@ static void nvg__addPath(NVGcontext* ctx)
 	path = &ctx->cache->paths[ctx->cache->npaths];
 	memset(path, 0, sizeof(*path));
 	path->first = ctx->cache->npoints;
-	path->winding = NVG_CCW;
+	path->winding = NVG_SOLID;
 
 	ctx->cache->npaths++;
 }
@@ -1373,7 +1369,7 @@ static NVGpoint* nvg__lastPoint(NVGcontext* ctx)
 	return NULL;
 }
 
-static void nvg__addPoint(NVGcontext* ctx, float x, float y, int flags)
+static void nvg__addPoint(NVGcontext* ctx, float x, float y, NVGpointFlags flags)
 {
 	NVGpath* path = nvg__lastPath(ctx);
 	NVGpoint* pt;
@@ -1413,7 +1409,7 @@ static void nvg__closePath(NVGcontext* ctx)
 	path->closed = 1;
 }
 
-static void nvg__pathWinding(NVGcontext* ctx, int winding)
+static void nvg__pathWinding(NVGcontext* ctx, NVGwinding winding)
 {
 	NVGpath* path = nvg__lastPath(ctx);
 	if (path == NULL) return;
@@ -1491,7 +1487,7 @@ static void nvg__vset(NVGvertex* vtx, float x, float y, float u, float v, float 
 
 // Adaptive forward differencing for bezier tesselation.
 void nvg__tesselateBezierAFD(NVGcontext* ctx, float x1, float y1, float x2, float y2,
-                               float x3, float y3, float x4, float y4, int type)
+                             float x3, float y3, float x4, float y4)
 {
   // Power basis.
   float ax = -x1 + 3*x2 - 3*x3 + x4;
@@ -1519,7 +1515,6 @@ void nvg__tesselateBezierAFD(NVGcontext* ctx, float x1, float y1, float x2, floa
   float tol = ctx->tessTol * 4.0;
 
   while(t < ONE) {
-
     // Flatness measure. XXX: guessing
     float d = ddx*ddx + ddy*ddy + dddx*dddx + dddy*dddy;
 
@@ -1571,7 +1566,7 @@ void nvg__tesselateBezierAFD(NVGcontext* ctx, float x1, float y1, float x2, floa
     ddy += dddy;
 
     // Output a point.
-    nvg__addPoint(ctx, px, py, t > 0 ? type : 0);
+    nvg__addPoint(ctx, px, py, NVG_PT_CORNER);
 
     // Advance along the curve.
     t += dt;
@@ -1622,7 +1617,7 @@ static void nvg__flattenPaths(NVGcontext* ctx)
 				cp2 = &ctx->commands[i+3];
 				p = &ctx->commands[i+5];
 
-                nvg__tesselateBezierAFD(ctx, last->x,last->y, cp1[0],cp1[1], cp2[0],cp2[1], p[0],p[1], NVG_PT_CORNER);
+                nvg__tesselateBezierAFD(ctx, last->x,last->y, cp1[0],cp1[1], cp2[0],cp2[1], p[0],p[1]);
 			}
 			i += 7;
 			break;
@@ -1631,7 +1626,7 @@ static void nvg__flattenPaths(NVGcontext* ctx)
 			i++;
 			break;
 		case NVG_WINDING:
-			nvg__pathWinding(ctx, (int)ctx->commands[i+1]);
+			nvg__pathWinding(ctx, (NVGwinding)ctx->commands[i+1]);
 			i += 2;
 			break;
 		default:
@@ -1660,11 +1655,11 @@ static void nvg__flattenPaths(NVGcontext* ctx)
         path->reversed = 0;
 		if (path->count > 2) {
 			area = nvg__polyArea(pts, path->count);
-			if (path->winding == NVG_CCW && area < 0.0f) {
+			if (path->winding == NVG_SOLID && area < 0.0f) {
 				nvg__polyReverse(pts, path->count);
 				path->reversed = 1;
 			}
-			if (path->winding == NVG_CW && area > 0.0f) {
+			if (path->winding == NVG_HOLE && area > 0.0f) {
 				nvg__polyReverse(pts, path->count);
 				path->reversed = 1;
 			}
@@ -2420,14 +2415,14 @@ void nvgArcTo(NVGcontext* ctx, float x1, float y1, float x2, float y2, float rad
 		cy = y1 + dy0*d + -dx0*radius;
 		a0 = nvg__atan2f(dx0, -dy0);
 		a1 = nvg__atan2f(-dx1, dy1);
-		dir = NVG_CW;
+		dir = NVG_HOLE;
 //		printf("CW c=(%f, %f) a0=%f° a1=%f°\n", cx, cy, a0/NVG_PI*180.0f, a1/NVG_PI*180.0f);
 	} else {
 		cx = x1 + dx0*d + -dy0*radius;
 		cy = y1 + dy0*d + dx0*radius;
 		a0 = nvg__atan2f(-dx0, dy0);
 		a1 = nvg__atan2f(dx1, -dy1);
-		dir = NVG_CCW;
+		dir = NVG_SOLID;
 //		printf("CCW c=(%f, %f) a0=%f° a1=%f°\n", cx, cy, a0/NVG_PI*180.0f, a1/NVG_PI*180.0f);
 	}
 
@@ -2440,7 +2435,7 @@ void nvgClosePath(NVGcontext* ctx)
 	nvg__appendCommands(ctx, vals, NVG_COUNTOF(vals));
 }
 
-void nvgPathWinding(NVGcontext* ctx, int dir)
+void nvgPathWinding(NVGcontext* ctx, NVGwinding dir)
 {
 	float vals[] = { NVG_WINDING, (float)dir };
 	nvg__appendCommands(ctx, vals, NVG_COUNTOF(vals));
@@ -2457,7 +2452,7 @@ void nvgArc(NVGcontext* ctx, float cx, float cy, float r, float a0, float a1, in
 
 	// Clamp angles
 	da = a1 - a0;
-	if (dir == NVG_CW) {
+	if (dir == NVG_HOLE) {
 		if (nvg__absf(da) >= NVG_PI*2) {
 			da = NVG_PI*2;
 		} else {
@@ -2476,7 +2471,7 @@ void nvgArc(NVGcontext* ctx, float cx, float cy, float r, float a0, float a1, in
 	hda = (da / (float)ndivs) / 2.0f;
 	kappa = nvg__absf(4.0f / 3.0f * (1.0f - nvg__cosf(hda)) / nvg__sinf(hda));
 
-	if (dir == NVG_CCW)
+	if (dir == NVG_SOLID)
 		kappa = -kappa;
 
 	nvals = 0;
@@ -2628,15 +2623,11 @@ int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
       for(int j = 0; j < p.nfill; j++)
       {
           nvgTransformPoint(&pathCopy.fill[j].x, &pathCopy.fill[j].y, invxform, pathCopy.fill[j].x, pathCopy.fill[j].y);
-          //nvgTransformPoint(&p.fill[i].u, &p.fill[i].v, invxform, p.fill[i].u, p.fill[i].v);
-          //nvgTransformPoint(&p.fill[i].s, &p.fill[i].t, invxform, p.fill[i].s, p.fill[i].t);
       }
         
       for(int j = 0; j < p.nstroke; j++)
       {
           nvgTransformPoint(&pathCopy.stroke[j].x, &pathCopy.stroke[j].y, invxform, pathCopy.stroke[j].x, pathCopy.stroke[j].y);
-          //nvgTransformPoint(&p.stroke[i].u, &p.stroke[i].v, invxform, p.stroke[i].u, p.stroke[i].v);
-          //nvgTransformPoint(&p.stroke[i].s, &p.stroke[i].t, invxform, p.stroke[i].s, p.stroke[i].t);
       }
         
       cacheEntry.paths.push_back(pathCopy);
@@ -2693,15 +2684,11 @@ int nvgLoadPath(NVGcontext* ctx, uint32_t pathId)
           for(int j = 0; j < p.nfill; j++)
           {
               nvgTransformPoint(&p.fill[j].x, &p.fill[j].y, state->xform, p.fill[j].x, p.fill[j].y);
-              //nvgTransformPoint(&p.fill[i].u, &p.fill[i].v, state->xform, p.fill[i].u, p.fill[i].v);
-              //nvgTransformPoint(&p.fill[i].s, &p.fill[i].t, state->xform, p.fill[i].s, p.fill[i].t);
           }
           
           for(int j = 0; j < p.nstroke; j++)
           {
               nvgTransformPoint(&p.stroke[j].x, &p.stroke[j].y, state->xform, p.stroke[j].x, p.stroke[j].y);
-              //nvgTransformPoint(&p.stroke[i].u, &p.stroke[i].v, state->xform, p.stroke[i].u, p.stroke[i].v);
-              //nvgTransformPoint(&p.stroke[i].s, &p.stroke[i].t, state->xform, p.stroke[i].s, p.stroke[i].t);
           }
         }
         
@@ -2993,18 +2980,6 @@ void nvgFontSize(NVGcontext* ctx, float size)
 	state->fontSize = size;
 }
 
-void nvgFontBlur(NVGcontext* ctx, float blur)
-{
-	NVGstate* state = nvg__getState(ctx);
-	state->fontBlur = blur;
-}
-
-void nvgFontDilate(NVGcontext* ctx, float dilate)
-{
-	NVGstate* state = nvg__getState(ctx);
-	state->fontDilate = dilate;
-}
-
 void nvgTextLetterSpacing(NVGcontext* ctx, float spacing)
 {
 	NVGstate* state = nvg__getState(ctx);
@@ -3133,8 +3108,6 @@ float nvgText(NVGcontext* ctx, float x, float y, const char* string, const char*
 
 	fonsSetSize(ctx->fs, state->fontSize*scale);
 	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
-	fonsSetBlur(ctx->fs, state->fontBlur*scale);
-	fonsSetDilate(ctx->fs, state->fontDilate*scale);
 	fonsSetAlign(ctx->fs, state->textAlign);
 	fonsSetFont(ctx->fs, state->fontId);
 
@@ -3240,7 +3213,6 @@ int nvgTextGlyphPositions(NVGcontext* ctx, float x, float y, const char* string,
 
 	fonsSetSize(ctx->fs, state->fontSize*scale);
 	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
-	fonsSetBlur(ctx->fs, state->fontBlur*scale);
 	fonsSetAlign(ctx->fs, state->textAlign);
 	fonsSetFont(ctx->fs, state->fontId);
 
@@ -3304,8 +3276,6 @@ int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, floa
 
 	fonsSetSize(ctx->fs, state->fontSize*scale);
 	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
-	fonsSetBlur(ctx->fs, state->fontBlur*scale);
-	fonsSetDilate(ctx->fs, state->fontDilate*scale);
 	fonsSetAlign(ctx->fs, state->textAlign);
 	fonsSetFont(ctx->fs, state->fontId);
 
@@ -3497,8 +3467,6 @@ float nvgTextBounds(NVGcontext* ctx, float x, float y, const char* string, const
 
 	fonsSetSize(ctx->fs, state->fontSize*scale);
 	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
-	fonsSetBlur(ctx->fs, state->fontBlur*scale);
-	fonsSetDilate(ctx->fs, state->fontDilate*scale);
 	fonsSetAlign(ctx->fs, state->textAlign);
 	fonsSetFont(ctx->fs, state->fontId);
 
@@ -3543,8 +3511,6 @@ void nvgTextBoxBounds(NVGcontext* ctx, float x, float y, float breakRowWidth, co
 
 	fonsSetSize(ctx->fs, state->fontSize*scale);
 	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
-	fonsSetBlur(ctx->fs, state->fontBlur*scale);
-	fonsSetDilate(ctx->fs, state->fontDilate*scale);
 	fonsSetAlign(ctx->fs, state->textAlign);
 	fonsSetFont(ctx->fs, state->fontId);
 	fonsLineBounds(ctx->fs, 0, &rminy, &rmaxy);
@@ -3595,8 +3561,6 @@ void nvgTextMetrics(NVGcontext* ctx, float* ascender, float* descender, float* l
 
 	fonsSetSize(ctx->fs, state->fontSize*scale);
 	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
-	fonsSetBlur(ctx->fs, state->fontBlur*scale);
-	fonsSetDilate(ctx->fs, state->fontDilate*scale);
 	fonsSetAlign(ctx->fs, state->textAlign);
 	fonsSetFont(ctx->fs, state->fontId);
 

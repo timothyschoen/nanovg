@@ -90,23 +90,18 @@ struct NVGpaint {
 	NVGcolor innerColor;
 	NVGcolor outerColor;
 	int image;
-    int dots;
     float dot_pattern_size;
     float offset;
-    int rounded_rect;
-    int double_stroke;
-    int smooth_glow;
+    bool dots : 1;
+    bool rounded_rect : 1;
+    bool double_stroke : 1;
+    bool smooth_glow : 1;
 };
 typedef struct NVGpaint NVGpaint;
 
 enum NVGwinding {
-	NVG_CCW = 1,			// Winding for solid shapes
-	NVG_CW = 2,				// Winding for holes
-};
-
-enum NVGsolidity {
-	NVG_SOLID = 1,			// CCW
-	NVG_HOLE = 2,			// CW
+    NVG_SOLID = 0,            // CCW
+    NVG_HOLE = 1,            // CW
 };
 
 enum NVGlineStyle {
@@ -167,10 +162,10 @@ enum NVGcompositeOperation {
 };
 
 struct NVGcompositeOperationState {
-	int srcRGB;
-	int dstRGB;
-	int srcAlpha;
-	int dstAlpha;
+    NVGblendFactor srcRGB;
+    NVGblendFactor dstRGB;
+    NVGblendFactor srcAlpha;
+    NVGblendFactor dstAlpha;
 };
 typedef struct NVGcompositeOperationState NVGcompositeOperationState;
 
@@ -226,10 +221,10 @@ void nvgEndFrame(NVGcontext* ctx);
 void nvgGlobalCompositeOperation(NVGcontext* ctx, int op);
 
 // Sets the composite operation with custom pixel arithmetic. The parameters should be one of NVGblendFactor.
-void nvgGlobalCompositeBlendFunc(NVGcontext* ctx, int sfactor, int dfactor);
+void nvgGlobalCompositeBlendFunc(NVGcontext* ctx, NVGblendFactor sfactor, NVGblendFactor dfactor);
 
 // Sets the composite operation with custom pixel arithmetic for RGB and alpha components separately. The parameters should be one of NVGblendFactor.
-void nvgGlobalCompositeBlendFuncSeparate(NVGcontext* ctx, int srcRGB, int dstRGB, int srcAlpha, int dstAlpha);
+void nvgGlobalCompositeBlendFuncSeparate(NVGcontext* ctx, NVGblendFactor srcRGB, NVGblendFactor dstRGB, NVGblendFactor srcAlpha, NVGblendFactor dstAlpha);
 
 //
 // Color utils
@@ -576,7 +571,7 @@ void nvgArcTo(NVGcontext* ctx, float x1, float y1, float x2, float y2, float rad
 void nvgClosePath(NVGcontext* ctx);
 
 // Sets the current sub-path winding, see NVGwinding and NVGsolidity.
-void nvgPathWinding(NVGcontext* ctx, int dir);
+void nvgPathWinding(NVGcontext* ctx, NVGwinding dir);
 
 // Creates new circle arc shaped sub-path. The arc center is at cx,cy, the arc radius is r,
 // and the arc is drawn from angle a0 to a1, and swept in direction dir (NVG_CCW, or NVG_CW).
@@ -778,15 +773,15 @@ typedef struct NVGvertex NVGvertex;
 struct NVGpath {
 	int first;
 	int count;
-	int reversed;
-	unsigned char closed;
 	int nbevel;
 	NVGvertex* fill;
 	int nfill;
 	NVGvertex* stroke;
 	int nstroke;
-	int winding;
-	int convex;
+    bool reversed : 1;
+    bool closed : 1;
+    NVGwinding winding : 1;
+	bool convex : 1;
 };
 typedef struct NVGpath NVGpath;
 
