@@ -97,7 +97,7 @@ struct NVGstate {
     uint8_t lineCap;
     uint8_t lineStyle;
     uint8_t textAlign;
-    uint8_t fontId;
+    int8_t fontId;
     bool shapeAntiAlias;
 };
 typedef struct NVGstate NVGstate;
