@@ -125,6 +125,24 @@ struct MNVGfragUniforms {
 };
 typedef struct MNVGfragUniforms MNVGfragUniforms;
 
+
+struct MNVGrenderData {
+    atomic_int image;
+    MNVGcall* calls;
+    atomic_int ccalls;
+    atomic_int ncalls;
+    uint32_t* indexes;
+    atomic_int cindexes;
+    atomic_int nindexes;
+    struct NVGvertex* verts;
+    atomic_int cverts;
+    atomic_int nverts;
+    unsigned char* uniforms;
+    atomic_int cuniforms;
+    atomic_int nuniforms;
+};
+typedef struct MNVGrenderData MNVGrenderData;
+
 @interface MNVGtexture : NSObject {
  @public
   int id;
@@ -138,26 +156,13 @@ typedef struct MNVGfragUniforms MNVGfragUniforms;
 @interface MNVGbuffers : NSObject
 
 @property (nonatomic, strong) id<MTLCommandBuffer> commandBuffer;
-@property (nonatomic, assign) atomic_int isBusy;
-@property (nonatomic, assign) int image;
 @property (nonatomic, strong) id<MTLBuffer> viewSizeBuffer;
 @property (nonatomic, strong) id<MTLTexture> stencilTexture;
-@property (nonatomic, assign) MNVGcall* calls;
-@property (nonatomic, assign) atomic_int ccalls;
-@property (nonatomic, assign) atomic_int ncalls;
 @property (nonatomic, strong) id<MTLBuffer> indexBuffer;
-@property (nonatomic, assign) uint32_t* indexes;
-@property (nonatomic, assign) atomic_int cindexes;
-@property (nonatomic, assign) atomic_int nindexes;
 @property (nonatomic, strong) id<MTLBuffer> vertBuffer;
-@property (nonatomic, assign) struct NVGvertex* verts;
-@property (nonatomic, assign) atomic_int cverts;
-@property (nonatomic, assign) atomic_int nverts;
 @property (nonatomic, strong) id<MTLBuffer> uniformBuffer;
-@property (nonatomic, assign) unsigned char* uniforms;
-@property (nonatomic, assign) atomic_int cuniforms;
-@property (nonatomic, assign) atomic_int nuniforms;
-
+@property (nonatomic, assign) atomic_int isBusy;
+@property (nonatomic, assign) MNVGrenderData* renderData;
 @end
 
 @interface MNVGcontext : NSObject
@@ -591,59 +596,62 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
 
 - (MNVGcall*)allocCall {
   MNVGcall* ret = NULL;
-  if (_buffers.ncalls + 1 > _buffers.ccalls) {
+  MNVGrenderData* renderData = _buffers.renderData;
+  if (renderData->ncalls + 1 > renderData->ccalls) {
     MNVGcall* calls;
-    int ccalls = mtlnvg__maxi(_buffers.ncalls + 1, 128) + _buffers.ccalls / 2;
-    calls = (MNVGcall*)realloc(_buffers.calls, sizeof(MNVGcall) * ccalls);
+    int ccalls = mtlnvg__maxi(renderData->ncalls + 1, 128) + renderData->ccalls / 2;
+    calls = (MNVGcall*)realloc(renderData->calls, sizeof(MNVGcall) * ccalls);
     if (calls == NULL) return NULL;
-    _buffers.calls = calls;
-    _buffers.ccalls = ccalls;
+    renderData->calls = calls;
+    renderData->ccalls = ccalls;
   }
-  ret = &_buffers.calls[_buffers.ncalls++];
+  ret = &renderData->calls[renderData->ncalls++];
   memset(ret, 0, sizeof(MNVGcall));
   return ret;
 }
 
 - (int)allocFragUniforms:(int)n {
+  MNVGrenderData* renderData = _buffers.renderData;
   int ret = 0;
-  if (_buffers.nuniforms + n > _buffers.cuniforms) {
-    int cuniforms = mtlnvg__maxi(_buffers.nuniforms + n, 128) \
-                    + _buffers.cuniforms / 2;
+  if (renderData->nuniforms + n > renderData->cuniforms) {
+    int cuniforms = mtlnvg__maxi(renderData->nuniforms + n, 128) \
+                    + renderData->cuniforms / 2;
     id<MTLBuffer> buffer = [_metalLayer.device
         newBufferWithLength:(_fragSize * cuniforms)
         options:kMetalBufferOptions];
     unsigned char* uniforms = [buffer contents];
     if (_buffers.uniformBuffer != nil) {
-      memcpy(uniforms, _buffers.uniforms,
-             _fragSize * _buffers.nuniforms);
+      memcpy(uniforms, renderData->uniforms,
+             _fragSize * renderData->nuniforms);
     }
     _buffers.uniformBuffer = buffer;
-    _buffers.uniforms = uniforms;
-    _buffers.cuniforms = cuniforms;
+    renderData->uniforms = uniforms;
+    renderData->cuniforms = cuniforms;
   }
-  ret = _buffers.nuniforms * _fragSize;
-  _buffers.nuniforms += n;
+  ret = renderData->nuniforms * _fragSize;
+  renderData->nuniforms += n;
   return ret;
 }
 
 - (int)allocIndexes:(int)n {
   int ret = 0;
-  if (_buffers.nindexes + n > _buffers.cindexes) {
-    int cindexes = mtlnvg__maxi(_buffers.nindexes + n, 4096) \
-                   + _buffers.cindexes / 2;
+  MNVGrenderData* renderData = _buffers.renderData;
+  if (renderData->nindexes + n > renderData->cindexes) {
+    int cindexes = mtlnvg__maxi(renderData->nindexes + n, 4096) \
+                   + renderData->cindexes / 2;
     id<MTLBuffer> buffer = [_metalLayer.device
         newBufferWithLength:(_indexSize * cindexes)
         options:kMetalBufferOptions];
     uint32_t* indexes = [buffer contents];
     if (_buffers.indexBuffer != nil) {
-      memcpy(indexes, _buffers.indexes, _indexSize * _buffers.nindexes);
+      memcpy(indexes, renderData->indexes, _indexSize * renderData->nindexes);
     }
     _buffers.indexBuffer = buffer;
-    _buffers.indexes = indexes;
-    _buffers.cindexes = cindexes;
+    renderData->indexes = indexes;
+    renderData->cindexes = cindexes;
   }
-  ret = _buffers.nindexes;
-  _buffers.nindexes += n;
+  ret = renderData->nindexes;
+  renderData->nindexes += n;
   return ret;
 }
 
@@ -665,22 +673,23 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
 }
 
 - (int)allocVerts:(int)n {
+  MNVGrenderData* renderData = _buffers.renderData;
   int ret = 0;
-  if (_buffers.nverts + n > _buffers.cverts) {
-    int cverts = mtlnvg__maxi(_buffers.nverts + n, 4096) + _buffers.cverts / 2;
+  if (renderData->nverts + n > renderData->cverts) {
+    int cverts = mtlnvg__maxi(renderData->nverts + n, 4096) + renderData->cverts / 2;
     id<MTLBuffer> buffer = [_metalLayer.device
         newBufferWithLength:(sizeof(NVGvertex) * cverts)
         options:kMetalBufferOptions];
     NVGvertex* verts = [buffer contents];
     if (_buffers.vertBuffer != nil) {
-      memcpy(verts, _buffers.verts, sizeof(NVGvertex) * _buffers.nverts);
+      memcpy(verts, renderData->verts, sizeof(NVGvertex) * renderData->nverts);
     }
     _buffers.vertBuffer = buffer;
-    _buffers.verts = verts;
-    _buffers.cverts = cverts;
+    renderData->verts = verts;
+    renderData->cverts = cverts;
   }
-  ret = _buffers.nverts;
-  _buffers.nverts += n;
+  ret = renderData->nverts;
+  renderData->nverts += n;
   return ret;
 }
 
@@ -880,16 +889,17 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
 }
 
 - (MNVGfragUniforms*)fragUniformAtIndex:(int)index {
-  return (MNVGfragUniforms*)&_buffers.uniforms[index];
+  return (MNVGfragUniforms*)&_buffers.renderData->uniforms[index];
 }
 
 - (void)renderCancel {
-  _buffers.image = 0;
+  MNVGrenderData* renderData = _buffers.renderData;
+  renderData->image = 0;
   _buffers.isBusy = NO;
-  _buffers.nindexes = 0;
-  _buffers.nverts = 0;
-  _buffers.ncalls = 0;
-  _buffers.nuniforms = 0;
+  renderData->nindexes = 0;
+  renderData->nverts = 0;
+  renderData->ncalls = 0;
+  renderData->nuniforms = 0;
   dispatch_semaphore_signal(_semaphore);
 }
 
@@ -1009,7 +1019,10 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
   }
   _cbuffers = [NSMutableArray arrayWithCapacity:_maxBuffers];
   for (int i = _maxBuffers; i--;) {
-    [_cbuffers addObject:[MNVGbuffers new]];
+      MNVGbuffers *buffer = [MNVGbuffers new];
+      buffer.renderData = malloc(sizeof(MNVGrenderData));
+      memset(buffer.renderData, 0, sizeof(MNVGrenderData));
+      [_cbuffers addObject:buffer];
   }
   _clearBufferOnFlush = NO;
   _semaphore = dispatch_semaphore_create(_maxBuffers);
@@ -1258,7 +1271,7 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
     buffers.indexBuffer = nil;
     buffers.vertBuffer = nil;
     buffers.uniformBuffer = nil;
-    free(buffers.calls);
+    free(buffers.renderData->calls);
   }
 
   for (MNVGtexture* texture in _textures) {
@@ -1312,10 +1325,11 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
                       paths:(const NVGpath*)paths
                      npaths:(int)npaths {
   MNVGcall* call = [self allocCall];
-  NVGvertex* quad;
-
   if (call == NULL) return;
-
+    
+  NVGvertex* quad;
+  MNVGrenderData* renderData = _buffers.renderData;
+    
   call->type = MNVG_FILL;
   call->triangleCount = 4;
   call->image = paint->image;
@@ -1337,17 +1351,17 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
   if (indexOffset == -1) goto error;
   call->indexOffset = indexOffset;
   call->indexCount = indexCount;
-  uint32_t* index = &_buffers.indexes[indexOffset];
+  uint32_t* index = &renderData->indexes[indexOffset];
 
   int strokeVertOffset = vertOffset + (maxverts - strokeCount);
   call->strokeOffset = strokeVertOffset + 1;
   call->strokeCount = strokeCount - 2;
-  NVGvertex* strokeVert = _buffers.verts + strokeVertOffset;
+  NVGvertex* strokeVert = renderData->verts + strokeVertOffset;
 
   NVGpath* path = (NVGpath*)&paths[0];
   for (int i = npaths; i--; ++path) {
     if (path->nfill > 2) {
-      memcpy(&_buffers.verts[vertOffset], path->fill,
+      memcpy(&renderData->verts[vertOffset], path->fill,
              sizeof(NVGvertex) * path->nfill);
 
       int hubVertOffset = vertOffset++;
@@ -1372,7 +1386,7 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
   if (call->type == MNVG_FILL) {
     // Quad
     call->triangleOffset = vertOffset;
-    quad = &_buffers.verts[call->triangleOffset];
+    quad = &renderData->verts[call->triangleOffset];
     mtlnvg__vset(&quad[0], bounds[2], bounds[3], 0.5f, 1.0f);
     mtlnvg__vset(&quad[1], bounds[2], bounds[1], 0.5f, 1.0f);
     mtlnvg__vset(&quad[2], bounds[0], bounds[3], 0.5f, 1.0f);
@@ -1395,7 +1409,7 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
 error:
   // We get here if call alloc was ok, but something else is not.
   // Roll back the last call to prevent drawing it.
-  if (_buffers.ncalls > 0) _buffers.ncalls--;
+  if (renderData->ncalls > 0) renderData->ncalls--;
 }
 
 - (void)renderFlush {
@@ -1408,26 +1422,34 @@ error:
   id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
   id<MTLTexture> colorTexture = nil;;
   vector_uint2 textureSize;
-
   _buffers.commandBuffer = commandBuffer;
   __block MNVGbuffers* buffers = _buffers;
+  __weak id weakSelf = self;
+  __weak id weakBuffers = buffers;
+
   [commandBuffer enqueue];
   [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-      buffers.isBusy = NO;
-      buffers.commandBuffer = nil;
-      buffers.image = 0;
-      buffers.nindexes = 0;
-      buffers.nverts = 0;
-      buffers.ncalls = 0;
-      buffers.nuniforms = 0;
-      dispatch_semaphore_signal(self.semaphore);
+      if(weakBuffers) {
+        MNVGrenderData* renderData = [weakBuffers renderData];
+        renderData->image = 0;
+        renderData->nindexes = 0;
+        renderData->nverts = 0;
+        renderData->ncalls = 0;
+        renderData->nuniforms = 0;
+        [weakBuffers setIsBusy:NO];
+        [weakBuffers setCommandBuffer:nil];
+    }
+    if (weakSelf) {
+        dispatch_semaphore_signal([weakSelf semaphore]);
+    }
   }];
 
+  MNVGrenderData* renderData = _buffers.renderData;
   if (s_framebuffer == NULL ||
       nvgInternalParams(s_framebuffer->ctx)->userPtr != (__bridge void*)self) {
     textureSize = _viewPortSize;
   } else {  // renders in framebuffer
-    buffers.image = s_framebuffer->image;
+    renderData->image = s_framebuffer->image;
     MNVGtexture* tex = [self findTexture:s_framebuffer->image];
     colorTexture = tex->tex;
     textureSize = (vector_uint2){(uint)colorTexture.width,
@@ -1445,8 +1467,8 @@ error:
   if (_renderEncoder == nil) {
     return;
   }
-  MNVGcall* call = &buffers.calls[0];
-  for (int i = buffers.ncalls; i--; ++call) {
+  MNVGcall* call = &renderData->calls[0];
+  for (int i = renderData->ncalls; i--; ++call) {
     MNVGblend* blend = &call->blendFunc;
     [self updateRenderPipelineStatesForBlend:blend
                                  pixelFormat:colorTexture.pixelFormat];
@@ -1510,6 +1532,7 @@ error:
 
   if (call == NULL) return;
 
+  MNVGrenderData* renderData = _buffers.renderData;
   call->type = MNVG_STROKE;
   call->image = paint->image;
   call->blendFunc = [self blendCompositeOperation:compositeOperation];
@@ -1522,7 +1545,7 @@ error:
 
   call->strokeOffset = offset + 1;
   call->strokeCount = strokeCount - 2;
-  NVGvertex* strokeVert = _buffers.verts + offset;
+  NVGvertex* strokeVert = renderData->verts + offset;
 
   NVGpath* path = (NVGpath*)&paths[0];
   for (int i = npaths; i--; ++path) {
@@ -1577,7 +1600,7 @@ error:
 error:
   // We get here if call alloc was ok, but something else is not.
   // Roll back the last call to prevent drawing it.
-  if (_buffers.ncalls > 0) _buffers.ncalls--;
+  if (renderData->ncalls > 0) renderData->ncalls--;
 }
 
 - (void)renderTrianglesWithPaint:(NVGpaint*) paint
@@ -1592,6 +1615,7 @@ error:
 
   if (call == NULL) return;
 
+  MNVGrenderData* renderData = _buffers.renderData;
   call->type = MNVG_TRIANGLES;
   call->image = paint->image;
   call->blendFunc = [self blendCompositeOperation:compositeOperation];
@@ -1601,7 +1625,7 @@ error:
   if (call->triangleOffset == -1) goto error;
   call->triangleCount = nverts;
 
-  memcpy(&_buffers.verts[call->triangleOffset], verts,
+  memcpy(&renderData->verts[call->triangleOffset], verts,
          sizeof(NVGvertex) * nverts);
 
   // Fill shader
@@ -1626,7 +1650,7 @@ error:
 error:
   // We get here if call alloc was ok, but something else is not.
   // Roll back the last call to prevent drawing it.
-  if (_buffers.ncalls > 0) _buffers.ncalls--;
+  if (renderData->ncalls > 0) renderData->ncalls--;
 }
 
 - (int)renderUpdateTextureWithImage:(int)image
