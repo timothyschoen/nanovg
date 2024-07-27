@@ -780,8 +780,8 @@ struct NVGpath {
 	int nstroke;
     bool reversed : 1;
     bool closed : 1;
-    enum NVGwinding winding : 1;
 	bool convex : 1;
+    bool winding : 1;
 };
 typedef struct NVGpath NVGpath;
 
