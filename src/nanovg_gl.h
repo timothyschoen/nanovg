@@ -730,8 +730,6 @@ static int glnvg__renderCreate(void* uptr)
 				float outerD = fwidth(oD) * 0.5f;
 				float iD = sdroundrect(pt, extent - vec2(1.0f), radius - 1.0f) - 0.04f;
                 float innerD = fwidth(iD) * 0.5f;
-				vec2 dx = dFdx(pt);
-				vec2 dy = dFdy(pt);
 				float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
                 float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
 				result = vec4(mix(outerCol.rgba, innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
@@ -816,14 +814,19 @@ static int glnvg__renderCreate(void* uptr)
 				if (color.x < 0.02f) discard;
 				color *= scissor;
 				result = color * innerCol;
-			} else if (type == 4) { // Dot pattern for plugdata
-				vec2 pt = (paintMat * vec3(fpos, 1.0f)).xy - (0.5f * patternSize);
-				vec2 center = pt.xy - mod(pt.xy, patternSize) + (0.5f * patternSize);
-				vec4 dotColor = mix(innerCol, outerCol, smoothstep(0.5f - feather, 0.5f + feather, circleDist(pt.xy, center, radius)));
-				vec4 color = mix(dotColor, vec4(0.0f, 0.0f, 0.0f, 0.0f), 0.1f * distance(uv.xy, vec2(0.5f)));
-				color *= scissor;
-				result = color;
-			}
+            } else if (type == 4) { // Dot pattern for plugdata
+                vec2 pt = (paintMat * vec3(fpos, 1.0f)).xy - (0.5f * patternSize);
+                vec2 center = pt.xy - mod(pt.xy, patternSize) + (0.5f * patternSize);
+                float dist = circleDist(pt.xy, center, radius);
+                float delta = fwidth(dist);
+
+                // We can use this variation for zoom >= 1.0f however, it may be fine as is on retina?
+                //float alpha = smoothstep(0.45f - delta, 0.45f, dist);
+
+				float alpha = smoothstep(feather - delta, feather + delta, dist);
+                vec4 dotColor = mix(innerCol, outerCol, alpha);
+                result = dotColor * scissor;
+            }
 		#ifdef NANOVG_GL3
 			outColor = result;
 		#else
