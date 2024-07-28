@@ -282,14 +282,17 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
       return uniforms.innerCol * strokeAlpha * scissor;
   }
   if(uniforms.type == 3) {
-    float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy - (0.5 * uniforms.patternSize);
-    float2 center = pt - float2(fmod(pt.x, uniforms.patternSize), fmod(pt.y, uniforms.patternSize)) + (0.5 * uniforms.patternSize);
-    float circleDistVal = circleDist(pt, center, uniforms.radius);
-    float4 dotColor = mix(uniforms.innerCol, uniforms.outerCol, smoothstep(0.5 - uniforms.feather, 0.5 + uniforms.feather, circleDistVal));
-    float dotFade = 0.1 * distance(in.uv, float2(0.5, 0.5));
-    float4 color = mix(dotColor, float4(0.0, 0.0, 0.0, 0.0), dotFade);
-    color *= scissor;
-    return color;
+    float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0f)).xy - (0.5f * uniforms.patternSize);
+    float2 center = pt.xy - fmod(pt.xy, uniforms.patternSize) + (0.5f * uniforms.patternSize);
+    float dist = circleDist(pt.xy, center, uniforms.radius);
+    float delta = fwidth(dist);
+
+    // We can use this variation for zoom >= 1.0f however, it may be fine as is on retina?
+    //float alpha = smoothstep(0.45f - delta, 0.45f, dist);
+
+	float alpha = smoothstep(uniforms.feather - delta, uniforms.feather + delta, dist);
+    float4 dotColor = mix(uniforms.innerCol, uniforms.outerCol, alpha);
+    return dotColor * scissor;
     }
   if (uniforms.type == 0) {  // MNVG_SHADER_FILLGRAD
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
