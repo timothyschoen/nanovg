@@ -474,8 +474,11 @@ void mnvgSetViewBounds(void* view, int width, int height) {
 
 NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     CAMetalLayer *metalLayer = (CAMetalLayer*)[(__bridge UIView*)view layer];
+    id<MTLDevice> metalDevice = MTLCreateSystemDefaultDevice();
+    if (!metalDevice) return NULL;
+
     [metalLayer setPixelFormat:MTLPixelFormatRGBA8Unorm];
-    [metalLayer setDevice: MTLCreateSystemDefaultDevice()];
+    [metalLayer setDevice: metalDevice];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
     return nvgCreateMTL((__bridge void*)metalLayer, flags);
 }
@@ -486,9 +489,12 @@ void mnvgSetViewBounds(void* view, int width, int height) {
 
 NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     CAMetalLayer *metalLayer = [CAMetalLayer new];
+    id<MTLDevice> metalDevice = MTLCreateSystemDefaultDevice();
+    if (!metalDevice) return NULL;
+    
     ((__bridge NSView*) view).layer = metalLayer;
     [metalLayer setPixelFormat:MTLPixelFormatRGBA8Unorm];
-    [metalLayer setDevice: MTLCreateSystemDefaultDevice()];
+    [metalLayer setDevice: metalDevice];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
     return nvgCreateMTL((__bridge void*)((__bridge NSView*) view).layer, flags);
 }
@@ -526,7 +532,7 @@ NVGcontext* nvgCreateMTL(void* metalLayer, int flags) {
 #else
     mtl.fragSize = 256;
 #endif
-    
+
   mtl.indexSize = 4;  // MTLIndexTypeUInt32
   mtl.metalLayer = (__bridge CAMetalLayer*)metalLayer;
 
@@ -587,6 +593,11 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
                                      (float)color.b * alpha,
                                      (float)color.a);
   mtl.clearBufferOnFlush = YES;
+}
+
+void* mnvgDevice(NVGcontext* ctx) {
+  MNVGcontext* mtl = (__bridge MNVGcontext*)nvgInternalParams(ctx)->userPtr;
+  return (__bridge void*)mtl.metalLayer.device;
 }
 
 @implementation MNVGbuffers
@@ -1326,10 +1337,10 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
                      npaths:(int)npaths {
   MNVGcall* call = [self allocCall];
   if (call == NULL) return;
-    
+
   NVGvertex* quad;
   MNVGrenderData* renderData = _buffers.renderData;
-    
+
   call->type = MNVG_FILL;
   call->triangleCount = 4;
   call->image = paint->image;
