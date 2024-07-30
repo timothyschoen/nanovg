@@ -198,6 +198,7 @@ struct GLNVGfragUniforms {
 		float paintMat[12];
 		struct NVGcolor innerCol;
 		struct NVGcolor outerCol;
+        struct NVGcolor dashCol;
 		float scissorExt[2];
 		float scissorScale[2];
 		float extent[2];
@@ -212,16 +213,18 @@ struct GLNVGfragUniforms {
         float scissorRadius;
         float lineLength;
         float offset;
+        float reversed;
 	#else
 		// note: after modifying layout or size of uniform array,
 		// don't forget to also update the fragment shader source!
-		#define NANOVG_GL_UNIFORMARRAY_SIZE 13
+		#define NANOVG_GL_UNIFORMARRAY_SIZE 14
 		union {
 			struct {
 				float scissorMat[12]; // matrices are actually 3 vec4s
 				float paintMat[12];
 				struct NVGcolor innerCol;
 				struct NVGcolor outerCol;
+                struct NVGcolor dashCol;
 				float scissorExt[2];
 				float scissorScale[2];
 				float extent[2];
@@ -236,6 +239,7 @@ struct GLNVGfragUniforms {
 				float scissorRadius;
 				float lineLength;
                 float offset;
+                float reverse;
 			};
 			float uniformArray[NANOVG_GL_UNIFORMARRAY_SIZE][4];
 		};
@@ -586,6 +590,7 @@ static int glnvg__renderCreate(void* uptr)
 				mat3 paintMat;
 				vec4 innerCol;
 				vec4 outerCol;
+                vec4 dashCol;
 				vec2 scissorExt;
 				vec2 scissorScale;
 				vec2 extent;
@@ -600,6 +605,7 @@ static int glnvg__renderCreate(void* uptr)
 				float scissorRadius;
 				float lineLength;
                 float offset;
+                int reverse;
 			};
 		#else // NANOVG_GL3 && !USE_UNIFORMBUFFER
 			uniform vec4 frag[UNIFORMARRAY_SIZE];
@@ -621,20 +627,22 @@ static int glnvg__renderCreate(void* uptr)
 			#define paintMat mat3(frag[3].xyz, frag[4].xyz, frag[5].xyz)
 			#define innerCol frag[6]
 			#define outerCol frag[7]
-			#define scissorExt frag[8].xy
-			#define scissorScale frag[8].zw
-			#define extent frag[9].xy
-			#define radius frag[9].z
-			#define feather frag[9].w
-			#define strokeMult frag[10].x
-			#define strokeThr frag[10].y
-			#define patternSize frag[10].z
-			#define lineStyle int(frag[10].w)
-			#define texType int(frag[11].x)
-			#define type int(frag[11].y)
-			#define scissorRadius frag[11].z
-			#define lineLength frag[11].w
-            #define offset frag[12].x
+            #define dashCol frag[8]
+			#define scissorExt frag[9].xy
+			#define scissorScale frag[9].zw
+			#define extent frag[10].xy
+			#define radius frag[10].z
+			#define feather frag[10].w
+			#define strokeMult frag[11].x
+			#define strokeThr frag[11].y
+			#define patternSize frag[11].z
+			#define lineStyle int(frag[11].w)
+			#define texType int(frag[12].x)
+			#define type int(frag[12].y)
+			#define scissorRadius frag[12].z
+			#define lineLength frag[12].w
+            #define offset frag[13].x
+            #deinne reverse frag[13].y
 		#endif
 
 		float sdroundrect(vec2 pt, vec2 ext, float rad) {
@@ -642,6 +650,11 @@ static int glnvg__renderCreate(void* uptr)
 			vec2 d = abs(pt) - ext2;
 			return min(max(d.x,d.y),0.0f) + length(max(d,0.0f)) - rad;
 		}
+        float sdSegment(vec2 p, vec2 a, vec2 b ) {
+            vec2 pa = p-a, ba = b-a;
+            float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0f, 1.0f );
+            return length( pa - ba*h );
+        }
         float inverseLerp(float a, float b, float value) {
             return (value - a) / (b - a);
         }
@@ -674,21 +687,18 @@ static int glnvg__renderCreate(void* uptr)
 		float circleDist(vec2 p, vec2 center, float d) {
 			 return distance(center, p) - d;
 		}
-		float dashed(vec2 uv){
-            vec2 UV = vec2(uv.x, uv.y - offset);
-			float fy = fract(UV.y / radius);
-			float w = step(fy, (radius / 8.0f));
-			fy *= (radius * 0.75);
-			if(fy >= (radius / 2.666f)) {
-				fy -= (radius / 2.666f);
-			} else if(fy <= (radius / 8.0f)) {
-				fy -= (radius / 8.0f);
-			} else {
-				fy = 0.0f;
-			}
-			w *= smoothstep(0.0f, 1.0f, (radius * 1.5f) * (0.25f - (UV.x * UV.x  + fy * fy)));
-			return w;
-		}
+		float dashed(vec2 uv, float rad, float thickness, float featherVal){
+			float fy = mod(uv.y, rad);
+            float radThick = rad * .25f;
+            float seg = sdSegment(vec2(uv.x, fy), vec2(0.0f, radThick + thickness), vec2(0.0f, (rad * 0.5f) + radThick - thickness)) - thickness;
+            float delta = fwidth(seg) * 0.5f;
+            //vec2 dx = dFdx(uv);
+            //vec2 dy = dFdy(uv);
+            //float alias = 0.5f * length(max(abs(dx), abs(dy)));
+            float aa = delta;
+            float w = clamp(inverseLerp(aa, -aa, seg), 0.0f, 1.0f);
+            return w;
+        }
 		float dotted(vec2 uv){
 			float fy = 4.0f * fract(uv.y / (4.0)) - 0.5f;
 			return smoothstep(0.0f, 1.0f, 6.0f * (0.25f - (uv.x * uv.x  + fy * fy)));
@@ -697,7 +707,7 @@ static int glnvg__renderCreate(void* uptr)
 		// Stroke - from [0..1] to clipped pyramid, where the slope is 1px.
 		float strokeMask() {
 			float mask = min(1.0f, (1.0f-abs(ftcoord.x*2.0f-1.0f))*strokeMult) * min(1.0f, ftcoord.y);
-			if(lineStyle == 2) mask*=dashed(vec2(uv.x, uv.y * lineLength));
+			if(lineStyle == 2) mask*=dashed(vec2(uv.x, uv.y * lineLength - offset), radius, 0.45f, 0.0f);
 			if(lineStyle == 3) mask*=dotted(uv);
 			if(lineStyle == 4) mask*=glow(uv);
 			return mask;
@@ -705,7 +715,7 @@ static int glnvg__renderCreate(void* uptr)
 		#else
 		float strokeMask() {
 			float mask = 1.0f;
-			if(lineStyle == 2) mask*=dashed(vec2(uv.x, uv.y * lineLength));
+			if(lineStyle == 2) mask*=dashed(vec2(uv.x, uv.y * lineLength - offset), radius, 0.45f, 0.0f);
 			if(lineStyle == 3) mask*=dotted(uv);
 			if(lineStyle == 4) mask*=glow(uv);
 			return mask;
@@ -749,25 +759,22 @@ static int glnvg__renderCreate(void* uptr)
 			if (type == 6) { // fill color
 				result = innerCol * strokeAlpha * scissor;
 			}
-			if (type == 7) { // double stroke with rounded caps, for  plugdata connections
-				float colorMix = (1.0 - 2.15 * abs(uv.x));
-				float smoothStart = 1.0f - feather;
-				float smoothEnd = feather;
-				vec4 icol = innerCol;
-				if (uv.y < 0.0) {
-					float dist = distance(vec2(uv.x * 2.0, uv.y * lineLength * 2.0), vec2(0.0, 0.0));
-					strokeAlpha *= 1.0 - step(1.0, dist);
-					float innerCap = 1.0 - smoothstep(smoothStart, smoothEnd, dist);
-					icol = mix(outerCol, icol, innerCap);
-				}
-				if (uv.y > 0.5) {
-					vec2 capStart = vec2(uv.x, (0.5 - uv.y) * lineLength);
-					float dist = distance(2.0 * capStart, vec2(0.0, 0.0));
-					strokeAlpha *= 1.0 - step(1.0, dist);
-					float innerCap = 1.0 - smoothstep(smoothStart, smoothEnd, dist);
-					icol = mix(outerCol, icol, innerCap);
-				}
-				result = mix(outerCol, icol, smoothstep(smoothStart, smoothEnd, clamp(colorMix, 0.0, 1.0))) * strokeAlpha * scissor;
+			if (type == 7) { // double stroke with rounded caps, for plugdata connections
+                // deal with path flipping here - instead of in geometry
+                float revUVy = (reverse > 0.5f) ? 0.5f - uv.y : uv.y;
+                vec2 uvLine = vec2(uv.x, revUVy * lineLength);
+                float seg = sdSegment(uvLine, vec2(0.0f), vec2(0.0f, lineLength * 0.5f));
+                float outerSeg = seg - 0.45f;
+                float outerDelta = fwidth(outerSeg);
+                float outerShape = clamp(inverseLerp(outerDelta, -outerDelta, outerSeg), 0.0f, 1.0f);
+                float innerSeg = seg - 0.22f;
+                float innerDelta = fwidth(innerSeg);
+                float innerShape = clamp(inverseLerp(innerDelta, -innerDelta, innerSeg), 0.0f, 1.0f);
+                float pattern = 0.0f;
+                if (radius > 0.0f) {
+                    pattern = dashed(uvLine, radius, 0.22f, feather);
+                }
+                result = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape) * outerShape * scissor;
 			}
 			if(type == 8) { // NSVG_SHADER_SMOOTH_GLOW
                 vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
@@ -1076,7 +1083,7 @@ static NVGcolor glnvg__premulColor(NVGcolor c)
 }
 
 static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpaint* paint,
-							   NVGscissor* scissor, float width, float fringe, float strokeThr, float lineLength, int lineStyle)
+							   NVGscissor* scissor, float width, float fringe, float strokeThr, float lineLength, int lineStyle, bool lineReversed = false)
 {
 	GLNVGtexture* tex = NULL;
 	float invxform[6];
@@ -1151,8 +1158,11 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         frag->radius = paint->radius;
     } else if(paint->double_stroke) {
         frag->type = NSVG_DOUBLE_STROKE;
+        frag->dashCol = glnvg__premulColor(paint->dashColor);
         frag->lineLength = lineLength;
         frag->feather = paint->feather;
+        frag->radius = paint->radius;
+        frag->reversed = lineReversed;
         nvgTransformInverse(invxform, paint->xform);
     }
     else if(paint->smooth_glow) {
@@ -1664,6 +1674,8 @@ static void glnvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperati
 	GLNVGcall* call = glnvg__allocCall(gl);
 	int i, maxverts, offset;
 
+    bool lineReversed = false;
+
 	if (call == NULL) return;
 
 	call->type = GLNVG_STROKE;
@@ -1683,6 +1695,7 @@ static void glnvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperati
 		const NVGpath* path = &paths[i];
 		memset(copy, 0, sizeof(GLNVGpath));
 		if (path->nstroke) {
+            lineReversed = path->reversed;
 			copy->strokeOffset = offset;
 			copy->strokeCount = path->nstroke;
 			memcpy(&gl->verts[offset], path->stroke, sizeof(NVGvertex) * path->nstroke);
@@ -1702,7 +1715,7 @@ static void glnvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperati
 		// Fill shader
 		call->uniformOffset = glnvg__allocFragUniforms(gl, 1);
 		if (call->uniformOffset == -1) goto error;
-		glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset), paint, scissor, strokeWidth, fringe, -1.0f, lineLength, lineStyle);
+		glnvg__convertPaint(gl, nvg__fragUniformPtr(gl, call->uniformOffset), paint, scissor, strokeWidth, fringe, -1.0f, lineLength, lineStyle, lineReversed);
 	}
 
 	return;

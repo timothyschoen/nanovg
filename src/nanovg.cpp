@@ -756,9 +756,10 @@ void nvgMiterLimit(NVGcontext* ctx, float limit)
 	state->miterLimit = limit;
 }
 
-void nvgLineStyle(NVGcontext* ctx, int lineStyle) {
+void nvgLineStyle(NVGcontext* ctx, int lineStyle, float feather) {
 	NVGstate* state = nvg__getState(ctx);
 	state->lineStyle = lineStyle;
+	state->stroke.feather = feather;
 }
 
 // Set line dash length if NVG_LINE_DASHED is active
@@ -949,7 +950,7 @@ NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patt
     return p;
 }
 
-NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol)
+NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor dashCol, float dashSize)
 {
     NVGpaint p;
     NVG_NOTUSED(ctx);
@@ -957,12 +958,15 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol)
 
     nvgTransformIdentity(p.xform);
     p.double_stroke = 1;
+    p.radius = dashSize;
     p.innerColor = icol;
     p.outerColor = ocol;
+    p.dashColor = dashCol;
     p.feather = ctx->devicePxRatio < 2.0f ? 0.8 : 0.6;
     
     NVGstate* state = nvg__getState(ctx);
     state->lineStyle = NVG_DOUBLE_STROKE;
+    state->stroke.radius = dashSize;
     
     return p;
 }
@@ -1856,12 +1860,14 @@ static NVGvertex* nvg__doubleStrokeCapStart(NVGvertex* dst, NVGpoint* p,
     float py = p->y - dy*d;
     float dlx = dy;
     float dly = -dx;
-    nvg__vset(dst, px + dlx*w - dx*aa, py + dly*w - dy*aa, u0,0, -1, t); dst++;
-    nvg__vset(dst, px - dlx*w - dx*aa, py - dly*w - dy*aa, u1,0, 1, t); dst++;
-    nvg__vset(dst, px + dlx*w, py + dly*w, u0,1, -1, t - invLength); dst++;
-    nvg__vset(dst, px - dlx*w, py - dly*w, u1,1, 1, t - invLength); dst++;
+
+    nvg__vset(dst, px + dlx * w, py + dly * w, u0, 1, -1, t); dst++;
+    nvg__vset(dst, px - dlx * w, py - dly * w, u1, 1, 1, t); dst++;
+    nvg__vset(dst, px + dlx * w - dx * aa, py + dly * w - dy * aa, u0, 0, -1, t - invLength); dst++;
+    nvg__vset(dst, px - dlx * w - dx * aa, py - dly * w - dy * aa, u1, 0, 1, t - invLength); dst++;
+
     return dst;
-}
+ }
 
 static NVGvertex* nvg__doubleStrokeCapEnd(NVGvertex* dst, NVGpoint* p,
                                   float dx, float dy, float w, float d,
@@ -1871,10 +1877,12 @@ static NVGvertex* nvg__doubleStrokeCapEnd(NVGvertex* dst, NVGpoint* p,
     float py = p->y + dy*d;
     float dlx = dy;
     float dly = -dx;
-    nvg__vset(dst, px + dlx*w, py + dly*w, u0, 1 , -1, t + invLength); dst++;
-    nvg__vset(dst, px - dlx*w, py - dly*w, u1, 1 , 1, t + invLength); dst++;
-    nvg__vset(dst, px + dlx*w + dx*aa, py + dly*w + dy*aa, u0, 0, -1, t); dst++;
-    nvg__vset(dst, px - dlx*w + dx*aa, py - dly*w + dy*aa, u1, 0, 1, t); dst++;
+
+    nvg__vset(dst, px + dlx * w + dx * aa, py + dly * w + dy * aa, u0, 0, -1, t + invLength); dst++;
+    nvg__vset(dst, px - dlx * w + dx * aa, py - dly * w + dy * aa, u1, 0, 1, t + invLength); dst++;
+    nvg__vset(dst, px + dlx * w, py + dly * w, u0, 1, -1, t); dst++;
+    nvg__vset(dst, px - dlx * w, py - dly * w, u1, 1, 1, t); dst++;
+
     return dst;
 }
 
@@ -2142,10 +2150,10 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			// Add cap
 			dx = p1->x - p0->x;
 			dy = p1->y - p0->y;
-			nvg__normalize(&dx, &dy);
-            if(lineStyle == 5)
-                dst = nvg__doubleStrokeCapStart(dst, p0, dx, dy, w, w-aa, aa, u0, u1, t, invLength);
-            else if (lineCap == NVG_BUTT)
+            nvg__normalize(&dx, &dy);
+            if(lineStyle == 5) {
+                dst = nvg__doubleStrokeCapStart(dst, p0, dx, dy, w, w - aa, aa, u0, u1, t, invLength);
+            }else if (lineCap == NVG_BUTT)
 				dst = nvg__buttCapStart(dst, p0, dx, dy, w, -aa*0.5f, aa, u0, u1, t, invLength);
 			else if (lineCap == NVG_SQUARE)
 				dst = nvg__buttCapStart(dst, p0, dx, dy, w, w-aa, aa, u0, u1, t, invLength);
