@@ -756,10 +756,10 @@ void nvgMiterLimit(NVGcontext* ctx, float limit)
 	state->miterLimit = limit;
 }
 
-void nvgLineStyle(NVGcontext* ctx, int lineStyle, float feather) {
+void nvgLineStyle(NVGcontext* ctx, int lineStyle) {
 	NVGstate* state = nvg__getState(ctx);
 	state->lineStyle = lineStyle;
-	state->stroke.feather = feather;
+	//state->stroke.feather = feather;
 }
 
 // Set line dash length if NVG_LINE_DASHED is active

@@ -108,6 +108,7 @@ struct MNVGfragUniforms {
   matrix_float3x3 paintMat;
   vector_float4 innerCol;
   vector_float4 outerCol;
+  vector_float4 dashCol;
   vector_float2 scissorExt;
   vector_float2 scissorScale;
   vector_float2 extent;
@@ -122,6 +123,7 @@ struct MNVGfragUniforms {
   float offset;
   int lineStyle;
   float lineLength;
+  int reversed;
 };
 typedef struct MNVGfragUniforms MNVGfragUniforms;
 
@@ -733,7 +735,8 @@ void* mnvgDevice(NVGcontext* ctx) {
                     fringe:(float)fringe
                  lineStyle:(int)lineStyle
                 lineLength:(float)lineLength
-                 strokeThr:(float)strokeThr {
+                 strokeThr:(float)strokeThr
+              lineReversed: (int)lineReversed {
   MNVGtexture* tex = nil;
   float invxform[6];
   int is_gradient = memcmp(&(paint->innerColor), &(paint->outerColor), sizeof(paint->outerColor));
@@ -742,9 +745,9 @@ void* mnvgDevice(NVGcontext* ctx) {
 
   frag->innerCol = mtlnvg__premulColor(paint->innerColor);
   frag->outerCol = mtlnvg__premulColor(paint->outerColor);
+  frag->dashCol = mtlnvg__premulColor(paint->dashColor);
   frag->lineStyle = lineStyle;
   frag->radius = paint->radius;
-  frag->offset = paint->offset * paint->radius;
 
   if (scissor->extent[0] < -0.5f || scissor->extent[1] < -0.5f) {
     frag->scissorMat = matrix_from_rows((vector_float3){0, 0, 0},
@@ -802,6 +805,8 @@ void* mnvgDevice(NVGcontext* ctx) {
         frag->type = MNVG_SHADER_DOUBLE_STROKE;
         frag->lineLength = lineLength;
         frag->feather = paint->feather;
+        frag->radius = paint->radius;
+        frag->reversed = lineReversed;
         nvgTransformInverse(invxform, paint->xform);
   }
   else if(paint->smooth_glow) {
@@ -1414,7 +1419,8 @@ void* mnvgDevice(NVGcontext* ctx) {
                      fringe:fringe
                      lineStyle:NVG_LINE_SOLID
                      lineLength:0.0f
-                  strokeThr:-1.0f];
+                    strokeThr:-1.0f
+                    lineReversed:0];
   return;
 
 error:
@@ -1559,8 +1565,10 @@ error:
   NVGvertex* strokeVert = renderData->verts + offset;
 
   NVGpath* path = (NVGpath*)&paths[0];
+  int lineReversed = 0;
   for (int i = npaths; i--; ++path) {
     if (path->nstroke > 0) {
+      lineReversed = path->reversed;
       memcpy(strokeVert, path->stroke, sizeof(NVGvertex));
       ++strokeVert;
       memcpy(strokeVert, path->stroke, sizeof(NVGvertex) * path->nstroke);
@@ -1581,7 +1589,8 @@ error:
                        fringe:fringe
                     lineStyle:lineStyle
                     lineLength:lineLength
-                    strokeThr:-1.0f];
+                    strokeThr:-1.0f
+                    lineReversed:lineReversed];
     MNVGfragUniforms* frag = [self
         fragUniformAtIndex:call->uniformOffset + _fragSize];
     [self convertPaintForFrag:frag
@@ -1591,7 +1600,8 @@ error:
                        fringe:fringe
                        lineStyle:lineStyle
                        lineLength:lineLength
-                    strokeThr:(1.0f - 0.5f / 255.0f)];
+                        strokeThr:(1.0f - 0.5f / 255.0f)
+                        lineReversed:lineReversed];
   } else {
     // Fill shader
     call->uniformOffset = [self allocFragUniforms:1];
@@ -1603,7 +1613,8 @@ error:
                        fringe:fringe
                     lineStyle:lineStyle
                     lineLength:lineLength
-                    strokeThr:-1.0f];
+                    strokeThr:-1.0f
+                    lineReversed:lineReversed];
   }
 
   return;
@@ -1650,7 +1661,8 @@ error:
                      fringe:fringe
                     lineStyle:NVG_LINE_SOLID
                     lineLength:0.0f
-                  strokeThr:-1.0f];
+                  strokeThr:-1.0f
+               lineReversed:0];
 
     if(text) {
         frag->type = MNVG_SHADER_IMG;

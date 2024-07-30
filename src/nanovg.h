@@ -317,7 +317,7 @@ void nvgStrokeWidth(NVGcontext* ctx, float size);
 
 // Sets how line is drawn.
 // Can be one of NVG_LINE_SOLID (default), NVG_LINE_GLOW, NVG_LINE_DASHED, NVG LINE_DOTTED
-void nvgLineStyle(NVGcontext* ctx, int lineStyle, float feather = 0.0f);
+void nvgLineStyle(NVGcontext* ctx, int lineStyle);
 
 // Set line dash length if NVG_LINE_DASHED is active
 void nvgDashLength(NVGcontext* ctx, float length);
@@ -489,7 +489,7 @@ NVGpaint nvgImagePattern(NVGcontext* ctx, float ox, float oy, float ex, float ey
 NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patternSize, float dotRadius, float feather);
 
 // Creates a double-stroked line with rounded caps (used for plugdata connection cords)
-NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor dashCol = nvgRGBA(0,0,0,0), float dashSize = 0.0f);
+NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor dashCol, float dashSize);
 
 // Fills a rectangle directly, bypassing paths system
 void nvgFillRect(NVGcontext* ctx, float x1, float y1, float w, float h);
