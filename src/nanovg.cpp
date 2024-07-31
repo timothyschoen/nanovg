@@ -2110,7 +2110,6 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 
         float length = 0.0f;
         float invLength = 1.0f;
-        //float widthIncrement = 1.0 / (w - (aa * 0.5f));
         if(lineStyle > 1) {
             for (int i = 0; i < e; ++i)
             {
