@@ -125,7 +125,7 @@ float sdSegment(float2 p, float2 a, float2 b ) {
     return length( pa - ba*h );
 }
 
-float dashed(float2 uv, float rad, float thickness, float featherVal){
+float dashed(float2 uv, float rad, float thickness, float featherVal) {
 	float fy = fmod(uv.y, rad);
     float radThick = rad * .25f;
     float seg = sdSegment(float2(uv.x, fy), float2(0.0f, radThick + thickness), float2(0.0f, (rad * 0.5f) + radThick - thickness)) - thickness;
@@ -191,7 +191,6 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     float4 result = float4(mix(uniforms.outerCol.rgba, uniforms.innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
     return result * strokeAlpha;
   }
-
   if(uniforms.type == 6) { // MNVG_SHADER_DOUBLE_STROKE
     float revUVy = (uniforms.reverse > 0.5f) ? 0.5f - in.uv.y : in.uv.y;
     float2 uvLine = float2(in.uv.x, revUVy * uniforms.lineLength);

@@ -2042,8 +2042,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 	float aa = fringe;//ctx->fringeWidth;
 	float u0 = 0.0f, u1 = 1.0f;
 	int ncap = nvg__curveDivs(w, NVG_PI, ctx->tessTol);	// Calculate divisions per half circle.
-
-	w += aa * 0.5f;
+    if(lineStyle <= 1) w += aa * 0.5f;
 	const float invStrokeWidth = 1.0 / w;
 	// Disable the gradient used for antialiasing when antialiasing is not used.
 	if (aa == 0.0f) {
@@ -2111,6 +2110,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 
         float length = 0.0f;
         float invLength = 1.0f;
+        //float widthIncrement = 1.0 / (w - (aa * 0.5f));
         if(lineStyle > 1) {
             for (int i = 0; i < e; ++i)
             {
@@ -2125,7 +2125,6 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
         ctx->currentLineLength = length;
         
 		t = 0;
-
 		int dir = 1;
 		if(lineStyle > 1 && lineStyle != 5 && path->reversed) {
 			dir = -1;
