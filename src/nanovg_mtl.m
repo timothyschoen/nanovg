@@ -179,7 +179,9 @@ typedef struct MNVGrenderData MNVGrenderData;
 @property (nonatomic, assign) vector_uint2 viewPortSize;
 @property (nonatomic, assign) MTLClearColor clearColor;
 @property (nonatomic, assign) BOOL clearBufferOnFlush;
-
+@property (nonatomic, assign) int lastUniformOffset;
+@property (nonatomic, assign) int lastBoundTexture;
+@property (nonatomic, weak)   id<MTLTexture> lastColorTexture;
 // Textures
 @property (nonatomic, strong) NSMutableArray<MNVGtexture*>* textures;
 @property int textureId;
@@ -207,7 +209,6 @@ typedef struct MNVGrenderData MNVGrenderData;
 @property (nonatomic, strong) id<MTLRenderPipelineState> pipelineState;
 @property (nonatomic, strong) id<MTLRenderPipelineState>
     stencilOnlyPipelineState;
-@property (nonatomic, strong) id<MTLSamplerState> pseudoSampler;
 @property (nonatomic, strong) id<MTLTexture> pseudoTexture;
 @property (nonatomic, strong) MTLVertexDescriptor* vertexDescriptor;
 
@@ -281,7 +282,8 @@ typedef struct MNVGrenderData MNVGrenderData;
 - (void)triangles:(MNVGcall*)call;
 
 - (void)updateRenderPipelineStatesForBlend:(MNVGblend*)blend
-                               pixelFormat:(MTLPixelFormat)pixelFormat;
+                               pixelFormat:(MTLPixelFormat)pixelFormat
+                  forceUpdatePipelineState:(int)forceUpdatePipelineState;
 
 @end
 
@@ -534,7 +536,8 @@ NVGcontext* nvgCreateMTL(void* metalLayer, int flags) {
 #else
     mtl.fragSize = 256;
 #endif
-
+  mtl.lastUniformOffset = 0;
+  mtl.lastBoundTexture = -1;
   mtl.indexSize = 4;  // MTLIndexTypeUInt32
   mtl.metalLayer = (__bridge CAMetalLayer*)metalLayer;
 
@@ -844,7 +847,6 @@ void* mnvgDevice(NVGcontext* ctx) {
 - (void)convexFill:(MNVGcall*)call {
   const int kIndexBufferOffset = call->indexOffset * _indexSize;
   [self setUniforms:call->uniformOffset image:call->image];
-  [_renderEncoder setRenderPipelineState:_pipelineState];
   if (call->indexCount > 0) {
     [_renderEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                                indexCount:call->indexCount
@@ -934,10 +936,11 @@ void* mnvgDevice(NVGcontext* ctx) {
   descriptor.colorAttachments[0].texture = colorTexture;
   _clearBufferOnFlush = NO;
 
+    /*
   descriptor.stencilAttachment.clearStencil = 0;
   descriptor.stencilAttachment.loadAction = MTLLoadActionClear;
   descriptor.stencilAttachment.storeAction = MTLStoreActionDontCare;
-  descriptor.stencilAttachment.texture = _buffers.stencilTexture;
+  descriptor.stencilAttachment.texture = _buffers.stencilTexture; */
 
   id<MTLCommandBuffer> commandBuffer = _buffers.commandBuffer;
   id<MTLRenderCommandEncoder> encoder = [commandBuffer
@@ -958,6 +961,7 @@ void* mnvgDevice(NVGcontext* ctx) {
                   atIndex:MNVG_VERTEX_INPUT_INDEX_VIEW_SIZE];
 
   [encoder setFragmentBuffer:_buffers.uniformBuffer offset:0 atIndex:0];
+    
   return encoder;
 }
 
@@ -978,16 +982,13 @@ void* mnvgDevice(NVGcontext* ctx) {
   return 0;
 #endif
 
-  bool creates_pseudo_texture = false;
   unsigned char* metal_library_bitcode;
   unsigned int metal_library_bitcode_len;
 #if TARGET_OS_SIMULATOR
   metal_library_bitcode = mnvg_bitcode_simulator;
   metal_library_bitcode_len = mnvg_bitcode_simulator_len;
 #elif TARGET_OS_IOS
-  if (@available(iOS 10, *)) {
-  } else if (@available(iOS 8, *)) {
-    creates_pseudo_texture = true;
+  if (@available(iOS 8, *)) {
   } else {
     return 0;
   }
@@ -1060,13 +1061,7 @@ void* mnvgDevice(NVGcontext* ctx) {
   _textureId = 0;
   _textures = [NSMutableArray array];
 
-  // Initializes default sampler descriptor.
-  MTLSamplerDescriptor* samplerDescriptor = [MTLSamplerDescriptor new];
-  _pseudoSampler = [_metalLayer.device
-      newSamplerStateWithDescriptor:samplerDescriptor];
-
-  // Initializes pseudo texture for macOS.
-  if (creates_pseudo_texture) {
+  // Initializes pseudo texture
     const int kPseudoTextureImage = [self
         renderCreateTextureWithType:NVG_TEXTURE_ALPHA
         width:1
@@ -1075,7 +1070,6 @@ void* mnvgDevice(NVGcontext* ctx) {
         data:NULL];
     MNVGtexture* tex = [self findTexture:kPseudoTextureImage];
     _pseudoTexture = tex->tex;
-  }
 
   // Initializes default blend states.
   _blendFunc = malloc(sizeof(MNVGblend));
@@ -1193,8 +1187,7 @@ void* mnvgDevice(NVGcontext* ctx) {
       height:height
       mipmapped:(imageFlags & NVG_IMAGE_GENERATE_MIPMAPS ? YES : NO)];
   textureDescriptor.usage = MTLTextureUsageShaderRead
-                            | MTLTextureUsageRenderTarget
-                            | MTLTextureUsageShaderWrite;
+                            | MTLTextureUsageRenderTarget;
 #if TARGET_OS_SIMULATOR
   textureDescriptor.storageMode = MTLStorageModePrivate;
 #endif  // TARGET_OS_SIMULATOR
@@ -1310,7 +1303,6 @@ void* mnvgDevice(NVGcontext* ctx) {
   _vertexFunction = nil;
   _pipelineState = nil;
   _stencilOnlyPipelineState = nil;
-  _pseudoSampler = nil;
   _pseudoTexture = nil;
   _vertexDescriptor = nil;
   _metalLayer.device = nil;
@@ -1437,7 +1429,7 @@ error:
   }
 
   id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
-  id<MTLTexture> colorTexture = nil;;
+  id<MTLTexture> colorTexture = nil;
   vector_uint2 textureSize;
   _buffers.commandBuffer = commandBuffer;
   __block MNVGbuffers* buffers = _buffers;
@@ -1473,14 +1465,16 @@ error:
                                  (uint)colorTexture.height};
   }
   if (textureSize.x == 0 || textureSize.y == 0) return;
-  [self updateStencilTextureToSize:&textureSize];
+  //[self updateStencilTextureToSize:&textureSize];
 
   id<CAMetalDrawable> drawable = nil;
   if (colorTexture == nil) {
     drawable = _metalLayer.nextDrawable;
     colorTexture = drawable.texture;
   }
+  
   _renderEncoder = [self renderCommandEncoderWithColorTexture:colorTexture];
+    
   if (_renderEncoder == nil) {
     return;
   }
@@ -1488,8 +1482,9 @@ error:
   for (int i = renderData->ncalls; i--; ++call) {
     MNVGblend* blend = &call->blendFunc;
     [self updateRenderPipelineStatesForBlend:blend
-                                 pixelFormat:colorTexture.pixelFormat];
-
+                                 pixelFormat:colorTexture.pixelFormat
+                                 forceUpdatePipelineState:(i==(renderData->ncalls - 1))];
+      
     if (call->type == MNVG_FILL)
       [self fill:call];
     else if (call->type == MNVG_CONVEXFILL)
@@ -1524,6 +1519,8 @@ error:
     [_buffers.commandBuffer waitUntilScheduled];
     [drawable present];
   }
+    
+  _lastBoundTexture = -1;
 }
 
 - (int)renderGetTextureSizeForImage:(int)image
@@ -1757,15 +1754,16 @@ error:
 }
 
 - (void)setUniforms:(int)uniformOffset image:(int)image {
-  [_renderEncoder setFragmentBufferOffset:uniformOffset atIndex:0];
-
-  MNVGtexture* tex = (image == 0 ? nil : [self findTexture:image]);
-  if (tex != nil) {
-    [_renderEncoder setFragmentTexture:tex->tex atIndex:0];
-    [_renderEncoder setFragmentSamplerState:tex->sampler atIndex:0];
-  } else {
-    [_renderEncoder setFragmentTexture:_pseudoTexture atIndex:0];
-    [_renderEncoder setFragmentSamplerState:_pseudoSampler atIndex:0];
+  if(_lastUniformOffset != uniformOffset) {
+    [_renderEncoder setFragmentBufferOffset:uniformOffset atIndex:0];
+    _lastUniformOffset = uniformOffset;
+  }
+    
+  if ( _lastBoundTexture != image) {
+      MNVGtexture* tex = image ? [self findTexture:image] : nil;
+      [_renderEncoder setFragmentTexture:(tex != nil ? tex->tex : _pseudoTexture) atIndex:0];
+      [_renderEncoder setFragmentSamplerState:(tex != nil ? tex->sampler : nil) atIndex:0];
+      _lastBoundTexture = image;
   }
 }
 
@@ -1778,7 +1776,6 @@ error:
     // Fills the stroke base without overlap.
     [self setUniforms:(call->uniformOffset + _fragSize) image:call->image];
     [_renderEncoder setDepthStencilState:_strokeShapeStencilState];
-    [_renderEncoder setRenderPipelineState:_pipelineState];
     [_renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
                        vertexStart:call->strokeOffset
                        vertexCount:call->strokeCount];
@@ -1797,10 +1794,10 @@ error:
                        vertexStart:call->strokeOffset
                        vertexCount:call->strokeCount];
     [_renderEncoder setDepthStencilState:_defaultStencilState];
+    [_renderEncoder setRenderPipelineState:_pipelineState];
   } else {
     // Draws strokes.
     [self setUniforms:call->uniformOffset image:call->image];
-    [_renderEncoder setRenderPipelineState:_pipelineState];
     [_renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
                        vertexStart:call->strokeOffset
                        vertexCount:call->strokeCount];
@@ -1809,14 +1806,15 @@ error:
 
 - (void)triangles:(MNVGcall*)call {
   [self setUniforms:call->uniformOffset image:call->image];
-  [_renderEncoder setRenderPipelineState:_pipelineState];
   [_renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle
                      vertexStart:call->triangleOffset
                      vertexCount:call->triangleCount];
 }
 
 - (void)updateRenderPipelineStatesForBlend:(MNVGblend*)blend
-                               pixelFormat:(MTLPixelFormat)pixelFormat {
+                               pixelFormat:(MTLPixelFormat)pixelFormat
+                   forceUpdatePipelineState:(int)forceUpdatePipelineState
+{
   if (_pipelineState != nil &&
       _stencilOnlyPipelineState != nil &&
       _piplelinePixelFormat == pixelFormat &&
@@ -1824,6 +1822,10 @@ error:
       _blendFunc->dstRGB == blend->dstRGB &&
       _blendFunc->srcAlpha == blend->srcAlpha &&
       _blendFunc->dstAlpha == blend->dstAlpha) {
+    if(forceUpdatePipelineState)
+    {
+        [_renderEncoder setRenderPipelineState:_pipelineState];
+    }
     return;
   }
 
@@ -1863,6 +1865,7 @@ error:
   [self checkError:error withMessage:"init pipeline stencil only state"];
 
   _piplelinePixelFormat = pixelFormat;
+  [_renderEncoder setRenderPipelineState:_pipelineState];
 }
 
 // Re-creates stencil texture whenever the specified size is bigger.
