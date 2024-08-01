@@ -96,6 +96,7 @@ struct NVGpaint {
     bool dots : 1;
     bool rounded_rect : 1;
     bool double_stroke : 1;
+    bool gradient_stroke : 1;
     bool smooth_glow : 1;
 };
 typedef struct NVGpaint NVGpaint;
@@ -489,7 +490,7 @@ NVGpaint nvgImagePattern(NVGcontext* ctx, float ox, float oy, float ex, float ey
 NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patternSize, float dotRadius, float feather);
 
 // Creates a double-stroked line with rounded caps (used for plugdata connection cords)
-NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor dashCol, float dashSize);
+NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor dashCol, float dashSize, bool isGradientStroke = false);
 
 // Fills a rectangle directly, bypassing paths system
 void nvgFillRect(NVGcontext* ctx, float x1, float y1, float w, float h);

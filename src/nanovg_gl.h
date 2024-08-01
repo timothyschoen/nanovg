@@ -129,7 +129,8 @@ enum GLNVGshaderType {
 	NSVG_SHADER_FAST_ROUNDEDRECT,
 	NSVG_SHADER_FILLCOLOR,
     NSVG_DOUBLE_STROKE,
-    NSVG_SMOOTH_GLOW
+    NSVG_SMOOTH_GLOW,
+    NSVG_DOUBLE_STROKE_GRAD
 };
 
 #if NANOVG_GL_USE_UNIFORMBUFFER
@@ -738,7 +739,8 @@ static int glnvg__renderCreate(void* uptr)
 				vec2 pt = (paintMat * vec3(fpos,1.0f)).xy;
                 float oD = sdroundrect(pt, extent, radius) - 0.04f;
 				float outerD = fwidth(oD) * 0.5f;
-				float iD = sdroundrect(pt, extent - vec2(1.0f), radius - 1.0f) - 0.04f;
+                // Use same SDF but reduce by 1px
+				float iD = oD + 1.0f;
                 float innerD = fwidth(iD) * 0.5f;
 				float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
                 float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
@@ -759,7 +761,7 @@ static int glnvg__renderCreate(void* uptr)
 			if (type == 6) { // fill color
 				result = innerCol * strokeAlpha * scissor;
 			}
-			if (type == 7) { // double stroke with rounded caps, for plugdata connections
+			if (type == 7 || type == 9) { // double stroke with rounded caps, for plugdata connections & same gradient fade
                 // deal with path flipping here - instead of in geometry
                 float revUVy = (reverse > 0.5f) ? 0.5f - uv.y : uv.y;
                 vec2 uvLine = vec2(uv.x, revUVy * lineLength);
@@ -774,8 +776,22 @@ static int glnvg__renderCreate(void* uptr)
                 if (radius > 0.0f) {
                     pattern = dashed(uvLine, radius, 0.22f, feather);
                 }
-                result = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape) * outerShape * scissor;
-			}
+                if (type == 7) {
+                    result = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape) * outerShape * scissor;
+                } else {
+                    vec4 cable = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape);
+                    float scaledUV = uv.y * 2.0f * lineLength;
+                    // Define the proportion of the line length where the fade should occur
+                    float fadeProportion = 0.3;
+
+                    // Calculate the fade range based on the line length, and make connections shorter than 60px solid
+                    float fadeRange = max(fadeProportion * lineLength, 60.0f);
+
+                    float fade = smoothstep(0.4, fadeRange, scaledUV) * smoothstep(0.4, fadeRange, lineLength - scaledUV);
+                    fade = min(fade, 0.97f);
+                    result = (mix(cable, vec4(0.0), fade)) * outerShape * scissor;
+                }
+            }
 			if(type == 8) { // NSVG_SHADER_SMOOTH_GLOW
                 vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
                 float blurRadius = clamp(radius, 2.0f, 20.0f) + feather;
@@ -1157,7 +1173,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
         frag->radius = paint->radius;
     } else if(paint->double_stroke) {
-        frag->type = NSVG_DOUBLE_STROKE;
+        frag->type = paint->gradient_stroke ? NSVG_DOUBLE_STROKE_GRAD : NSVG_DOUBLE_STROKE;
         frag->dashCol = glnvg__premulColor(paint->dashColor);
         frag->lineLength = lineLength;
         frag->feather = paint->feather;
