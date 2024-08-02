@@ -68,7 +68,8 @@ typedef enum MNVGshaderType {
   MNVG_SHADER_FAST_ROUNDEDRECT,
   MNVG_SHADER_FILLCOLOR,
   MNVG_SHADER_DOUBLE_STROKE,
-  MNVG_SHADER_SMOOTH_GLOW
+  MNVG_SHADER_SMOOTH_GLOW,
+  MNVG_DOUBLE_STROKE_GRAD
 } MNVGshaderType;
 
 enum MNVGcallType {
@@ -805,7 +806,7 @@ void* mnvgDevice(NVGcontext* ctx) {
       frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
       frag->radius = paint->radius;
   } else if(paint->double_stroke) {
-        frag->type = MNVG_SHADER_DOUBLE_STROKE;
+        frag->type = paint->gradient_stroke ? MNVG_DOUBLE_STROKE_GRAD : MNVG_SHADER_DOUBLE_STROKE;
         frag->lineLength = lineLength;
         frag->feather = paint->feather;
         frag->radius = paint->radius;

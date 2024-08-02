@@ -191,7 +191,8 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     float4 result = float4(mix(uniforms.outerCol.rgba, uniforms.innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
     return result * strokeAlpha;
   }
-  if(uniforms.type == 6) { // MNVG_SHADER_DOUBLE_STROKE
+  if (uniforms.type == 6 || uniforms.type == 8) { // double stroke with rounded caps, for plugdata connections & same gradient fade
+    // deal with path flipping here - instead of in geometry
     float revUVy = (uniforms.reverse > 0.5f) ? 0.5f - in.uv.y : in.uv.y;
     float2 uvLine = float2(in.uv.x, revUVy * uniforms.lineLength);
     float seg = sdSegment(uvLine, float2(0.0f), float2(0.0f, uniforms.lineLength * 0.5f));
@@ -205,8 +206,22 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     if (uniforms.radius > 0.0f) {
         pattern = dashed(uvLine, uniforms.radius, 0.22f, uniforms.feather);
     }
-    return mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape) * outerShape * scissor;
-  }
+    if (uniforms.type == 6) {
+        return mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape) * outerShape * scissor;
+    } else {
+        float4 cable = mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape);
+        float scaledUV = in.uv.y * 2.0f * uniforms.lineLength;
+        // Define the proportion of the line length where the fade should occur
+        float fadeProportion = 0.3;
+
+        // Calculate the fade range based on the line length, and make connections shorter than 60px solid
+        float fadeRange = max(fadeProportion * uniforms.lineLength, 60.0f);
+
+        float fade = smoothstep(0.4, fadeRange, scaledUV) * smoothstep(0.4, fadeRange, uniforms.lineLength - scaledUV);
+        fade = min(fade, 0.97f);
+        return (mix(cable, float4(0.0), fade)) * outerShape * scissor;
+    }
+}
   if(uniforms.type == 7) { // MNVG_SHADER_SMOOTH_GLOW
         float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
         float blurRadius = clamp(uniforms.radius, 2.0, 20.0) + uniforms.feather;
