@@ -24,6 +24,8 @@ extern "C" {
 
 // Create flags
 
+#include <regex>
+
 enum NVGcreateFlags {
 	// Flag indicating if geometry based anti-aliasing is used (may not be needed when using MSAA).
 	NVG_ANTIALIAS 		= 1<<0,
@@ -128,9 +130,11 @@ enum GLNVGshaderType {
 	NSVG_SHADER_DOTS,
 	NSVG_SHADER_FAST_ROUNDEDRECT,
 	NSVG_SHADER_FILLCOLOR,
-    NSVG_DOUBLE_STROKE,
     NSVG_SMOOTH_GLOW,
-    NSVG_DOUBLE_STROKE_GRAD
+    NSVG_DOUBLE_STROKE,
+    NSVG_DOUBLE_STROKE_GRAD,
+    NSVG_DOUBLE_STROKE_ACTIVITY,
+    NSVG_DOUBLE_STROKE_GRAD_ACTIVITY
 };
 
 #if NANOVG_GL_USE_UNIFORMBUFFER
@@ -526,31 +530,47 @@ static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h, int im
 
 static int glnvg__renderCreate(void* uptr)
 {
-	GLNVGcontext* gl = (GLNVGcontext*)uptr;
-	int align = 4;
+    GLNVGcontext* gl = (GLNVGcontext*)uptr;
+    int align = 4;
 
-	// TODO: mediump float may not be enough for GLES2 in iOS.
-	// see the following discussion: https://github.com/memononen/nanovg/issues/46
-	static const char* shaderHeader =
+    // TODO: mediump float may not be enough for GLES2 in iOS.
+    // see the following discussion: https://github.com/memononen/nanovg/issues/46
+
+    // Construct the shader header with correct defines
+    std::ostringstream shaderHeader;
+
 #if defined NANOVG_GL2
-		"#define NANOVG_GL2 1\n"
+    shaderHeader << "#define NANOVG_GL2 1\n";
 #elif defined NANOVG_GL3
-		"#version 150 core\n"
-		"#define NANOVG_GL3 1\n"
+    shaderHeader << "#version 150 core\n";
+    shaderHeader << "#define NANOVG_GL3 1\n";
 #elif defined NANOVG_GLES2
-		"#version 100\n"
-		"#define NANOVG_GL2 1\n"
+    shaderHeader <<	"#version 100\n";
+	shaderHeader <<	"#define NANOVG_GL2 1\n";
 #elif defined NANOVG_GLES3
-		"#version 300 es\n"
-		"#define NANOVG_GL3 1\n"
+	shaderHeader <<	"#version 300 es\n";
+	shaderHeader <<	"#define NANOVG_GL3 1\n";
 #endif
 
 #if NANOVG_GL_USE_UNIFORMBUFFER
-	"#define USE_UNIFORMBUFFER 1\n"
+	shaderHeader << "#define USE_UNIFORMBUFFER 1\n";
 #else
-	"#define UNIFORMARRAY_SIZE 12\n"
+    shaderHeader << "#define UNIFORMARRAY_SIZE " << NANOVG_GL_UNIFORMARRAY_SIZE << "\n";
 #endif
-	"\n";
+    shaderHeader << "\n";
+
+    shaderHeader << "#define NSVG_SHADER_FILLGRAD               " << NSVG_SHADER_FILLGRAD << "\n";
+    shaderHeader << "#define NSVG_SHADER_FILLIMG                " << NSVG_SHADER_FILLIMG << "\n";
+    shaderHeader << "#define NSVG_SHADER_SIMPLE                 " << NSVG_SHADER_SIMPLE << "\n";
+    shaderHeader << "#define NSVG_SHADER_IMG                    " << NSVG_SHADER_IMG << "\n";
+    shaderHeader << "#define NSVG_SHADER_DOTS                   " << NSVG_SHADER_DOTS << "\n";
+    shaderHeader << "#define NSVG_SHADER_FAST_ROUNDEDRECT       " << NSVG_SHADER_FAST_ROUNDEDRECT << "\n";
+    shaderHeader << "#define NSVG_SHADER_FILLCOLOR              " << NSVG_SHADER_FILLCOLOR << "\n";
+    shaderHeader << "#define NSVG_SMOOTH_GLOW                   " << NSVG_SMOOTH_GLOW << "\n";
+    shaderHeader << "#define NSVG_DOUBLE_STROKE                 " << NSVG_DOUBLE_STROKE << "\n";
+    shaderHeader << "#define NSVG_DOUBLE_STROKE_GRAD            " << NSVG_DOUBLE_STROKE_GRAD << "\n";
+    shaderHeader << "#define NSVG_DOUBLE_STROKE_ACTIVITY        " << NSVG_DOUBLE_STROKE_ACTIVITY << "\n";
+    shaderHeader << "#define NSVG_DOUBLE_STROKE_GRAD_ACTIVITY   " << NSVG_DOUBLE_STROKE_GRAD_ACTIVITY << "\n";
 
 	static char const* fillVertShader = R"(
 		#ifdef NANOVG_GL3
@@ -734,7 +754,7 @@ static int glnvg__renderCreate(void* uptr)
 				return;
 		#endif
 			}
-			if (type == 5) { //rounded rect fill+stroke
+			if (type == NSVG_SHADER_FAST_ROUNDEDRECT) {
 				// Calculate distance to edge.
 				vec2 pt = (paintMat * vec3(fpos,1.0f)).xy;
                 float oD = sdroundrect(pt, extent, radius) - 0.04f;
@@ -758,10 +778,10 @@ static int glnvg__renderCreate(void* uptr)
 		#else
 			if (lineStyle > 1 && strokeAlpha < strokeThr) discard;
 		#endif
-			if (type == 6) { // fill color
+			if (type == NSVG_SHADER_FILLCOLOR) { // fill color
 				result = innerCol * strokeAlpha * scissor;
 			}
-			if (type == 7 || type == 9) { // double stroke with rounded caps, for plugdata connections & same gradient fade
+			if (type == NSVG_DOUBLE_STROKE || type == NSVG_DOUBLE_STROKE_GRAD || type == NSVG_DOUBLE_STROKE_ACTIVITY || type == NSVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
                 // deal with path flipping here - instead of in geometry
                 float revUVy = (reverse > 0.5f) ? 0.5f - uv.y : uv.y;
                 vec2 uvLine = vec2(uv.x, revUVy * lineLength);
@@ -776,10 +796,25 @@ static int glnvg__renderCreate(void* uptr)
                 if (radius > 0.0f) {
                     pattern = dashed(uvLine, radius, 0.22f, feather);
                 }
-                if (type == 7) {
-                    result = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape) * outerShape * scissor;
-                } else {
-                    vec4 cable = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape);
+                float activity = 0.0f;
+                if (type == NSVG_DOUBLE_STROKE_ACTIVITY || type == NSVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
+                    activity = dashed(vec2(uvLine.x, uvLine.y - (offset * 3.0f)), 3.0f, 0.4f, feather);
+                }
+                if (type == NSVG_DOUBLE_STROKE) {
+                    result = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape) * outerShape;
+                } else if (type == NSVG_DOUBLE_STROKE_ACTIVITY) {
+                    vec4 overlay = mix(outerCol, vec4(innerCol.rgb * 0.8f, 1.0f), activity);
+                    vec4 mixedResult = mix(overlay, innerCol, innerShape);
+                    result = mixedResult * outerShape;
+                } else if (type == NSVG_DOUBLE_STROKE_GRAD || type == NSVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
+                    vec4 cable;
+                    if (type == NSVG_DOUBLE_STROKE_GRAD) {
+                        cable = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape);
+                    } else {
+                        vec4 overlay = mix(outerCol, vec4(innerCol.rgb * 0.8f, 1.0f), activity);
+                        vec4 mixedResult = mix(overlay, innerCol, innerShape);
+                        cable = mixedResult * outerShape;
+                    }
                     float scaledUV = uv.y * 2.0f * lineLength;
                     // Define the proportion of the line length where the fade should occur
                     float fadeProportion = 0.3;
@@ -788,11 +823,14 @@ static int glnvg__renderCreate(void* uptr)
                     float fadeRange = max(fadeProportion * lineLength, 60.0f);
 
                     float fade = smoothstep(0.4, fadeRange, scaledUV) * smoothstep(0.4, fadeRange, lineLength - scaledUV);
-                    fade = min(fade, 0.97f);
+
+                    // limit fade transparency so it doesn't become fully transparent
+                    fade = min(fade, 0.7f);
+
                     result = (mix(cable, vec4(0.0), fade)) * outerShape * scissor;
                 }
             }
-			if(type == 8) { // NSVG_SHADER_SMOOTH_GLOW
+			if(type == NSVG_SMOOTH_GLOW) {
                 vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
                 float blurRadius = clamp(radius, 2.0f, 20.0f) + feather;
                 float distShadow = clamp(sigmoid(sdroundrect(pt, extent - vec2(blurRadius), blurRadius) / feather), 0.0f, 1.0f);
@@ -801,7 +839,7 @@ static int glnvg__renderCreate(void* uptr)
                 col = mix(vec4(0.0f), col, distRect);
                 result = normalBlend(vec4(0.0f), col);
             }
-			if (type == 0) { // Gradient
+			if (type == NSVG_SHADER_FILLGRAD) {
 				// Calculate gradient color using box gradient
 				vec2 pt = (paintMat * vec3(fpos,1.0f)).xy;
 				float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5f) / feather, 0.0f, 1.0f);
@@ -809,7 +847,7 @@ static int glnvg__renderCreate(void* uptr)
 				// Combine alpha
 				color *= strokeAlpha * scissor;
 				result = color;
-			} else if (type == 1) { // Image
+			} else if (type == NSVG_SHADER_FILLIMG) {
 				// Calculate color fron texture
 				vec2 pt = (paintMat * vec3(fpos,1.0f)).xy / extent;
 		#ifdef NANOVG_GL3
@@ -824,9 +862,9 @@ static int glnvg__renderCreate(void* uptr)
 				// Combine alpha
 				color *= strokeAlpha * scissor;
 				result = color;
-			} else if (type == 2) { // Stencil fill
+			} else if (type == NSVG_SHADER_SIMPLE) { // Stencil fill
 				result = vec4(1.0f,1.0f,1.0f,1.0f);
-			} else if (type == 3) { // Textured tris
+			} else if (type == NSVG_SHADER_IMG) { // Textured tris
 		#ifdef NANOVG_GL3
 				vec4 color = texture(tex, ftcoord);
 		#else
@@ -837,7 +875,7 @@ static int glnvg__renderCreate(void* uptr)
 				if (color.x < 0.02f) discard;
 				color *= scissor;
 				result = color * innerCol;
-            } else if (type == 4) { // Dot pattern for plugdata
+            } else if (type == NSVG_SHADER_DOTS) { // Dot pattern for plugdata
                 vec2 pt = (paintMat * vec3(fpos, 1.0f)).xy - (0.5f * patternSize);
                 vec2 center = pt.xy - mod(pt.xy, patternSize) + (0.5f * patternSize);
                 float dist = circleDist(pt.xy, center, radius);
@@ -860,11 +898,11 @@ static int glnvg__renderCreate(void* uptr)
 
 	glnvg__checkError(gl, "init");
 
-	if (gl->flags & NVG_ANTIALIAS) {
-		if (glnvg__createShader(&gl->shader, "shader", shaderHeader, "#define EDGE_AA 1\n", fillVertShader, fillFragShader) == 0)
+    if (gl->flags & NVG_ANTIALIAS) {
+		if (glnvg__createShader(&gl->shader, "shader", shaderHeader.str().c_str(), "#define EDGE_AA 1\n", fillVertShader, fillFragShader) == 0)
 			return 0;
 	} else {
-		if (glnvg__createShader(&gl->shader, "shader", shaderHeader, NULL, fillVertShader, fillFragShader) == 0)
+		if (glnvg__createShader(&gl->shader, "shader", shaderHeader.str().c_str(), NULL, fillVertShader, fillFragShader) == 0)
 			return 0;
 	}
 
@@ -1173,7 +1211,21 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
         frag->radius = paint->radius;
     } else if(paint->double_stroke) {
-        frag->type = paint->gradient_stroke ? NSVG_DOUBLE_STROKE_GRAD : NSVG_DOUBLE_STROKE;
+        if (paint->gradient_stroke) {
+            if (paint->connection_activity) {
+                frag->type = NSVG_DOUBLE_STROKE_GRAD_ACTIVITY;
+                frag->offset = paint->offset;
+            } else {
+                frag->type = NSVG_DOUBLE_STROKE_GRAD;
+            }
+        } else {
+            if (paint->connection_activity){
+                frag->type = NSVG_DOUBLE_STROKE_ACTIVITY;
+                frag->offset = paint->offset;
+            } else {
+                frag->type = NSVG_DOUBLE_STROKE;
+            }
+        }
         frag->dashCol = glnvg__premulColor(paint->dashColor);
         frag->lineLength = lineLength;
         frag->feather = paint->feather;
