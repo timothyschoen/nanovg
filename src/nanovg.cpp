@@ -950,7 +950,7 @@ NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patt
     return p;
 }
 
-NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor dashCol, float dashSize)
+NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor dashCol, float dashSize, bool isGradientStroke)
 {
     NVGpaint p;
     NVG_NOTUSED(ctx);
@@ -958,6 +958,7 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor
 
     nvgTransformIdentity(p.xform);
     p.double_stroke = 1;
+    p.gradient_stroke = isGradientStroke;
     p.radius = dashSize;
     p.innerColor = icol;
     p.outerColor = ocol;
