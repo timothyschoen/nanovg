@@ -35,9 +35,9 @@ typedef enum {
   MNVG_SHADER_FILLCOLOR,
   MNVG_SHADER_DOUBLE_STROKE,
   MNVG_SHADER_SMOOTH_GLOW,
-  MNVG_DOUBLE_STROKE_GRAD,
-  MNVG_DOUBLE_STROKE_ACTIVITY,
-  MNVG_DOUBLE_STROKE_GRAD_ACTIVITY
+  MNVG_SHADER_DOUBLE_STROKE_GRAD,
+  MNVG_SHADER_DOUBLE_STROKE_ACTIVITY,
+  MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY
 } FragmentShaderCall;
 
 typedef struct {
@@ -205,7 +205,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     float4 result = float4(mix(uniforms.outerCol.rgba, uniforms.innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
     return result * strokeAlpha;
   }
-  if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE || uniforms.type == MNVG_DOUBLE_STROKE_GRAD || uniforms.type == MNVG_DOUBLE_STROKE_ACTIVITY || uniforms.type == MNVG_DOUBLE_STROKE_GRAD_ACTIVITY) { // double stroke with rounded caps, for plugdata connections & same gradient fade
+  if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
     // deal with path flipping here - instead of in geometry
     float revUVy = (uniforms.reverse > 0.5f) ? 0.5f - in.uv.y : in.uv.y;
     float2 uvLine = float2(in.uv.x, revUVy * uniforms.lineLength);
@@ -220,17 +220,19 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     if (uniforms.radius > 0.0f) {
         pattern = dashed(uvLine, uniforms.radius, 0.22f, uniforms.feather);
     }
-
     float activity = 0.0f;
-    if (uniforms.type == MNVG_DOUBLE_STROKE_ACTIVITY || uniforms.type == MNVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
+    if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
         activity = dashed(float2(uvLine.x, uvLine.y - (uniforms.offset * 3.0f)), 3.0f, 0.4f, uniforms.feather);
     }
     if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE) {
-        return mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape) * outerShape * scissor;
-    }
-    else if (uniforms.type == MNVG_DOUBLE_STROKE_GRAD || uniforms.type == MNVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
+        return mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape) * outerShape;
+    } else if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY) {
+        float4 overlay = mix(uniforms.outerCol, float4(uniforms.innerCol.rgb * 0.8f, 1.0f), activity);
+        float4 mixedResult = mix(overlay, uniforms.innerCol, innerShape);
+        return mixedResult * outerShape;
+    } else if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
         float4 cable;
-        if (uniforms.type == MNVG_DOUBLE_STROKE_GRAD) {
+        if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD) {
             cable = mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape);
         } else {
             float4 overlay = mix(uniforms.outerCol, float4(uniforms.innerCol.rgb * 0.8f, 1.0f), activity);
@@ -240,11 +242,16 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         float scaledUV = in.uv.y * 2.0f * uniforms.lineLength;
         // Define the proportion of the line length where the fade should occur
         float fadeProportion = 0.3;
+
+        // Calculate the fade range based on the line length, and make connections shorter than 60px solid
         float fadeRange = max(fadeProportion * uniforms.lineLength, 60.0f);
+
         float fade = smoothstep(0.4, fadeRange, scaledUV) * smoothstep(0.4, fadeRange, uniforms.lineLength - scaledUV);
+
         // limit fade transparency so it doesn't become fully transparent
         fade = min(fade, 0.7f);
-        return mix(cable, float4(0.0), fade) * outerShape * scissor;
+
+        return (mix(cable, float4(0.0), fade)) * outerShape * scissor;
     }
 }
   if(uniforms.type == MNVG_SHADER_SMOOTH_GLOW) {
