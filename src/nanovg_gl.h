@@ -1045,18 +1045,25 @@ static GLNVGfragUniforms* nvg__fragUniformPtr(GLNVGcontext* gl, int i);
 
 static void glnvg__setUniforms(GLNVGcontext* gl, int uniformOffset, int image)
 {
-	GLNVGtexture* tex = NULL;
-	glBindBufferRange(GL_UNIFORM_BUFFER, GLNVG_FRAG_BINDING, gl->fragBuf, uniformOffset, sizeof(GLNVGfragUniforms));
+    // Bind the uniform buffer only if it's not already bound
+    static int lastUniformOffset = -1;
+    if (uniformOffset != lastUniformOffset) {
+        glBindBufferRange(GL_UNIFORM_BUFFER, GLNVG_FRAG_BINDING, gl->fragBuf, uniformOffset, sizeof(GLNVGfragUniforms));
+        lastUniformOffset = uniformOffset;
+    }
 
-	if (image != 0) {
-		tex = glnvg__findTexture(gl, image);
-	}
-	// If no image is set, use empty texture
-	if (tex == NULL) {
-		tex = glnvg__findTexture(gl, gl->dummyTex);
-	}
-	glnvg__bindTexture(gl, tex != NULL ? tex->tex : 0);
-	glnvg__checkError(gl, "tex paint tex");
+    // Determine which texture to use
+    GLNVGtexture* tex = (image != 0) ? glnvg__findTexture(gl, image) : glnvg__findTexture(gl, gl->dummyTex);
+
+    // Bind the texture only if it's not already bound
+    static GLuint lastTexture = 0;
+    GLuint newTexture = (tex != NULL) ? tex->tex : 0;
+    if (newTexture != lastTexture) {
+        glBindTexture(GL_TEXTURE_2D, newTexture);
+        lastTexture = newTexture;
+    }
+
+    glnvg__checkError(gl, "tex paint tex");
 }
 
 static void glnvg__renderViewport(void* uptr, float width, float height, float devicePixelRatio)
