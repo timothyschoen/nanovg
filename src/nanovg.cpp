@@ -320,12 +320,11 @@ NVGcontext* nvgCreateInternal(NVGparams* params)
 {
 	FONSparams fontParams;
     NVGcontext* ctx = (NVGcontext*) malloc(sizeof(NVGcontext));
-	int i;
 	if (ctx == NULL) goto error;
 	memset(ctx, 0, sizeof(NVGcontext));
 
 	ctx->params = *params;
-	for (i = 0; i < NVG_MAX_FONTIMAGES; i++)
+	for (int i = 0; i < NVG_MAX_FONTIMAGES; i++)
 		ctx->fontImages[i] = 0;
 
 	ctx->commands = (float*)malloc(sizeof(float)*NVG_INIT_COMMANDS_SIZE);
@@ -391,7 +390,6 @@ void nvgCurrentScissor(NVGcontext* ctx, float* x, float* y, float* w, float* h) 
 
 void nvgDeleteInternal(NVGcontext* ctx)
 {
-	int i;
 	if (ctx == NULL) return;
 	if (ctx->commands != NULL) free(ctx->commands);
 	if (ctx->cache != NULL) nvg__deletePathCache(ctx->cache);
@@ -399,7 +397,7 @@ void nvgDeleteInternal(NVGcontext* ctx)
 	if (ctx->fs)
 		fonsDeleteInternal(ctx->fs);
 
-	for (i = 0; i < NVG_MAX_FONTIMAGES; i++) {
+	for (int i = 0; i < NVG_MAX_FONTIMAGES; i++) {
 		if (ctx->fontImages[i] != 0) {
 			nvgDeleteImage(ctx, ctx->fontImages[i]);
 			ctx->fontImages[i] = 0;
@@ -516,13 +514,12 @@ NVGcolor nvgTransRGBAf(NVGcolor c, float a)
 
 NVGcolor nvgLerpRGBA(NVGcolor c0, NVGcolor c1, float u)
 {
-	int i;
 	float oneminu;
 	NVGcolor cint = {{{0}}};
 
 	u = nvg__clampf(u, 0.0f, 1.0f);
 	oneminu = 1.0f - u;
-	for( i = 0; i <4; i++ )
+	for(int i = 0; i <4; i++ )
 	{
 		cint.rgba[i] = c0.rgba[i] * oneminu + c1.rgba[i] * u;
 	}
@@ -1285,7 +1282,6 @@ static float nvg__distPtSeg(float x, float y, float px, float py, float qx, floa
 static void nvg__appendCommands(NVGcontext* ctx, float* vals, int nvals)
 {
 	NVGstate* state = nvg__getState(ctx);
-	int i;
 
 	if (ctx->ncommands+nvals > ctx->ccommands) {
 		float* commands;
@@ -1302,7 +1298,7 @@ static void nvg__appendCommands(NVGcontext* ctx, float* vals, int nvals)
 	}
 
 	// transform commands
-	i = 0;
+	int i = 0;
 	while (i < nvals) {
 		int cmd = (int)vals[i];
 		switch (cmd) {
@@ -1455,9 +1451,8 @@ static float nvg__triarea2(float ax, float ay, float bx, float by, float cx, flo
 
 static float nvg__polyArea(NVGpoint* pts, int npts)
 {
-	int i;
 	float area = 0;
-	for (i = 2; i < npts; i++) {
+	for (int i = 2; i < npts; i++) {
 		NVGpoint* a = &pts[0];
 		NVGpoint* b = &pts[i-1];
 		NVGpoint* c = &pts[i];
@@ -1925,13 +1920,12 @@ static NVGvertex* nvg__roundCapStart(NVGvertex* dst, NVGpoint* p,
 									 float dx, float dy, float w, int ncap,
 									 float aa, float u0, float u1, float t, int dir)
 {
-	int i;
 	float px = p->x;
 	float py = p->y;
 	float dlx = dy;
 	float dly = -dx;
 	NVG_NOTUSED(aa);
-	for (i = 0; i < ncap; i++) {
+	for (int i = 0; i < ncap; i++) {
 		const float a = i/(float)(ncap-1)*NVG_PI;
 		float ax = cosf(a) * w, ay = sinf(a) * w;
 		nvg__vset(dst, px - dlx*ax - dx*ay, py - dly*ax - dy*ay, u0, 1, ax / w, t - dir * ay / w); dst++;
@@ -1946,7 +1940,6 @@ static NVGvertex* nvg__roundCapEnd(NVGvertex* dst, NVGpoint* p,
 								   float dx, float dy, float w, int ncap,
 								   float aa, float u0, float u1, float t, float invLength)
 {
-	int i;
 	float px = p->x;
 	float py = p->y;
 	float dlx = dy;
@@ -1954,7 +1947,7 @@ static NVGvertex* nvg__roundCapEnd(NVGvertex* dst, NVGpoint* p,
 	NVG_NOTUSED(aa);
 	nvg__vset(dst, px + dlx*w, py + dly*w, u0,1, w, t); dst++;
 	nvg__vset(dst, px - dlx*w, py - dly*w, u1,1, -w, t); dst++;
-	for (i = 0; i < ncap; i++) {
+	for (int i = 0; i < ncap; i++) {
 		float a = i/(float)(ncap-1)*NVG_PI;
 		float ax = cosf(a) * w, ay = sinf(a) * w;
 		nvg__vset(dst, px, py, 0.5f, 1, 0, t); dst++;
@@ -2712,7 +2705,6 @@ void nvgFill(NVGcontext* ctx)
 {
 	NVGstate* state = nvg__getState(ctx);
 	NVGpaint fillPaint = state->fill;
-	int i;
     
     if(ctx->isCached)
     {
@@ -2746,7 +2738,7 @@ void nvgFill(NVGcontext* ctx)
     
 	// Count triangles
 #if DEBUG
-	for (i = 0; i < ctx->cache->npaths; i++) {
+	for (int i = 0; i < ctx->cache->npaths; i++) {
         const NVGpath* path = &ctx->cache->paths[i];
 		ctx->fillTriCount += path->nfill-2;
 		ctx->fillTriCount += path->nstroke-2;
@@ -2761,7 +2753,6 @@ void nvgStroke(NVGcontext* ctx)
 	const float scale = nvg__getAverageScale(state->xform);
 	float strokeWidth = nvg__clampf(state->strokeWidth * scale, 0.0f, 1000.0f);
 	NVGpaint strokePaint = state->stroke;
-	int i;
     
     if (strokeWidth < ctx->fringeWidth) {
         // If the stroke width is less than pixel size, use alpha to emulate coverage.
@@ -2782,7 +2773,7 @@ void nvgStroke(NVGcontext* ctx)
                                  strokeWidth, state->lineStyle, ctx->currentLineLength, ctx->cache->cachedPaths, ctx->cache->npaths);
         
 #if DEBUG
-        for (i = 0; i < ctx->cache->npaths; i++) {
+        for (int i = 0; i < ctx->cache->npaths; i++) {
             const NVGpath* path = &ctx->cache->paths[i];
             ctx->strokeTriCount += path->nstroke-2;
             ctx->drawCallCount++;
