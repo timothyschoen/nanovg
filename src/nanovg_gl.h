@@ -1300,14 +1300,22 @@ static void glnvg__renderFlush(void* uptr)
 		for (i = 0; i < gl->ncalls; i++) {
 			GLNVGcall* call = &gl->calls[i];
 			glnvg__blendFuncSeparate(gl,&call->blendFunc);
-			if (call->type == GLNVG_FILL)
-				glnvg__fill(gl, call);
-			else if (call->type == GLNVG_CONVEXFILL)
-				glnvg__convexFill(gl, call);
-			else if (call->type == GLNVG_STROKE)
-				glnvg__stroke(gl, call);
-			else if (call->type == GLNVG_TRIANGLES)
-				glnvg__triangles(gl, call);
+            switch (call->type) {
+                case GLNVG_FILL:
+                    glnvg__fill(gl, call);
+                    break;
+                case GLNVG_CONVEXFILL:
+                    glnvg__convexFill(gl, call);
+                    break;
+                case GLNVG_STROKE:
+                    glnvg__stroke(gl, call);
+                    break;
+                case GLNVG_TRIANGLES:
+                    glnvg__triangles(gl, call);
+                    break;
+                default:
+                    break;
+            }
 		}
 
 		glDisableVertexAttribArray(0);
