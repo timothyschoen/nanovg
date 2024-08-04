@@ -158,6 +158,7 @@ typedef struct MNVGrenderData MNVGrenderData;
 }
 @end
 
+__attribute__((objc_direct_members))
 @interface MNVGbuffers : NSObject
 
 @property (nonatomic, strong) id<MTLCommandBuffer> commandBuffer;
@@ -1451,11 +1452,12 @@ error:
   _buffers.commandBuffer = commandBuffer;
   __block MNVGbuffers* buffers = _buffers;
   __weak id weakSelf = self;
-  __weak id weakBuffers = buffers;
+  __weak MNVGbuffers* weakBuffers = buffers;
 
   [commandBuffer enqueue];
   [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
       if(weakBuffers) {
+          
         MNVGrenderData* renderData = [weakBuffers renderData];
         renderData->image = 0;
         renderData->nindexes = 0;
@@ -1592,7 +1594,7 @@ error:
     }
   }
 
-  if (_flags & NVG_STENCIL_STROKES) {
+  if (false /*_flags & NVG_STENCIL_STROKES*/) {
     // Fill shader
     call->uniformOffset = [self allocFragUniforms:2];
     if (call->uniformOffset == -1) goto error;
@@ -1789,7 +1791,7 @@ error:
     return;
   }
 
-  if (_flags & NVG_STENCIL_STROKES) {
+  if (false /*_flags & NVG_STENCIL_STROKES*/) {
     // Fills the stroke base without overlap.
     [self setUniforms:(call->uniformOffset + _fragSize) image:call->image];
     [_renderEncoder setDepthStencilState:_strokeShapeStencilState];
