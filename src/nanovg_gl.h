@@ -184,6 +184,7 @@ struct GLNVGfragUniforms {
         float lineLength;
         float offset;
         int stateData;
+        float padding[3]; // Padding to align the uniform to std140 rules
 };
 typedef struct GLNVGfragUniforms GLNVGfragUniforms;
 
@@ -504,6 +505,7 @@ static int glnvg__renderCreate(void* uptr)
 	    	float lineLength;
             float offset;
 	    	int stateData;
+            float padding[3];
 	    };
 	    uniform sampler2D tex;
 	    in vec2 ftcoord;
