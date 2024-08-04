@@ -26,6 +26,20 @@
 
 using namespace metal;
 
+typedef enum {
+  MNVG_SHADER_FILLGRAD,
+  MNVG_SHADER_FILLIMG,
+  MNVG_SHADER_IMG,
+  MNVG_SHADER_DOTS,
+  MNVG_SHADER_FAST_ROUNDEDRECT,
+  MNVG_SHADER_FILLCOLOR,
+  MNVG_SHADER_DOUBLE_STROKE,
+  MNVG_SHADER_SMOOTH_GLOW,
+  MNVG_DOUBLE_STROKE_GRAD,
+  MNVG_DOUBLE_STROKE_ACTIVITY,
+  MNVG_DOUBLE_STROKE_GRAD_ACTIVITY
+} FragmentShaderCall;
+
 typedef struct {
   float2 pos [[attribute(0)]];
   float4 tcoord [[attribute(1)]];
@@ -162,7 +176,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   float scissor = uniforms.scissorRadius == 0.0f ? scissorMask(uniforms, in.fpos) : roundedScissorMask(uniforms, in.fpos, uniforms.scissorRadius);
   if (scissor == 0) discard_fragment();
 
-  if (uniforms.type == 2) {  // MNVG_SHADER_IMG
+  if (uniforms.type == MNVG_SHADER_IMG) {  // MNVG_SHADER_IMG
     float4 color = texture.sample(sampler, in.ftcoord);
     if (uniforms.texType == 1)
       color = float4(color.xyz * color.w, color.w);
@@ -180,7 +194,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   if(uniforms.lineStyle == 3) strokeAlpha*=dotted(in.uv);
   if(uniforms.lineStyle == 4) strokeAlpha*=glow(in.uv);
 
-  if (uniforms.type == 4) {  // MNVG_SHADER_FAST_ROUNDEDRECT
+  if (uniforms.type == MNVG_SHADER_FAST_ROUNDEDRECT) {
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
     float oD = sdroundrect(pt, uniforms.extent, uniforms.radius) - 0.04f;
 	float outerD = fwidth(oD) * 0.5f;
@@ -191,7 +205,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     float4 result = float4(mix(uniforms.outerCol.rgba, uniforms.innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
     return result * strokeAlpha;
   }
-  if (uniforms.type == 6 || uniforms.type == 8) { // double stroke with rounded caps, for plugdata connections & same gradient fade
+  if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE || uniforms.type == MNVG_DOUBLE_STROKE_GRAD || uniforms.type == MNVG_DOUBLE_STROKE_ACTIVITY || uniforms.type == MNVG_DOUBLE_STROKE_GRAD_ACTIVITY) { // double stroke with rounded caps, for plugdata connections & same gradient fade
     // deal with path flipping here - instead of in geometry
     float revUVy = (uniforms.reverse > 0.5f) ? 0.5f - in.uv.y : in.uv.y;
     float2 uvLine = float2(in.uv.x, revUVy * uniforms.lineLength);
@@ -206,23 +220,34 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     if (uniforms.radius > 0.0f) {
         pattern = dashed(uvLine, uniforms.radius, 0.22f, uniforms.feather);
     }
-    if (uniforms.type == 6) {
+
+    float activity = 0.0f;
+    if (uniforms.type == MNVG_DOUBLE_STROKE_ACTIVITY || uniforms.type == MNVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
+        activity = dashed(float2(uvLine.x, uvLine.y - (uniforms.offset * 3.0f)), 3.0f, 0.4f, uniforms.feather);
+    }
+    if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE) {
         return mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape) * outerShape * scissor;
-    } else {
-        float4 cable = mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape);
+    }
+    else if (uniforms.type == MNVG_DOUBLE_STROKE_GRAD || uniforms.type == MNVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
+        float4 cable;
+        if (uniforms.type == MNVG_DOUBLE_STROKE_GRAD) {
+            cable = mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape);
+        } else {
+            float4 overlay = mix(uniforms.outerCol, float4(uniforms.innerCol.rgb * 0.8f, 1.0f), activity);
+            float4 mixedResult = mix(overlay, uniforms.innerCol, innerShape);
+            cable = mixedResult * outerShape;
+        }
         float scaledUV = in.uv.y * 2.0f * uniforms.lineLength;
         // Define the proportion of the line length where the fade should occur
         float fadeProportion = 0.3;
-
-        // Calculate the fade range based on the line length, and make connections shorter than 60px solid
         float fadeRange = max(fadeProportion * uniforms.lineLength, 60.0f);
-
         float fade = smoothstep(0.4, fadeRange, scaledUV) * smoothstep(0.4, fadeRange, uniforms.lineLength - scaledUV);
-        fade = min(fade, 0.97f);
-        return (mix(cable, float4(0.0), fade)) * outerShape * scissor;
+        // limit fade transparency so it doesn't become fully transparent
+        fade = min(fade, 0.7f);
+        return mix(cable, float4(0.0), fade) * outerShape * scissor;
     }
 }
-  if(uniforms.type == 7) { // MNVG_SHADER_SMOOTH_GLOW
+  if(uniforms.type == MNVG_SHADER_SMOOTH_GLOW) {
         float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
         float blurRadius = clamp(uniforms.radius, 2.0, 20.0) + uniforms.feather;
         float distShadow = clamp(sigmoid(sdroundrect(pt, uniforms.extent - float2(blurRadius), blurRadius) / uniforms.feather), 0.0, 1.0);
@@ -231,10 +256,10 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         col = mix(float4(0.0), col, distRect);
         return col;
   }
-  if(uniforms.type == 5) { // MNVG_SHADER_FILLCOLOR
+  if(uniforms.type == MNVG_SHADER_FILLCOLOR) {
       return uniforms.innerCol * strokeAlpha * scissor;
   }
-  if(uniforms.type == 3) {
+  if(uniforms.type == MNVG_SHADER_DOTS) {
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0f)).xy - (0.5f * uniforms.patternSize);
     float2 center = pt.xy - fmod(pt.xy, uniforms.patternSize) + (0.5f * uniforms.patternSize);
     float dist = circleDist(pt.xy, center, uniforms.radius);
@@ -247,7 +272,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     float4 dotColor = mix(uniforms.innerCol, uniforms.outerCol, alpha);
     return dotColor * scissor;
     }
-  if (uniforms.type == 0) {  // MNVG_SHADER_FILLGRAD
+  if (uniforms.type == MNVG_SHADER_FILLGRAD) {
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
     float d = saturate((uniforms.feather * 0.5 + sdroundrect(pt, uniforms.extent, uniforms.radius))
                         / uniforms.feather);
