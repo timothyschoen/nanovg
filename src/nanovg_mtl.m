@@ -118,7 +118,6 @@ struct MNVGfragUniforms {
   float radius;
   float feather;
   float strokeMult;
-  float strokeThr;
   float scissorRadius;
   float patternSize;
   float offset;
@@ -761,7 +760,6 @@ void* mnvgDevice(NVGcontext* ctx) {
                     fringe:(float)fringe
                  lineStyle:(int)lineStyle
                 lineLength:(float)lineLength
-                 strokeThr:(float)strokeThr
               lineReversed: (int)lineReversed {
   MNVGtexture* tex = nil;
   float invxform[6];
@@ -796,7 +794,6 @@ void* mnvgDevice(NVGcontext* ctx) {
 
   frag->extent = (vector_float2){paint->extent[0], paint->extent[1]};
   frag->strokeMult = (width * 0.5f + fringe * 0.5f) / fringe;
-  frag->strokeThr = strokeThr;
 
   if (paint->image != 0) {
     tex = [self findTexture:paint->image];
@@ -1445,7 +1442,6 @@ void* mnvgDevice(NVGcontext* ctx) {
                      fringe:fringe
                      lineStyle:NVG_LINE_SOLID
                      lineLength:0.0f
-                    strokeThr:-1.0f
                     lineReversed:0];
   return;
 
@@ -1610,7 +1606,6 @@ error:
                        fringe:fringe
                     lineStyle:lineStyle
                     lineLength:lineLength
-                    strokeThr:-1.0f
                     lineReversed:lineReversed];
     MNVGfragUniforms* frag = [self
         fragUniformAtIndex:call->uniformOffset + _fragSize];
@@ -1621,7 +1616,6 @@ error:
                        fringe:fringe
                        lineStyle:lineStyle
                        lineLength:lineLength
-                        strokeThr:(1.0f - 0.5f / 255.0f)
                         lineReversed:lineReversed];
   } else {
     // Fill shader
@@ -1634,7 +1628,6 @@ error:
                        fringe:fringe
                     lineStyle:lineStyle
                     lineLength:lineLength
-                    strokeThr:-1.0f
                     lineReversed:lineReversed];
   }
 
@@ -1682,7 +1675,6 @@ error:
                      fringe:fringe
                     lineStyle:NVG_LINE_SOLID
                     lineLength:0.0f
-                  strokeThr:-1.0f
                lineReversed:0];
 
     if(text) {

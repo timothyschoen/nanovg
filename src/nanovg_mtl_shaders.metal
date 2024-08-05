@@ -64,7 +64,6 @@ typedef struct  {
   float radius;
   float feather;
   float strokeMult;
-  float strokeThr;
   float scissorRadius;
   float patternSize;
   float offset;
@@ -189,7 +188,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   }
 
   float strokeAlpha = strokeMask(uniforms, in.ftcoord);
-  if (lineStyle > 1 && strokeAlpha < uniforms.strokeThr) {
+  if (lineStyle > 1 && strokeAlpha < -1.0f) {
      discard_fragment();
   }
   if(lineStyle == 2) strokeAlpha*=dashed(float2(in.uv.x, in.uv.y * uniforms.lineLength - uniforms.offset), uniforms.radius, 0.45f, 0.0f);
