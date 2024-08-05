@@ -2658,6 +2658,15 @@ void nvgDeletePath(NVGcontext* ctx, uint32_t pathId)
 
 int nvgLoadPath(NVGcontext* ctx, uint32_t pathId)
 {
+    /*
+     auto cacheItemIterator = CACHE.find(pathId);
+     if(cacheItemIterator != CACHE.end())
+     {
+         NVGstate* state = nvg__getState(ctx);
+         nvgBeginPath(ctx);
+         
+         auto& cacheEntry = cacheItemIterator->second;
+     */
     if(CACHE.contains(pathId))
     {
         NVGstate* state = nvg__getState(ctx);

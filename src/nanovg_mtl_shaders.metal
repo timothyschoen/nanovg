@@ -65,14 +65,11 @@ typedef struct  {
   float feather;
   float strokeMult;
   float strokeThr;
-  int texType;
-  int type;
   float scissorRadius;
   float patternSize;
   float offset;
-  int lineStyle;
   float lineLength;
-  int reverse;
+  int stateData;
 } Uniforms;
 
 float sdroundrect(float2 pt, float2 ext, float rad);
@@ -176,25 +173,30 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   float scissor = uniforms.scissorRadius == 0.0f ? scissorMask(uniforms, in.fpos) : roundedScissorMask(uniforms, in.fpos, uniforms.scissorRadius);
   if (scissor == 0) discard_fragment();
 
-  if (uniforms.type == MNVG_SHADER_IMG) {  // MNVG_SHADER_IMG
+  uint8_t lineStyle = (uniforms.stateData >> 7) & 0x03;     // 2 bits
+  uint8_t texType   = (uniforms.stateData >> 5) & 0x03;     // 2 bits
+  uint8_t type      = (uniforms.stateData >> 1) & 0x0F;     // 4 bits
+  bool reverse      = bool(uniforms.stateData & 0x01);      // 1 bit
+
+  if (type == MNVG_SHADER_IMG) {  // MNVG_SHADER_IMG
     float4 color = texture.sample(sampler, in.ftcoord);
-    if (uniforms.texType == 1)
+    if (texType == 1)
       color = float4(color.xyz * color.w, color.w);
-    else if (uniforms.texType == 2)
+    else if (texType == 2)
       color = float4(color.x);
     color *= scissor;
     return color * uniforms.innerCol;
   }
 
   float strokeAlpha = strokeMask(uniforms, in.ftcoord);
-  if (uniforms.lineStyle > 1 && strokeAlpha < uniforms.strokeThr) {
+  if (lineStyle > 1 && strokeAlpha < uniforms.strokeThr) {
      discard_fragment();
   }
-  if(uniforms.lineStyle == 2) strokeAlpha*=dashed(float2(in.uv.x, in.uv.y * uniforms.lineLength - uniforms.offset), uniforms.radius, 0.45f, 0.0f);
-  if(uniforms.lineStyle == 3) strokeAlpha*=dotted(in.uv);
-  if(uniforms.lineStyle == 4) strokeAlpha*=glow(in.uv);
+  if(lineStyle == 2) strokeAlpha*=dashed(float2(in.uv.x, in.uv.y * uniforms.lineLength - uniforms.offset), uniforms.radius, 0.45f, 0.0f);
+  if(lineStyle == 3) strokeAlpha*=dotted(in.uv);
+  if(lineStyle == 4) strokeAlpha*=glow(in.uv);
 
-  if (uniforms.type == MNVG_SHADER_FAST_ROUNDEDRECT) {
+  if (type == MNVG_SHADER_FAST_ROUNDEDRECT) {
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
     float oD = sdroundrect(pt, uniforms.extent, uniforms.radius) - 0.04f;
 	float outerD = fwidth(oD) * 0.5f;
@@ -205,9 +207,9 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     float4 result = float4(mix(uniforms.outerCol.rgba, uniforms.innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
     return result * strokeAlpha;
   }
-  if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
+  if (type == MNVG_SHADER_DOUBLE_STROKE || type == MNVG_SHADER_DOUBLE_STROKE_GRAD || type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY || type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
     // deal with path flipping here - instead of in geometry
-    float revUVy = (uniforms.reverse > 0.5f) ? 0.5f - in.uv.y : in.uv.y;
+    float revUVy = (reverse > 0.5f) ? 0.5f - in.uv.y : in.uv.y;
     float2 uvLine = float2(in.uv.x, revUVy * uniforms.lineLength);
     float seg = sdSegment(uvLine, float2(0.0f), float2(0.0f, uniforms.lineLength * 0.5f));
     float outerSeg = seg - 0.45f;
@@ -221,18 +223,18 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         pattern = dashed(uvLine, uniforms.radius, 0.22f, uniforms.feather);
     }
     float activity = 0.0f;
-    if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
+    if (type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY || type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
         activity = dashed(float2(uvLine.x, uvLine.y - (uniforms.offset * 3.0f)), 3.0f, 0.4f, uniforms.feather);
     }
-    if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE) {
+    if (type == MNVG_SHADER_DOUBLE_STROKE) {
         return mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape) * outerShape;
-    } else if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY) {
+    } else if (type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY) {
         float4 overlay = mix(uniforms.outerCol, float4(uniforms.innerCol.rgb * 0.8f, 1.0f), activity);
         float4 mixedResult = mix(overlay, uniforms.innerCol, innerShape);
         return mixedResult * outerShape;
-    } else if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
+    } else if (type == MNVG_SHADER_DOUBLE_STROKE_GRAD || type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
         float4 cable;
-        if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD) {
+        if (type == MNVG_SHADER_DOUBLE_STROKE_GRAD) {
             cable = mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape);
         } else {
             float4 overlay = mix(uniforms.outerCol, float4(uniforms.innerCol.rgb * 0.8f, 1.0f), activity);
@@ -254,7 +256,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         return (mix(cable, float4(0.0), fade)) * outerShape * scissor;
     }
 }
-  if(uniforms.type == MNVG_SHADER_SMOOTH_GLOW) {
+  if(type == MNVG_SHADER_SMOOTH_GLOW) {
         float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
         float blurRadius = clamp(uniforms.radius, 2.0, 20.0) + uniforms.feather;
         float distShadow = clamp(sigmoid(sdroundrect(pt, uniforms.extent - float2(blurRadius), blurRadius) / uniforms.feather), 0.0, 1.0);
@@ -263,10 +265,10 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         col = mix(float4(0.0), col, distRect);
         return col;
   }
-  if(uniforms.type == MNVG_SHADER_FILLCOLOR) {
+  if(type == MNVG_SHADER_FILLCOLOR) {
       return uniforms.innerCol * strokeAlpha * scissor;
   }
-  if(uniforms.type == MNVG_SHADER_DOTS) {
+  if(type == MNVG_SHADER_DOTS) {
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0f)).xy - (0.5f * uniforms.patternSize);
     float2 center = pt.xy - fmod(pt.xy, uniforms.patternSize) + (0.5f * uniforms.patternSize);
     float dist = circleDist(pt.xy, center, uniforms.radius);
@@ -279,7 +281,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     float4 dotColor = mix(uniforms.innerCol, uniforms.outerCol, alpha);
     return dotColor * scissor;
     }
-  if (uniforms.type == MNVG_SHADER_FILLGRAD) {
+  if (type == MNVG_SHADER_FILLGRAD) {
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
     float d = saturate((uniforms.feather * 0.5 + sdroundrect(pt, uniforms.extent, uniforms.radius))
                         / uniforms.feather);
@@ -290,9 +292,9 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   } else {  // MNVG_SHADER_FILLIMG
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy / uniforms.extent;
     float4 color = texture.sample(sampler, pt);
-    if (uniforms.texType == 1)
+    if (texType == 1)
       color = float4(color.xyz * color.w, color.w);
-    else if (uniforms.texType == 2)
+    else if (texType == 2)
       color = float4(color.x);
     color *= scissor;
     color *= strokeAlpha;
