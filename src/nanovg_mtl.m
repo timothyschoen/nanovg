@@ -634,8 +634,7 @@ void* mnvgDevice(NVGcontext* ctx) {
   MNVGrenderData* renderData = _buffers.renderData;
   int ret = 0;
   if (renderData->nuniforms + n > renderData->cuniforms) {
-    int cuniforms = mtlnvg__maxi(renderData->nuniforms + n, 128) \
-                    + renderData->cuniforms / 2;
+    int cuniforms = mtlnvg__maxi(renderData->nuniforms + n, 128) + renderData->cuniforms / 2;
     id<MTLBuffer> buffer = [_metalLayer.device
         newBufferWithLength:(_fragSize * cuniforms)
         options:kMetalBufferOptions];

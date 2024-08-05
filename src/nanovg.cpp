@@ -127,8 +127,8 @@ struct NVGpathCache {
 typedef struct NVGpathCache NVGpathCache;
 
 struct StrokeCacheLine {
-std::vector<NVGpath> paths;
-float lineLength;
+    std::vector<NVGpath> paths;
+    float lineLength;
 };
 
 using StrokeCache = std::unordered_map<uint32_t, StrokeCacheLine>;
@@ -605,7 +605,7 @@ void nvgTransformSkewY(float* t, float a)
 	t[4] = 0.0f; t[5] = 0.0f;
 }
 
-void nvgTransformMultiply(float* t, const float* s)
+void nvgTransformMultiply(float* __restrict t, const float* __restrict s)
 {
 	float t0 = t[0] * s[0] + t[1] * s[2];
 	float t2 = t[2] * s[0] + t[3] * s[2];
@@ -626,7 +626,7 @@ void nvgTransformPremultiply(float* t, const float* s)
 	memcpy(t, s2, sizeof(float)*6);
 }
 
-int nvgTransformInverse(float* inv, const float* t)
+int nvgTransformInverse(float* __restrict inv, const float* __restrict t)
 {
 	double invdet, det = (double)t[0] * t[3] - (double)t[2] * t[1];
 	if (det > -1e-6 && det < 1e-6) {
@@ -2664,24 +2664,21 @@ int nvgLoadPath(NVGcontext* ctx, uint32_t pathId)
         nvgBeginPath(ctx);
         
         auto& cacheEntry = CACHE[pathId];
-        auto numPaths = cacheEntry.paths.size();
-        
-        memcpy(ctx->userCachedPaths, cacheEntry.paths.data(), numPaths * sizeof(NVGpath));
+        std::copy(cacheEntry.paths.begin(), cacheEntry.paths.end(), ctx->userCachedPaths);
         ctx->cache->cachedPaths = ctx->userCachedPaths;
-        ctx->cache->npaths = (int)numPaths;
+        ctx->cache->npaths = (int)cacheEntry.paths.size();
         ctx->currentLineLength = cacheEntry.lineLength;
         
-        for (int i = 0; i < numPaths; i++) {
-        
+        for (int i = 0; i < cacheEntry.paths.size(); i++) {
           auto& p = ctx->cache->cachedPaths[i];
           auto& cachedPath = cacheEntry.paths[i];
           
           // Duplicate path data
           p.fill = ctx->cachedVertexBuffer;
-          memcpy(p.fill, cachedPath.fill, cachedPath.nfill * sizeof(NVGvertex));
+          std::copy(cachedPath.fill, cachedPath.fill + cachedPath.nfill, p.fill);
       
           p.stroke = ctx->cachedVertexBuffer + (1<<13);
-          memcpy(p.stroke, cachedPath.stroke, cachedPath.nstroke * sizeof(NVGvertex));
+          std::copy(cachedPath.stroke, cachedPath.stroke + cachedPath.nstroke, p.stroke);
         
           for(int j = 0; j < p.nfill; j++)
           {
