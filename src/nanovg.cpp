@@ -2658,21 +2658,13 @@ void nvgDeletePath(NVGcontext* ctx, uint32_t pathId)
 
 int nvgLoadPath(NVGcontext* ctx, uint32_t pathId)
 {
-    /*
-     auto cacheItemIterator = CACHE.find(pathId);
-     if(cacheItemIterator != CACHE.end())
-     {
-         NVGstate* state = nvg__getState(ctx);
-         nvgBeginPath(ctx);
-         
-         auto& cacheEntry = cacheItemIterator->second;
-     */
-    if(CACHE.contains(pathId))
+    auto cacheItemIterator = CACHE.find(pathId);
+    if(cacheItemIterator != CACHE.end())
     {
         NVGstate* state = nvg__getState(ctx);
         nvgBeginPath(ctx);
         
-        auto& cacheEntry = CACHE[pathId];
+        auto& cacheEntry = cacheItemIterator->second;
         std::copy(cacheEntry.paths.begin(), cacheEntry.paths.end(), ctx->userCachedPaths);
         ctx->cache->cachedPaths = ctx->userCachedPaths;
         ctx->cache->npaths = (int)cacheEntry.paths.size();
