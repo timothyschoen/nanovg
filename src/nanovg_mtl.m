@@ -284,7 +284,7 @@ stencilOnlyPipelineState;
 - (void)triangles:(MNVGcall*)call;
 
 - (void)updateRenderPipelineStatesForBlend:(MNVGblend*)blend
-                               pixelFormat:(MTLPixelFormat)pixelFormat
+                               pixelFormat:(MTLPixelFormat)pixelFormat;
 
 @end
 
