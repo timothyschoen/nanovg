@@ -210,6 +210,7 @@ strokeAntiAliasStencilState;
 @property (nonatomic, strong) id<MTLRenderPipelineState> pipelineState;
 @property (nonatomic, strong) id<MTLRenderPipelineState>
 stencilOnlyPipelineState;
+@property (nonatomic, strong) id<MTLSamplerState> pseudoSampler;
 @property (nonatomic, strong) id<MTLTexture> pseudoTexture;
 @property (nonatomic, strong) MTLVertexDescriptor* vertexDescriptor;
 
@@ -970,11 +971,10 @@ void* mnvgDevice(NVGcontext* ctx) {
     descriptor.colorAttachments[0].texture = colorTexture;
     _clearBufferOnFlush = NO;
     
-    /*
      descriptor.stencilAttachment.clearStencil = 0;
      descriptor.stencilAttachment.loadAction = MTLLoadActionClear;
      descriptor.stencilAttachment.storeAction = MTLStoreActionDontCare;
-     descriptor.stencilAttachment.texture = _buffers.stencilTexture; */
+     descriptor.stencilAttachment.texture = _buffers.stencilTexture;
     
     id<MTLCommandBuffer> commandBuffer = _buffers.commandBuffer;
     id<MTLRenderCommandEncoder> encoder = [commandBuffer
@@ -1091,6 +1091,10 @@ void* mnvgDevice(NVGcontext* ctx) {
     // Initialzes textures.
     _textureId = 0;
     _textures = [NSMutableArray array];
+    
+    MTLSamplerDescriptor* samplerDescriptor = [MTLSamplerDescriptor new];
+     _pseudoSampler = [_metalLayer.device
+         newSamplerStateWithDescriptor:samplerDescriptor];
     
     // Initializes pseudo texture
     const int kPseudoTextureImage = [self
@@ -1496,7 +1500,7 @@ error:
             (uint)colorTexture.height};
     }
     if (textureSize.x == 0 || textureSize.y == 0) return;
-    //[self updateStencilTextureToSize:&textureSize];
+    [self updateStencilTextureToSize:&textureSize];
     
     id<CAMetalDrawable> drawable = nil;
     if (colorTexture == nil) {
@@ -1778,7 +1782,7 @@ error:
     if ( _lastBoundTexture != image) {
         MNVGtexture* tex = image ? [self findTexture:image] : nil;
         [_renderEncoder setFragmentTexture:(tex != nil ? tex->tex : _pseudoTexture) atIndex:0];
-        [_renderEncoder setFragmentSamplerState:(tex != nil ? tex->sampler : nil) atIndex:0];
+        [_renderEncoder setFragmentSamplerState:(tex != nil ? tex->sampler : _pseudoSampler) atIndex:0];
         _lastBoundTexture = image;
     }
 }
