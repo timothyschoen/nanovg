@@ -285,7 +285,6 @@ stencilOnlyPipelineState;
 
 - (void)updateRenderPipelineStatesForBlend:(MNVGblend*)blend
                                pixelFormat:(MTLPixelFormat)pixelFormat
-                  forceUpdatePipelineState:(int)forceUpdatePipelineState;
 
 @end
 
@@ -430,6 +429,7 @@ static void mtlnvg__renderFill(void* uptr, NVGpaint* paint,
 
 static void mtlnvg__renderFlush(void* uptr) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
+    [[mtl renderEncoder] textureBarrier];
     [mtl renderFlush];
 }
 
@@ -1509,6 +1509,8 @@ error:
     }
     
     _renderEncoder = [self renderCommandEncoderWithColorTexture:colorTexture];
+    if(_pipelineState != nil) [_renderEncoder setRenderPipelineState:_pipelineState];
+    _lastUniformOffset = 0;
     
     if (_renderEncoder == nil) {
         return;
@@ -1517,9 +1519,7 @@ error:
     for (int i = renderData->ncalls; i--; ++call) {
         MNVGblend* blend = &call->blendFunc;
         [self updateRenderPipelineStatesForBlend:blend
-                                     pixelFormat:colorTexture.pixelFormat
-                        forceUpdatePipelineState:(i==(renderData->ncalls - 1))];
-        
+                                     pixelFormat:colorTexture.pixelFormat];
         if (call->type == MNVG_FILL)
             [self fill:call];
         else if (call->type == MNVG_CONVEXFILL)
@@ -1833,7 +1833,6 @@ error:
 
 - (void)updateRenderPipelineStatesForBlend:(MNVGblend*)blend
                                pixelFormat:(MTLPixelFormat)pixelFormat
-                  forceUpdatePipelineState:(int)forceUpdatePipelineState
 {
     if (_pipelineState != nil &&
         _stencilOnlyPipelineState != nil &&
@@ -1842,10 +1841,6 @@ error:
         _blendFunc->dstRGB == blend->dstRGB &&
         _blendFunc->srcAlpha == blend->srcAlpha &&
         _blendFunc->dstAlpha == blend->dstAlpha) {
-        if(forceUpdatePipelineState)
-        {
-            [_renderEncoder setRenderPipelineState:_pipelineState];
-        }
         return;
     }
     
