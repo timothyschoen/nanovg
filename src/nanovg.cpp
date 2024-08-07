@@ -2591,23 +2591,14 @@ void nvgDebugDumpPathCache(NVGcontext* ctx)
 
 int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
 {
-    if(ctx->ncommands < 3 || ctx->cache->npaths > 3) {
-      return -1;
-    }
-    
     NVGstate* state = nvg__getState(ctx);
     auto cacheEntry = StrokeCacheLine();
-    
-    float invxform[6];
-    nvgTransformInverse(invxform, state->xform);
-        
+
     cacheEntry.lineLength = ctx->currentLineLength;
     
     for (int i = 0; i < ctx->cache->npaths; i++) {
       
       auto& p = ctx->cache->paths[i];
-      if(p.nfill > (1<<13) || p.nstroke > (1<<13)) return -1;
-        
       NVGpath pathCopy = p;
         
       // Duplicate path data
@@ -2616,18 +2607,8 @@ int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
     
       pathCopy.stroke = (NVGvertex*) malloc( p.nstroke * sizeof(NVGvertex) );
       memcpy(pathCopy.stroke, p.stroke, p.nstroke * sizeof(NVGvertex));
-    
-      for(int j = 0; j < p.nfill; j++)
-      {
-          nvgTransformPoint(&pathCopy.fill[j].x, &pathCopy.fill[j].y, invxform, pathCopy.fill[j].x, pathCopy.fill[j].y);
-      }
-        
-      for(int j = 0; j < p.nstroke; j++)
-      {
-          nvgTransformPoint(&pathCopy.stroke[j].x, &pathCopy.stroke[j].y, invxform, pathCopy.stroke[j].x, pathCopy.stroke[j].y);
-      }
-      
-      nvgTransformIdentity(cacheEntry.currentTransform);
+
+      memcpy(cacheEntry.currentTransform, state->xform, sizeof(float) * 6);
       cacheEntry.paths.push_back(pathCopy);
     }
     
