@@ -158,6 +158,7 @@ struct NVGcontext {
 	int textTriCount;
 #endif
     struct NVGscissorBounds scissor;
+    int numCached;
     StrokeCache* strokeCache;
 };
 
@@ -948,21 +949,21 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor
     NVG_NOTUSED(ctx);
     memset(&p, 0, sizeof(p));
 
-    nvgTransformIdentity(p.xform);
-    p.double_stroke = 1;
-    p.gradient_stroke = isGradientStroke;
-    p.connection_activity = showActivity;
+    p.xform[0] = 1.0f;
+    p.xform[3] = 1.0f;
+
     p.radius = dashSize;
-    p.offset = activityOffset;
+    p.feather = ctx->devicePxRatio < 2.0f ? 0.8 : 0.6;
     p.innerColor = icol;
     p.outerColor = ocol;
     p.dashColor = dashCol;
-    p.feather = ctx->devicePxRatio < 2.0f ? 0.8 : 0.6;
+    p.offset = activityOffset;
+    p.double_stroke = 1;
+    p.gradient_stroke = isGradientStroke;
+    p.connection_activity = showActivity;
     
     NVGstate* state = nvg__getState(ctx);
     state->lineStyle = NVG_DOUBLE_STROKE;
-    state->stroke.radius = dashSize;
-    
     return p;
 }
 
@@ -2632,7 +2633,7 @@ int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
     
     if(pathId == -1)
     {
-        pathId = CACHE.size();
+        pathId = ctx->numCached++;
     }
     
     CACHE[pathId] = cacheEntry;
