@@ -1565,7 +1565,8 @@ error:
                     lineStyle: (int)lineStyle
                    lineLength: (float)lineLength
                         paths:(const NVGpath*)paths
-                       npaths:(int)npaths {
+                       npaths:(int)npaths
+{
     MNVGcall* call = [self allocCall];
     
     if (call == NULL) return;

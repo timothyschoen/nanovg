@@ -606,8 +606,8 @@ void nvgStroke(NVGcontext* ctx);
 // Saves the current path to the paths cache
 int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId);
 
-// Load and set a path from path cache
-int nvgLoadPath(NVGcontext* ctx, uint32_t pathId);
+int nvgStrokeCachedPath(NVGcontext* ctx, uint32_t pathId);
+int nvgFillCachedPath(NVGcontext* ctx, uint32_t pathId);
 
 // Clean up path cache empty
 void nvgDeletePath(NVGcontext* ctx, uint32_t pathId);
