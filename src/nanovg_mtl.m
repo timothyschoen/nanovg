@@ -152,6 +152,7 @@ typedef struct MNVGrenderData MNVGrenderData;
     int flags;
     id<MTLTexture> tex;
     id<MTLSamplerState> sampler;
+    bool valid;
 }
 @end
 
@@ -429,7 +430,9 @@ static void mtlnvg__renderFill(void* uptr, NVGpaint* paint,
 
 static void mtlnvg__renderFlush(void* uptr) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
+#if TARGET_OS_OSX
     [[mtl renderEncoder] textureBarrier];
+#endif
     [mtl renderFlush];
 }
 
@@ -698,7 +701,7 @@ void* mnvgDevice(NVGcontext* ctx) {
     MNVGtexture* tex = nil;
     
     for (MNVGtexture* texture in _textures) {
-        if (texture->id == 0) {
+        if (texture->valid == 0) {
             tex = texture;
             break;
         }
@@ -706,8 +709,9 @@ void* mnvgDevice(NVGcontext* ctx) {
     if (tex == nil) {
         tex = [MNVGtexture new];
         [_textures addObject:tex];
+        tex->id = ++_textureId;
     }
-    tex->id = ++_textureId;
+    tex->valid = true;
     return tex;
 }
 
@@ -933,12 +937,9 @@ void* mnvgDevice(NVGcontext* ctx) {
     [_renderEncoder setDepthStencilState:_defaultStencilState];
 }
 
-- (MNVGtexture*)findTexture:(int)id {
-    for (MNVGtexture* texture in _textures) {
-        if (texture->id == id)
-            return texture;
-    }
-    return nil;
+- (MNVGtexture* __unsafe_unretained)findTexture:(int)id {
+    if (id <= 0) return nil;
+    return _textures[id - 1];
 }
 
 - (MNVGfragUniforms*)fragUniformAtIndex:(int)index {
@@ -1345,19 +1346,18 @@ void* mnvgDevice(NVGcontext* ctx) {
 }
 
 - (int)renderDeleteTexture:(int)image {
-    for (MNVGtexture* texture in _textures) {
-        if (texture->id == image) {
-            if (texture->tex != nil &&
-                (texture->flags & NVG_IMAGE_NODELETE) == 0) {
-                texture->tex = nil;
-                texture->sampler = nil;
-            }
-            texture->id = 0;
-            texture->flags = 0;
-            return 1;
-        }
+    if(image <= 0) return 0;
+    MNVGtexture* texture = _textures[image-1];
+    if(texture == nil) return 0;
+    
+    if (texture->tex != nil &&
+        (texture->flags & NVG_IMAGE_NODELETE) == 0) {
+        texture->tex = nil;
+        texture->sampler = nil;
     }
-    return 0;
+    texture->valid = 0;
+    texture->flags = 0;
+    return 1;
 }
 
 - (void)renderFillWithPaint:(NVGpaint*)paint

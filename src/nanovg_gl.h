@@ -126,6 +126,7 @@ struct GLNVGtexture {
 	int width, height;
 	int type;
 	int flags;
+    int valid;
 };
 typedef struct GLNVGtexture GLNVGtexture;
 
@@ -289,9 +290,8 @@ static GLNVGtexture* glnvg__allocTexture(GLNVGcontext* gl)
 {
 	GLNVGtexture* tex = NULL;
 	int i;
-
 	for (i = 0; i < gl->ntextures; i++) {
-		if (gl->textures[i].id == 0) {
+		if (gl->textures[i].valid == 0) {
 			tex = &gl->textures[i];
 			break;
 		}
@@ -306,35 +306,29 @@ static GLNVGtexture* glnvg__allocTexture(GLNVGcontext* gl)
 			gl->ctextures = ctextures;
 		}
 		tex = &gl->textures[gl->ntextures++];
+        memset(tex, 0, sizeof(*tex));
+        tex->id = ++gl->textureId;
 	}
-
-	memset(tex, 0, sizeof(*tex));
-	tex->id = ++gl->textureId;
-
+    tex->valid = 1;
 	return tex;
 }
 
 static GLNVGtexture* glnvg__findTexture(GLNVGcontext* gl, int id)
 {
-	int i;
-	for (i = 0; i < gl->ntextures; i++)
-		if (gl->textures[i].id == id)
-			return &gl->textures[i];
-	return NULL;
+    if(id <= 0) return NULL;
+    return &gl->textures[id - 1];
 }
 
 static int glnvg__deleteTexture(GLNVGcontext* gl, int id)
 {
-	int i;
-	for (i = 0; i < gl->ntextures; i++) {
-		if (gl->textures[i].id == id) {
-			if (gl->textures[i].tex != 0 && (gl->textures[i].flags & NVG_IMAGE_NODELETE) == 0)
-				glDeleteTextures(1, &gl->textures[i].tex);
-			memset(&gl->textures[i], 0, sizeof(gl->textures[i]));
-			return 1;
-		}
-	}
-	return 0;
+    if(id <= 0) return 0;
+    GLNVGtexture* texture = &gl->textures[id-1];
+    
+    if (texture->tex != 0 && (texture->flags & NVG_IMAGE_NODELETE) == 0)
+        glDeleteTextures(1, &texture->tex);
+    
+    texture->valid = 0;
+	return 1;
 }
 
 static void glnvg__dumpShaderError(GLuint shader, const char* name, const char* type)

@@ -54,7 +54,7 @@ extern "C" {
   #define nvgBindFramebuffer(fb) mnvgBindFramebuffer(fb)
   #define nvgCreateFramebuffer(ctx, w, h, flags) mnvgCreateFramebuffer(ctx, w, h, flags)
   #define nvgDeleteFramebuffer(fb) mnvgDeleteFramebuffer(fb)
-  #define nvgViewport(x, y, w, h) NVG_NOTUSED(x); NVG_NOTUSED(y); NVG_NOTUSED(w); NVG_NOTUSED(h);
+  #define nvgViewport(x, y, w, h) NVG_NOTUSED(x); NVG_NOTUSED(y); NVG_NOTUSED(w); NVG_NOTUSED(h)
   #define nvgClear(nvg) mnvgClearWithColor(nvg, nvgRGBA(0, 0, 0, 0))
   #define NVGframebuffer MNVGframebuffer
 #endif
