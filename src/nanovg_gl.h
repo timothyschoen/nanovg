@@ -323,10 +323,10 @@ static int glnvg__deleteTexture(GLNVGcontext* gl, int id)
 {
     if(id <= 0) return 0;
     GLNVGtexture* texture = &gl->textures[id-1];
-    
+
     if (texture->tex != 0 && (texture->flags & NVG_IMAGE_NODELETE) == 0)
         glDeleteTextures(1, &texture->tex);
-    
+
     texture->valid = 0;
 	return 1;
 }
@@ -638,11 +638,11 @@ static int glnvg__renderCreate(void* uptr)
                     activity = dashed(vec2(uvLine.x, uvLine.y - (offset * 3.0f)), 3.0f, 0.4f, feather);
                 }
                 if (type == NSVG_DOUBLE_STROKE) {
-                    result = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape) * outerShape;
+                    result = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape) * outerShape * scissor;
                 } else if (type == NSVG_DOUBLE_STROKE_ACTIVITY) {
                     vec4 overlay = mix(outerCol, vec4(innerCol.rgb * 0.8f, 1.0f), activity);
                     vec4 mixedResult = mix(overlay, innerCol, innerShape);
-                    result = mixedResult * outerShape;
+                    result = mixedResult * outerShape * scissor;
                 } else if (type == NSVG_DOUBLE_STROKE_GRAD || type == NSVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
                     vec4 cable;
                     if (type == NSVG_DOUBLE_STROKE_GRAD) {
