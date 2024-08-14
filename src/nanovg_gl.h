@@ -222,7 +222,10 @@ struct GLNVGcontext {
 	GLint stencilFuncRef;
 	GLuint stencilFuncMask;
 	GLNVGblend blendFunc;
-	#endif
+    #endif
+
+    int current_uniform_size;
+    int current_vert_array_size;
 
 	int dummyTex;
 };
@@ -1267,14 +1270,36 @@ static void glnvg__renderFlush(void* uptr)
 		gl->blendFunc.dstAlpha = GL_INVALID_ENUM;
 		#endif
 
-		// Upload ubo for frag shaders
-		glBindBuffer(GL_UNIFORM_BUFFER, gl->fragBuf);
-		glBufferData(GL_UNIFORM_BUFFER, gl->nuniforms * gl->fragSize, gl->uniforms, GL_STREAM_DRAW);
+        // Upload UBO
+        // Only reallocate if buffer size is larger than current size
+        // Else substitute the buffer into the current buffer
+        glBindBuffer(GL_UNIFORM_BUFFER, gl->fragBuf);
+        glBufferData(GL_UNIFORM_BUFFER, gl->nuniforms * gl->fragSize, gl->uniforms, GL_STREAM_DRAW);
 
-		// Upload vertex data
+        // Upload vertex data
+        int uniform_size = gl->nuniforms * gl->fragSize;
+        if (uniform_size > gl->current_uniform_size) {
+            glBufferData(GL_UNIFORM_BUFFER, uniform_size, gl->uniforms, GL_DYNAMIC_DRAW);
+            gl->current_uniform_size = uniform_size;
+        }
+        else
+            glBufferSubData(GL_UNIFORM_BUFFER, 0, uniform_size, gl->uniforms);
+
+
+        // Upload vertex data
+        // Only reallocate if buffer size is larger than current size
+        // Else substitute the buffer into the current buffer
 		glBindVertexArray(gl->vertArr);
 		glBindBuffer(GL_ARRAY_BUFFER, gl->vertBuf);
 		glBufferData(GL_ARRAY_BUFFER, gl->nverts * sizeof(NVGvertex), gl->verts, GL_STREAM_DRAW);
+		int array_size = gl->nverts * sizeof(NVGvertex);
+		if (array_size > gl->current_vert_array_size){
+		    glBufferData(GL_ARRAY_BUFFER, array_size, gl->verts, GL_DYNAMIC_DRAW);
+            gl->current_vert_array_size = array_size;
+        }
+        else
+            glBufferSubData(GL_ARRAY_BUFFER, 0, array_size, gl->verts);
+
 		glEnableVertexAttribArray(0);
 		glEnableVertexAttribArray(1);
 		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(NVGvertex), (const GLvoid*)(size_t)0);
@@ -1657,6 +1682,10 @@ NVGcontext* nvgCreateGL3(int flags)
 	params.edgeAntiAlias = flags & NVG_ANTIALIAS ? 1 : 0;
 
 	gl->flags = flags;
+
+    // If the context is recreated, force opengl to re-upload the full UBO & VBO
+    gl->current_uniform_size = -1;
+    gl->current_vert_array_size = -1;
 
 	ctx = nvgCreateInternal(&params);
 	if (ctx == NULL) goto error;
