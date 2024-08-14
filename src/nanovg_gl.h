@@ -1274,9 +1274,6 @@ static void glnvg__renderFlush(void* uptr)
         // Only reallocate if buffer size is larger than current size
         // Else substitute the buffer into the current buffer
         glBindBuffer(GL_UNIFORM_BUFFER, gl->fragBuf);
-        glBufferData(GL_UNIFORM_BUFFER, gl->nuniforms * gl->fragSize, gl->uniforms, GL_STREAM_DRAW);
-
-        // Upload vertex data
         int uniform_size = gl->nuniforms * gl->fragSize;
         if (uniform_size > gl->current_uniform_size) {
             glBufferData(GL_UNIFORM_BUFFER, uniform_size, gl->uniforms, GL_DYNAMIC_DRAW);
@@ -1285,13 +1282,11 @@ static void glnvg__renderFlush(void* uptr)
         else
             glBufferSubData(GL_UNIFORM_BUFFER, 0, uniform_size, gl->uniforms);
 
-
         // Upload vertex data
         // Only reallocate if buffer size is larger than current size
         // Else substitute the buffer into the current buffer
 		glBindVertexArray(gl->vertArr);
 		glBindBuffer(GL_ARRAY_BUFFER, gl->vertBuf);
-		glBufferData(GL_ARRAY_BUFFER, gl->nverts * sizeof(NVGvertex), gl->verts, GL_STREAM_DRAW);
 		int array_size = gl->nverts * sizeof(NVGvertex);
 		if (array_size > gl->current_vert_array_size){
 		    glBufferData(GL_ARRAY_BUFFER, array_size, gl->verts, GL_DYNAMIC_DRAW);
