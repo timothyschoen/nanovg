@@ -99,6 +99,10 @@ void mnvgDeleteFramebuffer(MNVGframebuffer* framebuffer);
 // Clear context on next frame, must be called before nvgEndFrame
 void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color);
 
+// Read pixels from an image
+void mnvgReadPixels(NVGcontext* ctx, int image, int x, int y, int width,
+                    int height, void* data);
+
 // Returns a pointer to the corresponded `id<MTLDevice>` object.
 void* mnvgDevice(NVGcontext* ctx);
 

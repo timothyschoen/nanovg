@@ -436,6 +436,7 @@ static void mtlnvg__renderFlush(void* uptr) {
     [mtl renderFlush];
 }
 
+
 static int mtlnvg__renderGetTextureSize(void* uptr, int image, int* w, int* h) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
     return [mtl renderGetTextureSizeForImage:image width:w height:h];
@@ -625,6 +626,65 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
                                        (float)color.b * alpha,
                                        (float)color.a);
     mtl.clearBufferOnFlush = YES;
+}
+
+void mnvgReadPixels(NVGcontext* ctx, int image, int x, int y, int width,
+                    int height, void* data) {
+  MNVGcontext* mtl = (__bridge MNVGcontext*)nvgInternalParams(ctx)->userPtr;
+    
+#if TARGET_OS_OSX
+    [[mtl renderEncoder] textureBarrier];
+#endif
+    
+  MNVGtexture* tex = [mtl findTexture:image];
+  if (tex == nil) return;
+    
+  NSUInteger bytesPerRow;
+  if (tex->type == NVG_TEXTURE_RGBA) {
+    bytesPerRow = tex->tex.width * 4;
+  } else {
+    bytesPerRow = tex->tex.width;
+  }
+
+  // Makes sure the command execution for the image has been done.
+  for (MNVGbuffers* buffers in mtl.cbuffers) {
+    if (buffers.isBusy && buffers.renderData->image == image && buffers.commandBuffer) {
+      id<MTLCommandBuffer> commandBuffer = buffers.commandBuffer;
+      [commandBuffer waitUntilCompleted];
+      break;
+    }
+  }
+
+#if TARGET_OS_SIMULATOR
+  CAMetalLayer* metalLayer = mtl.metalLayer;
+  const NSUInteger kBufferSize = bytesPerRow * height;
+  id<MTLBuffer> buffer = [metalLayer.device
+      newBufferWithLength:kBufferSize
+      options:MTLResourceStorageModeShared];
+
+  id<MTLCommandBuffer> commandBuffer = [mtl.commandQueue commandBuffer];
+  id<MTLBlitCommandEncoder> blitCommandEncoder = [commandBuffer
+      blitCommandEncoder];
+  [blitCommandEncoder copyFromTexture:tex->tex
+      sourceSlice:0
+      sourceLevel:0
+      sourceOrigin:MTLOriginMake(x, y, 0)
+      sourceSize:MTLSizeMake(width, height, 1)
+      toBuffer:buffer
+      destinationOffset:0
+      destinationBytesPerRow:bytesPerRow
+      destinationBytesPerImage:kBufferSize];
+
+  [blitCommandEncoder endEncoding];
+  [commandBuffer commit];
+  [commandBuffer waitUntilCompleted];
+  memcpy(data, [buffer contents], kBufferSize);
+#else
+  [tex->tex getBytes:data
+         bytesPerRow:bytesPerRow
+          fromRegion:MTLRegionMake2D(x, y, width, height)
+         mipmapLevel:0];
+#endif  // TARGET_OS_SIMULATOR
 }
 
 void* mnvgDevice(NVGcontext* ctx) {

@@ -129,6 +129,22 @@ void nvgluBindFramebuffer(NVGLUframebuffer* fb)
 #endif
 }
 
+static void nvgluReadPixels(NVGcontext* ctx, int image, int x, int y, int width, int height, void* data) {
+    // Bind image texture
+    glBindTexture(GL_TEXTURE_2D, image);
+
+    // Set the pixel transfer parameters
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+
+    // Read the pixels from the texture
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    
+    // Unbind texture
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+
 void nvgluGenerateMipmaps(NVGLUframebuffer* fb)
 {
     glActiveTexture(GL_TEXTURE0);
