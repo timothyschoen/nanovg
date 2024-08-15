@@ -632,10 +632,6 @@ void mnvgReadPixels(NVGcontext* ctx, int image, int x, int y, int width,
                     int height, void* data) {
   MNVGcontext* mtl = (__bridge MNVGcontext*)nvgInternalParams(ctx)->userPtr;
     
-#if TARGET_OS_OSX
-    [[mtl renderEncoder] textureBarrier];
-#endif
-    
   MNVGtexture* tex = [mtl findTexture:image];
   if (tex == nil) return;
     
@@ -648,9 +644,9 @@ void mnvgReadPixels(NVGcontext* ctx, int image, int x, int y, int width,
 
   // Makes sure the command execution for the image has been done.
   for (MNVGbuffers* buffers in mtl.cbuffers) {
-    if (buffers.isBusy && buffers.renderData->image == image && buffers.commandBuffer) {
+    if (buffers.isBusy && buffers.renderData && buffers.renderData->image == image && buffers.commandBuffer) {
       id<MTLCommandBuffer> commandBuffer = buffers.commandBuffer;
-      [commandBuffer waitUntilCompleted];
+      while(buffers.isBusy) usleep(10);
       break;
     }
   }
@@ -1008,12 +1004,14 @@ void* mnvgDevice(NVGcontext* ctx) {
 
 - (void)renderCancel {
     MNVGrenderData* renderData = _buffers.renderData;
-    renderData->image = 0;
     _buffers.isBusy = NO;
-    renderData->nindexes = 0;
-    renderData->nverts = 0;
-    renderData->ncalls = 0;
-    renderData->nuniforms = 0;
+    if(renderData) {
+        renderData->image = 0;
+        renderData->nindexes = 0;
+        renderData->nverts = 0;
+        renderData->ncalls = 0;
+        renderData->nuniforms = 0;
+    }
     dispatch_semaphore_signal(_semaphore);
 }
 
@@ -1536,7 +1534,6 @@ error:
     [commandBuffer enqueue];
     [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
         if(weakBuffers) {
-
             MNVGrenderData* renderData = [weakBuffers renderData];
             renderData->image = 0;
             renderData->nindexes = 0;
