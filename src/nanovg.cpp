@@ -614,12 +614,18 @@ void nvgTransformMultiply(float* __restrict t, const float* __restrict s)
 	t[4] = t4;
 }
 
-void nvgTransformPremultiply(float* t, const float* s)
+void nvgTransformPremultiply(float* __restrict t, const float* s)
 {
-	float s2[6];
-	memcpy(s2, s, sizeof(float)*6);
-	nvgTransformMultiply(s2, t);
-	memcpy(t, s2, sizeof(float)*6);
+    float t0 = s[0] * t[0] + s[1] * t[2];
+    float t1 = s[0] * t[1] + s[1] * t[3];
+    float t2 = s[2] * t[0] + s[3] * t[2];
+    float t3 = s[2] * t[1] + s[3] * t[3];
+    t[4] = s[4] * t[0] + s[5] * t[2] + t[4];
+    t[5] = s[4] * t[1] + s[5] * t[3] + t[5];
+    t[0] = t0;
+    t[1] = t1;
+    t[2] = t2;
+    t[3] = t3;
 }
 
 int nvgTransformInverse(float* __restrict inv, const float* __restrict t)
