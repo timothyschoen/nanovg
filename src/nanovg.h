@@ -73,7 +73,7 @@ extern "C" {
 
 typedef struct NVGcontext NVGcontext;
 
-struct alignas(16) NVGcolor {
+struct NVGcolor {
 	union {
 		uint32_t rgba32;
 		uint8_t rgba8[4];

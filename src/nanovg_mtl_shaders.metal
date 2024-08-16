@@ -55,9 +55,9 @@ typedef struct {
 typedef struct  {
   float3x3 scissorMat;
   float3x3 paintMat;
-  float4 innerCol;
-  float4 outerCol;
-  float4 dashCol;
+  int innerCol;
+  int outerCol;
+  int dashCol;
   float2 scissorExt;
   float2 scissorScale;
   float2 extent;
@@ -120,9 +120,13 @@ float gradientNoise(float2 uv){
     return fract(52.9829189 * fract(dot(uv, float2(0.06711056, 0.00583715))));
 }
 
-float4 normalBlend(float4 src, float4 dst) {
-    float finalAlpha = src.a + dst.a * (1.0 - src.a);
-    return float4((src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / finalAlpha, finalAlpha);
+float4 convertColour(int rgba){
+    float3 col;
+    col.r = float((rgba >> 24) & 0xFF) / 255.0f;
+    col.g = float((rgba >> 16) & 0xFF) / 255.0f;
+    col.b = float((rgba >> 8) & 0xFF) / 255.0f;
+    float a = float(rgba & 0xFF) / 255.0f;
+    return float4((col * a).rgb, a);
 }
 
 float sigmoid(float t) {
@@ -184,7 +188,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     else if (texType == 2)
       color = float4(color.x);
     color *= scissor;
-    return color * uniforms.innerCol;
+    return color * convertColour(uniforms.innerCol);
   }
 
   float strokeAlpha = strokeMask(uniforms, in.ftcoord);
@@ -203,7 +207,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     float innerD = fwidth(iD) * 0.5f;
 	float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
     float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
-    float4 result = float4(mix(uniforms.outerCol.rgba, uniforms.innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
+    float4 result = float4(mix(convertColour(uniforms.outerCol).rgba, convertColour(uniforms.innerCol).rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
     return result * strokeAlpha;
   }
   if (type == MNVG_SHADER_DOUBLE_STROKE || type == MNVG_SHADER_DOUBLE_STROKE_GRAD || type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY || type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
@@ -226,18 +230,18 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         activity = dashed(float2(uvLine.x, uvLine.y - (uniforms.offset * 3.0f)), 3.0f, 0.4f, uniforms.feather);
     }
     if (type == MNVG_SHADER_DOUBLE_STROKE) {
-        return mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape) * outerShape;
+        return mix(mix(convertColour(uniforms.outerCol), convertColour(uniforms.innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(uniforms.dashCol), pattern * innerShape) * outerShape;
     } else if (type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY) {
-        float4 overlay = mix(uniforms.outerCol, float4(uniforms.innerCol.rgb * 0.8f, 1.0f), activity);
-        float4 mixedResult = mix(overlay, uniforms.innerCol, innerShape);
+        float4 overlay = mix(convertColour(uniforms.outerCol), float4(convertColour(uniforms.innerCol).rgb * 0.8f, 1.0f), activity);
+        float4 mixedResult = mix(overlay, convertColour(uniforms.innerCol), innerShape);
         return mixedResult * outerShape;
     } else if (type == MNVG_SHADER_DOUBLE_STROKE_GRAD || type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
         float4 cable;
         if (type == MNVG_SHADER_DOUBLE_STROKE_GRAD) {
-            cable = mix(mix(uniforms.outerCol, uniforms.innerCol, smoothstep(0.0, 1.0, innerShape)), uniforms.dashCol, pattern * innerShape);
+            cable = mix(mix(convertColour(uniforms.outerCol), convertColour(uniforms.innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(uniforms.dashCol), pattern * innerShape);
         } else {
-            float4 overlay = mix(uniforms.outerCol, float4(uniforms.innerCol.rgb * 0.8f, 1.0f), activity);
-            float4 mixedResult = mix(overlay, uniforms.innerCol, innerShape);
+            float4 overlay = mix(convertColour(uniforms.outerCol), float4(convertColour(uniforms.innerCol).rgb * 0.8f, 1.0f), activity);
+            float4 mixedResult = mix(overlay, convertColour(uniforms.innerCol), innerShape);
             cable = mixedResult * outerShape;
         }
         float scaledUV = in.uv.y * 2.0f * uniforms.lineLength;
@@ -260,12 +264,12 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         float blurRadius = clamp(uniforms.radius, 2.0, 20.0) + uniforms.feather;
         float distShadow = clamp(sigmoid(sdroundrect(pt, uniforms.extent - float2(blurRadius), blurRadius) / uniforms.feather), 0.0, 1.0);
         float distRect = clamp(sdroundrect(pt, uniforms.extent - float2(5.5), uniforms.radius), 0.0, 1.0);
-        float4 col = float4(uniforms.innerCol * (1.0 - distShadow));
+        float4 col = float4(convertColour(uniforms.innerCol) * (1.0 - distShadow));
         col = mix(float4(0.0), col, distRect);
         return col;
   }
   if(type == MNVG_SHADER_FILLCOLOR) {
-      return uniforms.innerCol * strokeAlpha * scissor;
+      return convertColour(uniforms.innerCol) * strokeAlpha * scissor;
   }
   if(type == MNVG_SHADER_DOTS) {
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0f)).xy - (0.5f * uniforms.patternSize);
@@ -277,14 +281,14 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     //float alpha = smoothstep(0.45f - delta, 0.45f, dist);
 
 	float alpha = smoothstep(uniforms.feather - delta, uniforms.feather + delta, dist);
-    float4 dotColor = mix(uniforms.innerCol, uniforms.outerCol, alpha);
+    float4 dotColor = mix(convertColour(uniforms.innerCol), convertColour(uniforms.outerCol), alpha);
     return dotColor * scissor;
     }
   if (type == MNVG_SHADER_FILLGRAD) {
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
     float d = saturate((uniforms.feather * 0.5 + sdroundrect(pt, uniforms.extent, uniforms.radius))
                         / uniforms.feather);
-    float4 color = mix(uniforms.innerCol, uniforms.outerCol, d);
+    float4 color = mix(convertColour(uniforms.innerCol), convertColour(uniforms.outerCol), d);
     color *= scissor;
     color *= strokeAlpha;
     return color;
@@ -297,6 +301,6 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
       color = float4(color.x);
     color *= scissor;
     color *= strokeAlpha;
-    return color * uniforms.innerCol;
+    return color * convertColour(uniforms.innerCol);
   }
 }

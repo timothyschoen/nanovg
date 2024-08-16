@@ -109,9 +109,9 @@ typedef struct MNVGcall MNVGcall;
 struct MNVGfragUniforms {
     matrix_float3x3 scissorMat;
     matrix_float3x3 paintMat;
-    vector_float4 innerCol;
-    vector_float4 outerCol;
-    vector_float4 dashCol;
+    int innerCol;
+    int outerCol;
+    int dashCol;
     vector_float2 scissorExt;
     vector_float2 scissorScale;
     vector_float2 extent;
@@ -373,13 +373,6 @@ static int mtlnvg__maxVertCount(const NVGpath* paths, int npaths,
         }
     }
     return count;
-}
-
-static vector_float4 mtlnvg__premulColor(NVGcolor c) {
-    c.r *= c.a;
-    c.g *= c.a;
-    c.b *= c.a;
-    return (vector_float4){c.r, c.g, c.b, c.a};
 }
 
 static void mtlnvg__renderCancel(void* uptr) {
@@ -824,13 +817,13 @@ void* mnvgDevice(NVGcontext* ctx) {
               lineReversed: (int)lineReversed {
     MNVGtexture* tex = nil;
     float invxform[6];
-    int is_gradient = memcmp(&(paint->innerColor), &(paint->outerColor), sizeof(paint->outerColor));
+    int is_gradient = paint->innerColor.rgba32 != paint->outerColor.rgba32;
 
     memset(frag, 0, sizeof(*frag));
 
-    frag->innerCol = mtlnvg__premulColor(paint->innerColor);
-    frag->outerCol = mtlnvg__premulColor(paint->outerColor);
-    frag->dashCol = mtlnvg__premulColor(paint->dashColor);
+    frag->innerCol = paint->innerColor.rgba32;
+    frag->outerCol = paint->outerColor.rgba32;
+    frag->dashCol = paint->dashColor.rgba32;
     frag->stateData = mtlnvg_packStateDataUniform(PACK_LINE_STYLE, lineStyle);
     frag->radius = paint->radius;
 

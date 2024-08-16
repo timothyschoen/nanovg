@@ -1128,7 +1128,7 @@ NVGpaint nvgImagePattern(NVGcontext* ctx,
 
 	p.image = image;
 
-	p.innerColor = p.outerColor = nvgRGBAf(1,1,1,alpha);
+	p.innerColor = p.outerColor = nvgRGBA(255,255,255,alpha);
 
 	return p;
 }
