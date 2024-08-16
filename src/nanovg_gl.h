@@ -170,9 +170,10 @@ typedef struct GLNVGpath GLNVGpath;
 struct GLNVGfragUniforms {
 		float scissorMat[12]; // matrices are actually 3 vec4s
 		float paintMat[12];
-		struct NVGcolor innerCol;
-		struct NVGcolor outerCol;
-        struct NVGcolor dashCol;
+        uint32_t innerCol;
+        uint32_t outerCol;
+        uint32_t dashCol;
+        int stateData;
 		float scissorExt[2];
 		float scissorScale[2];
 		float extent[2];
@@ -183,7 +184,6 @@ struct GLNVGfragUniforms {
         float scissorRadius;
         float lineLength;
         float offset;
-        int stateData;
 };
 typedef struct GLNVGfragUniforms GLNVGfragUniforms;
 
@@ -485,9 +485,10 @@ static int glnvg__renderCreate(void* uptr)
 	    layout(std140) uniform frag {
 	    	mat3 scissorMat;
 	    	mat3 paintMat;
-	    	vec4 innerCol;
-	    	vec4 outerCol;
-            vec4 dashCol;
+	    	int innerCol;
+	    	int outerCol;
+            int dashCol;
+	    	int stateData;
 	    	vec2 scissorExt;
 	    	vec2 scissorScale;
 	    	vec2 extent;
@@ -498,7 +499,6 @@ static int glnvg__renderCreate(void* uptr)
 	    	float scissorRadius;
 	    	float lineLength;
             float offset;
-	    	int stateData;
 	    };
 	    uniform sampler2D tex;
 	    in vec2 ftcoord;
@@ -506,6 +506,15 @@ static int glnvg__renderCreate(void* uptr)
 	    smooth in vec2 uv;
 	    out vec4 outColor;
 
+        vec4 convertColour(int rgba){
+            vec3 col;
+            col.r = float((rgba >> 24) & 0xFF) / 255.0f;
+            col.g = float((rgba >> 16) & 0xFF) / 255.0f;
+            col.b = float((rgba >> 8) & 0xFF) / 255.0f;
+            float a = float(rgba & 0xFF) / 255.0f;
+
+            return vec4((col * a).rgb, a);
+        }
 		float sdroundrect(vec2 pt, vec2 ext, float rad) {
 			vec2 ext2 = ext - vec2(rad,rad);
 			vec2 d = abs(pt) - ext2;
@@ -607,7 +616,7 @@ static int glnvg__renderCreate(void* uptr)
                 float innerD = fwidth(iD) * 0.5f;
 				float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
                 float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
-				result = vec4(mix(outerCol.rgba, innerCol.rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
+				result = vec4(mix(convertColour(outerCol).rgba, convertColour(innerCol).rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
 				outColor = result;
 				return;
 			}
@@ -618,7 +627,7 @@ static int glnvg__renderCreate(void* uptr)
 			if (lineStyle > 1 && strokeAlpha < -1.0f) discard;
 		#endif
 			if (type == NSVG_SHADER_FILLCOLOR) { // fill color
-				result = innerCol * strokeAlpha * scissor;
+				result = convertColour(innerCol) * strokeAlpha * scissor;
 			}
 			if (type == NSVG_DOUBLE_STROKE || type == NSVG_DOUBLE_STROKE_GRAD || type == NSVG_DOUBLE_STROKE_ACTIVITY || type == NSVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
                 // Deal with path flipping here - instead of in geometry
@@ -641,18 +650,18 @@ static int glnvg__renderCreate(void* uptr)
                     activity = dashed(vec2(uvLine.x, uvLine.y - (offset * 3.0f)), 3.0f, 0.4f, feather);
                 }
                 if (type == NSVG_DOUBLE_STROKE) {
-                    result = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape) * outerShape * scissor;
+                    result = mix(mix(convertColour(outerCol), convertColour(innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(dashCol), pattern * innerShape) * outerShape * scissor;
                 } else if (type == NSVG_DOUBLE_STROKE_ACTIVITY) {
-                    vec4 overlay = mix(outerCol, vec4(innerCol.rgb * 0.8f, 1.0f), activity);
-                    vec4 mixedResult = mix(overlay, innerCol, innerShape);
+                    vec4 overlay = mix(convertColour(outerCol), vec4(convertColour(innerCol).rgb * 0.8f, 1.0f), activity);
+                    vec4 mixedResult = mix(overlay, convertColour(innerCol), innerShape);
                     result = mixedResult * outerShape * scissor;
                 } else if (type == NSVG_DOUBLE_STROKE_GRAD || type == NSVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
                     vec4 cable;
                     if (type == NSVG_DOUBLE_STROKE_GRAD) {
-                        cable = mix(mix(outerCol, innerCol, smoothstep(0.0, 1.0, innerShape)), dashCol, pattern * innerShape);
+                        cable = mix(mix(convertColour(outerCol), convertColour(innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(dashCol), pattern * innerShape);
                     } else {
-                        vec4 overlay = mix(outerCol, vec4(innerCol.rgb * 0.8f, 1.0f), activity);
-                        vec4 mixedResult = mix(overlay, innerCol, innerShape);
+                        vec4 overlay = mix(convertColour(outerCol), vec4(convertColour(innerCol).rgb * 0.8f, 1.0f), activity);
+                        vec4 mixedResult = mix(overlay, convertColour(innerCol), innerShape);
                         cable = mixedResult * outerShape;
                     }
                     float scaledUV = uv.y * 2.0f * lineLength;
@@ -675,7 +684,7 @@ static int glnvg__renderCreate(void* uptr)
                 float blurRadius = clamp(radius, 2.0f, 20.0f) + feather;
                 float distShadow = clamp(sigmoid(sdroundrect(pt, extent - vec2(blurRadius), blurRadius) / feather), 0.0f, 1.0f);
                 float distRect = clamp(sdroundrect(pt, extent - vec2(5.5f), radius), 0.0f, 1.0f);
-                vec4 col = vec4(innerCol * (1.0f - distShadow));
+                vec4 col = vec4(convertColour(innerCol) * (1.0f - distShadow));
                 col = mix(vec4(0.0f), col, distRect);
                 result = normalBlend(vec4(0.0f), col);
             }
@@ -683,7 +692,7 @@ static int glnvg__renderCreate(void* uptr)
 				// Calculate gradient color using box gradient
 				vec2 pt = (paintMat * vec3(fpos,1.0f)).xy;
 				float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5f) / feather, 0.0f, 1.0f);
-				vec4 color = mix(innerCol,outerCol,d);
+				vec4 color = mix(convertColour(innerCol), convertColour(outerCol), d);
 				// Combine alpha
 				color *= strokeAlpha * scissor;
 				result = color;
@@ -694,7 +703,7 @@ static int glnvg__renderCreate(void* uptr)
 				if (texType == 1) color = vec4(color.xyz*color.w,color.w);
 				if (texType == 2) color = vec4(color.x);
 				// Apply color tint and alpha.
-				color *= innerCol;
+				color *= convertColour(innerCol);
 				// Combine alpha
 				color *= strokeAlpha * scissor;
 				result = color;
@@ -706,7 +715,7 @@ static int glnvg__renderCreate(void* uptr)
 				if (texType == 2) color = vec4(color.x);
 				if (color.x < 0.02f) discard;
 				color *= scissor;
-				result = color * innerCol;
+				result = color * convertColour(innerCol);
             } else if (type == NSVG_SHADER_DOTS) { // Dot pattern for plugdata
                 vec2 pt = (paintMat * vec3(fpos, 1.0f)).xy - (0.5f * patternSize);
                 vec2 center = pt.xy - mod(pt.xy, patternSize) + (0.5f * patternSize);
@@ -717,7 +726,7 @@ static int glnvg__renderCreate(void* uptr)
                 //float alpha = smoothstep(0.45f - delta, 0.45f, dist);
 
 				float alpha = smoothstep(feather - delta, feather + delta, dist);
-                vec4 dotColor = mix(innerCol, outerCol, alpha);
+                vec4 dotColor = mix(convertColour(innerCol), convertColour(outerCol), alpha);
                 result = dotColor * scissor;
             }
 			outColor = result;
@@ -907,24 +916,16 @@ static void glnvg__xformToMat3x4(float* m3, float* t)
 	m3[11] = 0.0f;
 }
 
-static NVGcolor glnvg__premulColor(NVGcolor c)
-{
-	c.r *= c.a;
-	c.g *= c.a;
-	c.b *= c.a;
-	return c;
-}
-
 static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpaint* paint,
 							   NVGscissor* scissor, float width, float fringe, float lineLength, int lineStyle, bool lineReversed = false)
 {
 	GLNVGtexture* tex = NULL;
 	float invxform[6];
-	int is_gradient = memcmp(&(paint->innerColor), &(paint->outerColor), sizeof(paint->outerColor));
+	int is_gradient = paint->innerColor.rgba32 != paint->outerColor.rgba32;
 	memset(frag, 0, sizeof(*frag));
 
-	frag->innerCol = glnvg__premulColor(paint->innerColor);
-	frag->outerCol = glnvg__premulColor(paint->outerColor);
+	frag->innerCol = paint->innerColor.rgba32;
+	frag->outerCol = paint->outerColor.rgba32;
 	frag->stateData |= packStateDataUniform(PACK_LINE_STYLE, lineStyle);
 	frag->radius = paint->radius;
 	frag->offset = paint->offset * paint->radius;
@@ -996,7 +997,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
                 frag->stateData |= packStateDataUniform(PACK_TYPE, NSVG_DOUBLE_STROKE);
             }
         }
-        frag->dashCol = glnvg__premulColor(paint->dashColor);
+        frag->dashCol = paint->dashColor.rgba32;
         frag->lineLength = lineLength;
         frag->feather = paint->feather;
         frag->radius = paint->radius;
@@ -1014,9 +1015,9 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         nvgTransformInverse(invxform, paint->xform);
     }
     else if(paint->dots) {
-	   frag->stateData |= packStateDataUniform(PACK_TYPE, NSVG_SHADER_DOTS);
-	   frag->feather = paint->feather;
-	   frag->patternSize = paint->dot_pattern_size;
+	    frag->stateData |= packStateDataUniform(PACK_TYPE, NSVG_SHADER_DOTS);
+	    frag->feather = paint->feather;
+	    frag->patternSize = paint->dot_pattern_size;
 		nvgTransformInverse(invxform, paint->xform);
 	} else if (paint->image == 0 && lineStyle == NVG_LINE_SOLID && !is_gradient) {
         frag->stateData |= packStateDataUniform(PACK_TYPE, NSVG_SHADER_FILLCOLOR);
@@ -1242,6 +1243,7 @@ static void glnvg__renderFlush(void* uptr)
 		// Setup require GL state.
 		glUseProgram(gl->shader.prog);
 
+        //glEnable(GL_FRAMEBUFFER_SRGB);
 		glEnable(GL_CULL_FACE);
 		glCullFace(GL_BACK);
 		glFrontFace(GL_CCW);

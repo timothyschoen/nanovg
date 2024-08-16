@@ -73,15 +73,16 @@ extern "C" {
 
 typedef struct NVGcontext NVGcontext;
 
-struct NVGcolor {
+struct alignas(16) NVGcolor {
 	union {
-		float rgba[4];
+		uint32_t rgba32;
+		uint8_t rgba8[4];
 		struct {
-			float r,g,b,a;
+            // listed in reverse (byte) order
+			uint8_t a,b,g,r;
 		};
 	};
 };
-typedef struct NVGcolor NVGcolor;
 typedef struct NVGcolor NVGcolor;
 
 struct NVGpaint {
@@ -243,6 +244,7 @@ NVGcolor nvgRGB(unsigned char r, unsigned char g, unsigned char b);
 // Returns a color value from red, green, blue values. Alpha will be set to 1.0f.
 NVGcolor nvgRGBf(float r, float g, float b);
 
+NVGcolor nvgRGBA32(unsigned char r, unsigned char g, unsigned char b, unsigned char a);
 
 // Returns a color value from red, green, blue and alpha values.
 NVGcolor nvgRGBA(unsigned char r, unsigned char g, unsigned char b, unsigned char a);
