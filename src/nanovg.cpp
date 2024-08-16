@@ -474,26 +474,43 @@ NVGcolor nvgRGBf(float r, float g, float b)
 	return nvgRGBAf(r,g,b,1.0f);
 }
 
+NVGcolor nvgRGBA32(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
+{
+    NVGcolor color;
+    // Use longer initialization to suppress warning.
+    color.r = r;
+    color.g = g;
+    color.b = b;
+    color.a = a;
+    return color;
+}
+
 NVGcolor nvgRGBA(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
 {
-	NVGcolor color;
-	// Use longer initialization to suppress warning.
-	color.r = r / 255.0f;
-	color.g = g / 255.0f;
-	color.b = b / 255.0f;
-	color.a = a / 255.0f;
-	return color;
+    NVGcolor outCol;
+    outCol.r = r;
+    outCol.g = g;
+    outCol.b = b;
+    outCol.a = a;
+    return outCol;
+}
+
+float srgbToLinear(float srgb) {
+    if (srgb <= 0.04045f) {
+        return srgb / 12.92f;
+    } else {
+        return std::powf((srgb + 0.055f) / 1.055f, 2.4f);
+    }
 }
 
 NVGcolor nvgRGBAf(float r, float g, float b, float a)
 {
-	NVGcolor color;
-	// Use longer initialization to suppress warning.
-	color.r = r;
-	color.g = g;
-	color.b = b;
-	color.a = a;
-	return color;
+    NVGcolor color;
+    color.r = static_cast<uint8_t>(r * 255.0f);
+    color.g = static_cast<uint8_t>(g * 255.0f);
+    color.b = static_cast<uint8_t>(b * 255.0f);
+    color.a = static_cast<uint8_t>(a * 255.0f);
+    return color;
 }
 
 NVGcolor nvgTransRGBA(NVGcolor c, unsigned char a)
@@ -517,7 +534,7 @@ NVGcolor nvgLerpRGBA(NVGcolor c0, NVGcolor c1, float u)
 	oneminu = 1.0f - u;
 	for(int i = 0; i <4; i++ )
 	{
-		cint.rgba[i] = c0.rgba[i] * oneminu + c1.rgba[i] * u;
+		cint.rgba8[i] = c0.rgba8[i] * oneminu + c1.rgba8[i] * u;
 	}
 
 	return cint;
@@ -544,18 +561,18 @@ static float nvg__hue(float h, float m1, float m2)
 NVGcolor nvgHSLA(float h, float s, float l, unsigned char a)
 {
 	float m1, m2;
-	NVGcolor col;
+	float col[4];
 	h = nvg__modf(h, 1.0f);
 	if (h < 0.0f) h += 1.0f;
 	s = nvg__clampf(s, 0.0f, 1.0f);
 	l = nvg__clampf(l, 0.0f, 1.0f);
 	m2 = l <= 0.5f ? (l * (1 + s)) : (l + s - l * s);
 	m1 = 2 * l - m2;
-	col.r = nvg__clampf(nvg__hue(h + 1.0f/3.0f, m1, m2), 0.0f, 1.0f);
-	col.g = nvg__clampf(nvg__hue(h, m1, m2), 0.0f, 1.0f);
-	col.b = nvg__clampf(nvg__hue(h - 1.0f/3.0f, m1, m2), 0.0f, 1.0f);
-	col.a = a/255.0f;
-	return col;
+	col[0] = nvg__clampf(nvg__hue(h + 1.0f/3.0f, m1, m2), 0.0f, 1.0f);
+	col[1] = nvg__clampf(nvg__hue(h, m1, m2), 0.0f, 1.0f);
+	col[2] = nvg__clampf(nvg__hue(h - 1.0f/3.0f, m1, m2), 0.0f, 1.0f);
+	col[3] = a/255.0f;
+	return nvgRGBAf(col[3], col[0], col[1], col[2]);
 }
 
 void nvgTransformIdentity(float* t)
@@ -2872,11 +2889,13 @@ void nvgStrokeRect(NVGcontext* ctx, float x1, float y1, float w, float h)
 
 void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
 {
+    float shortestSide = std::min(w, h);
+
     x -= 1.5f;
     y -= 1.5f;
     w += 3.0f;
     h += 3.0f;
-    
+
     NVGpaint p;
     memset(&p, 0, sizeof(p));
     nvgTransformIdentity(p.xform);
@@ -2884,7 +2903,9 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
     p.xform[5] = y+h*0.5f;
 
     p.rounded_rect = 1;
-    p.radius = radius;
+    // If the radius is less than half of the shortest side, it will no longer be rounded
+    // So force rounding here. Sorry not sorry.
+    p.radius = std::min(radius, shortestSide * 0.5f);
     p.innerColor = icol;
     p.outerColor = ocol;
     p.extent[0] = (w * 0.5f) - 1.5f;
