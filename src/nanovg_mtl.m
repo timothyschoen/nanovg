@@ -502,7 +502,14 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     id<MTLDevice> metalDevice = MTLCreateSystemDefaultDevice();
     if (!metalDevice) return NULL;
 
-    [metalLayer setPixelFormat:MTLPixelFormatRGBA8Unorm];
+    // Set pixel format to RGBA8Unorm if available, otherwise use BGRA8Unorm
+    MTLPixelFormat pixelFormat = MTLPixelFormatRGBA8Unorm;
+    if (![metalDevice supportsTextureSampleCount:MTLPixelFormatRGBA8Unorm]) {
+        pixelFormat = MTLPixelFormatBGRA8Unorm;
+    }
+    
+    
+    [metalLayer setPixelFormat:pixelFormat];
     [metalLayer setDevice: metalDevice];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
     return nvgCreateMTL((__bridge void*)metalLayer, flags);
@@ -517,8 +524,14 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     id<MTLDevice> metalDevice = MTLCreateSystemDefaultDevice();
     if (!metalDevice) return NULL;
 
+    // Set pixel format to RGBA8Unorm if available, otherwise use BGRA8Unorm
+    MTLPixelFormat pixelFormat = MTLPixelFormatRGBA8Unorm;
+    if (![metalDevice supportsTextureSampleCount:MTLPixelFormatRGBA8Unorm]) {
+        pixelFormat = MTLPixelFormatBGRA8Unorm;
+    }
+    
     ((__bridge NSView*) view).layer = metalLayer;
-    [metalLayer setPixelFormat:MTLPixelFormatRGBA8Unorm];
+    [metalLayer setPixelFormat:pixelFormat];
     [metalLayer setDevice: metalDevice];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
     return nvgCreateMTL((__bridge void*)((__bridge NSView*) view).layer, flags);
