@@ -89,6 +89,8 @@ struct NVGpaint {
 	float xform[6];
 	float extent[2];
 	float radius;
+    int flag_type;
+    bool flag_outline : 1;
 	float feather;
 	NVGcolor innerColor;
 	NVGcolor outerColor;
@@ -98,6 +100,7 @@ struct NVGpaint {
     float offset;
     bool dots : 1;
     bool rounded_rect : 1;
+    bool object_rect : 1;
     bool double_stroke : 1;
     bool gradient_stroke : 1;
     bool smooth_glow : 1;
@@ -505,6 +508,15 @@ void nvgStrokeRect(NVGcontext* ctx, float x1, float y1, float w, float h);
 
 // Fills and strokes a rounded rectangle using rounded rectangle shader, also bypassing paths system
 void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius);
+
+enum ObjectFlagType {
+    FlagTopBottom = 1,
+    FlagTop = 2,
+    FlagMessage = 3
+};
+
+// Fills and stroke a plugdata object, with ability to draw it's own flag either filled (plugdata style) or outlined (vanilla style)
+void nvgDrawObjectWithFlag(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, NVGcolor flagCol, float radius, ObjectFlagType flagType, bool flagOutline);
 
 // Fills a rounded rectangle using rounded rectangle shader, also bypassing paths system. Uses current fill colour
 void nvgFillRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, float radius);
