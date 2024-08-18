@@ -542,17 +542,6 @@ static int glnvg__renderCreate(void* uptr)
             float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0f, 1.0f );
             return length( pa - ba*h );
         }
-        float sdTriangle( in vec2 p, in vec2 p0, in vec2 p1, in vec2 p2 )
-        {
-            vec2 e0 = p1-p0, e1 = p2-p1, e2 = p0-p2;
-            vec2 v0 = p -p0, v1 = p -p1, v2 = p -p2;
-            vec2 pq0 = v0 - e0*clamp( dot(v0,e0)/dot(e0,e0), 0.0, 1.0 );
-            vec2 pq1 = v1 - e1*clamp( dot(v1,e1)/dot(e1,e1), 0.0, 1.0 );
-            vec2 pq2 = v2 - e2*clamp( dot(v2,e2)/dot(e2,e2), 0.0, 1.0 );
-            float s = sign( e0.x*e2.y - e0.y*e2.x );
-            vec2 d = min(min(vec2(dot(pq0,pq0), s*(v0.x*e0.y-v0.y*e0.x)), vec2(dot(pq1,pq1), s*(v1.x*e1.y-v1.y*e1.x))), vec2(dot(pq2,pq2), s*(v2.x*e2.y-v2.y*e2.x)));
-            return -sqrt(d.x)*sign(d.y);
-        }
         float inverseLerp(float a, float b, float value) {
             return (value - a) / (b - a);
         }
@@ -641,7 +630,7 @@ static int glnvg__renderCreate(void* uptr)
                 int flagType = (stateData >> 9) & 0x03;     // 2 bits
 
                 vec2 flagPoints[3];
-                float flagSize = 9.0f;
+                float flagSize = 5.0f;
                 if (flagType != 3) {
                     flagPoints[1] = vec2(-1.0f, -1.0f) * flagSize;
                 } else {
@@ -651,24 +640,27 @@ static int glnvg__renderCreate(void* uptr)
                 flagPoints[2] = vec2(0.0f, -1.0f) * flagSize;
 
                 bool objectOutline = bool((stateData >> 11) & 0x01); // 1 bit (off or on)
-                float offset = 1.0f;
+                float offset = 0.0f;
 
                 float flag;
                 switch (flagType){
                     case 1: // triangle flag top bottom
-                        vec2 flagPosTopBottom = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y + flagSize - 1.0f);
-                        flag = sdTriangle(flagPosTopBottom, flagPoints[0], flagPoints[1], flagPoints[2]);
+                        vec2 flagPosTopBottom = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y);
+                        vec2 rPoint = rotatePoint(flagPosTopBottom, 0.7854f); // 45 in radians
+                        flag = sdroundrect(rPoint, vec2(flagSize), 0.0f);
                         break;
                     case 2: // triangle flag top only
-                        vec2 flagPosTop = pt - vec2(extent.x + offset, -extent.y + flagSize - 1.0f);
-                        flag = sdTriangle(flagPosTop, flagPoints[0], flagPoints[1], flagPoints[2]);
+                        vec2 flagPosTop = pt - vec2(extent.x + offset, -extent.y);
+                        vec2 rPoint2 = rotatePoint(flagPosTop, 0.7854f);
+                        flag = sdroundrect(rPoint2, vec2(flagSize), 0.0f);
                         break;
                     case 3: // composite square & triangle top / bottom
-                        vec2 messageFlag = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y + flagSize - 1.0f);
-                        float triangle = sdTriangle(messageFlag, flagPoints[0], flagPoints[1], flagPoints[2]);
-                        float middle = (extent.y - flagSize + 1.0f) * 0.5f;
-                        float square = sdroundrect(vec2(messageFlag.x, messageFlag.y - middle - 1.0f), vec2(flagSize, middle + 2.0f), 0.5f);
-                        flag = min(triangle, square); // union of triangle and square
+                        vec2 messageFlag = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y);
+                        vec2 rPoint3 = rotatePoint(messageFlag, 0.7854f);
+                        float triangle = sdroundrect(rPoint3, vec2(flagSize), 0.0f);
+                        float squareMid = (extent.y - flagSize) * 0.5f;
+                        float square = sdroundrect(messageFlag, vec2(flagSize, flagSize), 0.0f);
+                        flag = min(triangle, square); // union
                         break;
                     default:
                         break;
