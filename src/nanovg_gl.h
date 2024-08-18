@@ -528,54 +528,30 @@ static int glnvg__renderCreate(void* uptr)
 			vec2 d = abs(pt) - ext2;
 			return min(max(d.x,d.y),0.0f) + length(max(d,0.0f)) - rad;
 		}
+        vec2 rotatePoint(vec2 p, float angle) {
+            float cosAngle = cos(angle);
+            float sinAngle = sin(angle);
+            mat2 rotationMatrix = mat2(
+                cosAngle, -sinAngle,
+                sinAngle,  cosAngle
+            );
+            return rotationMatrix * p;
+        }
         float sdSegment(vec2 p, vec2 a, vec2 b ) {
             vec2 pa = p-a, ba = b-a;
             float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0f, 1.0f );
             return length( pa - ba*h );
         }
-        float cross2d(vec2 v0, vec2 v1) {
-            return v0.x*v1.y - v0.y*v1.x;
-        }
-        float sdPoly(in vec2 p, in vec2[4] poly, int numPoints) {
-            vec2[4] e;
-            vec2[4] v;
-            vec2[4] pq;
-            // data
-            for( int i = 0; i < numPoints; i++) {
-                int i2= int(mod(float(i+1),float(numPoints))); //i+1
-        		e[i] = poly[i2] - poly[i];
-                v[i] = p - poly[i];
-                pq[i] = v[i] - e[i]*clamp( dot(v[i],e[i])/dot(e[i],e[i]), 0.0, 1.0 );
-            }
-            //distance
-            float d = dot(pq[0], pq[0]);
-        	for( int i=1; i < numPoints; i++) {
-            	d = min( d, dot(pq[i], pq[i]));
-            }
-            //winding number
-            // from http://geomalgorithms.com/a03-_inclusion.html
-            int wn =0;
-            for( int i=0; i < numPoints; i++) {
-                int i2= int(mod(float(i+1),float(numPoints)));
-                bool cond1= 0. <= v[i].y;
-                bool cond2= 0. > v[i2].y;
-                float val3= cross2d(e[i],v[i]); //isLeft
-                wn+= cond1 && cond2 && val3>0. ? 1 : 0; // have  a valid up intersect
-                wn-= !cond1 && !cond2 && val3<0. ? 1 : 0; // have  a valid down intersect
-            }
-            float s= wn == 0 ? 1. : -1.;
-            return sqrt(d) * s;
-        }
-        float intersect(float shape1, float shape2){
-            return max(shape1, shape2);
-        }
-        float subtract(float base, float subtraction){
-            return intersect(base, -subtraction);
-        }
-        void getTriangleFlag(inout vec2 array[4], float size){
-            array[0] = vec2(0.0f);
-            array[1] = vec2(-1.0f, -1.0f) * size;
-            array[2] = vec2(0.0f, -1.0f) * size;
+        float sdTriangle( in vec2 p, in vec2 p0, in vec2 p1, in vec2 p2 )
+        {
+            vec2 e0 = p1-p0, e1 = p2-p1, e2 = p0-p2;
+            vec2 v0 = p -p0, v1 = p -p1, v2 = p -p2;
+            vec2 pq0 = v0 - e0*clamp( dot(v0,e0)/dot(e0,e0), 0.0, 1.0 );
+            vec2 pq1 = v1 - e1*clamp( dot(v1,e1)/dot(e1,e1), 0.0, 1.0 );
+            vec2 pq2 = v2 - e2*clamp( dot(v2,e2)/dot(e2,e2), 0.0, 1.0 );
+            float s = sign( e0.x*e2.y - e0.y*e2.x );
+            vec2 d = min(min(vec2(dot(pq0,pq0), s*(v0.x*e0.y-v0.y*e0.x)), vec2(dot(pq1,pq1), s*(v1.x*e1.y-v1.y*e1.x))), vec2(dot(pq2,pq2), s*(v2.x*e2.y-v2.y*e2.x)));
+            return -sqrt(d.x)*sign(d.y);
         }
         float inverseLerp(float a, float b, float value) {
             return (value - a) / (b - a);
@@ -611,9 +587,6 @@ static int glnvg__renderCreate(void* uptr)
             float radThick = rad * .25f;
             float seg = sdSegment(vec2(uv.x, fy), vec2(0.0f, radThick + thickness), vec2(0.0f, (rad * 0.5f) + radThick - thickness)) - thickness;
             float delta = fwidth(seg) * 0.5f;
-            //vec2 dx = dFdx(uv);
-            //vec2 dy = dFdy(uv);
-            //float alias = 0.5f * length(max(abs(dx), abs(dy)));
             float aa = delta;
             float w = clamp(inverseLerp(aa, -aa, seg), 0.0f, 1.0f);
             return w;
@@ -640,7 +613,6 @@ static int glnvg__renderCreate(void* uptr)
 			return mask;
 		}
 		#endif
-
 		void main(void) {
             int lineStyle = (stateData >> 7) & 0x03;     // 2 bits
             int texType   = (stateData >> 5) & 0x03;     // 2 bits
@@ -666,66 +638,67 @@ static int glnvg__renderCreate(void* uptr)
 			}
 			if (type == NSVG_SHADER_OBJECT_RECT) {
 				vec2 pt = (paintMat * vec3(fpos,1.0f)).xy;
-
                 int flagType = (stateData >> 9) & 0x03;     // 2 bits
 
-                vec2 flagPoints[4];
+                vec2 flagPoints[3];
                 float flagSize = 9.0f;
                 if (flagType != 3) {
-                    getTriangleFlag(flagPoints, flagSize);
+                    flagPoints[1] = vec2(-1.0f, -1.0f) * flagSize;
                 } else {
                     flagSize = 6.0f;
-                    flagPoints[0] = vec2(0.0f);
-                    flagPoints[1] = vec2(-1.0f, 1.0f) * flagSize;
-                    flagPoints[2] = vec2(-1.0f, extent.y) * flagSize;
-                    flagPoints[3] = vec2(0.0f, extent.y) * flagSize;
+                    flagPoints[1] = vec2(-1.0f, 0.0f) * flagSize;
                 }
+                flagPoints[2] = vec2(0.0f, -1.0f) * flagSize;
 
                 bool objectOutline = bool((stateData >> 11) & 0x01); // 1 bit (off or on)
-                float offset = objectOutline ? 2.0f : 1.0f;
+                float offset = 1.0f;
 
                 float flag;
                 switch (flagType){
-                    case 1:
+                    case 1: // triangle flag top bottom
                         vec2 flagPosTopBottom = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y + flagSize - 1.0f);
-                        flag = sdPoly(flagPosTopBottom, flagPoints, 3);
+                        flag = sdTriangle(flagPosTopBottom, flagPoints[0], flagPoints[1], flagPoints[2]);
                         break;
-                    case 2:
+                    case 2: // triangle flag top only
                         vec2 flagPosTop = pt - vec2(extent.x + offset, -extent.y + flagSize - 1.0f);
-                        flag = sdPoly(flagPosTop, flagPoints, 3);
+                        flag = sdTriangle(flagPosTop, flagPoints[0], flagPoints[1], flagPoints[2]);
                         break;
-                    case 3:
-                        vec2 flagMessagePos = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y - 1.0f);
-                        flag = sdPoly(flagMessagePos, flagPoints, 4);
+                    case 3: // composite square & triangle top / bottom
+                        vec2 messageFlag = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y + flagSize - 1.0f);
+                        float triangle = sdTriangle(messageFlag, flagPoints[0], flagPoints[1], flagPoints[2]);
+                        float middle = (extent.y - flagSize + 1.0f) * 0.5f;
+                        float square = sdroundrect(vec2(messageFlag.x, messageFlag.y - middle - 1.0f), vec2(flagSize, middle + 2.0f), 0.5f);
+                        flag = min(triangle, square); // union of triangle and square
                         break;
                     default:
                         break;
                     }
 
-				// Calculate outer rectangle
-                float oD = sdroundrect(pt, extent, radius) - 0.04f;
+                float oD = sdroundrect(pt, extent, radius) - 0.04f; // Calculate outer rectangle
+
                 if (objectOutline) {
-                    oD = subtract(oD, flag);
-                    float outerD = fwidth(oD) * 0.5f;
-                    // Use same SDF but reduce by 1px
-				    float iD = oD + 1.0f;
-                    float innerD = fwidth(iD) * 0.5f;
-				    float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
-                    float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
-				    result = vec4(mix(convertColour(outerCol), convertColour(innerCol), innerRoundedRectAlpha) * outerRoundedRectAlpha) * scissor;
+                    oD = max(oD, -flag); // subtract flag shape from background
                 }
-                else {
-                    float flagD = fwidth(flag) * 0.5f;
-                    float triFlagShape = clamp(inverseLerp(flagD, -flagD, flag), 0.0f, 1.0f);
-                    float outerD = fwidth(oD) * 0.5f;
-                    // Use same SDF but reduce by 1px
-				    float iD = oD + 1.0f;
-                    float innerD = fwidth(iD) * 0.5f;
-				    float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
-                    float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
-				    result = vec4(mix(convertColour(outerCol), mix(convertColour(innerCol), convertColour(dashCol), triFlagShape), innerRoundedRectAlpha) * outerRoundedRectAlpha) * scissor;
-				}
-                outColor = result;
+
+                float flagD = fwidth(flag) * 0.5f;
+                float triFlagShape = clamp(inverseLerp(flagD, -flagD, flag), 0.0f, 1.0f);
+
+                float outerD = fwidth(oD) * 0.5f;
+                // Use same SDF and reduce by 1px for border
+                float iD = oD + 1.0f;
+                float innerD = fwidth(iD) * 0.5f;
+
+                float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
+                float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
+
+                vec4 finalColor;
+                if (objectOutline) {
+                    finalColor = mix(convertColour(outerCol), convertColour(innerCol), innerRoundedRectAlpha);
+                } else {
+                    finalColor = mix(convertColour(outerCol), mix(convertColour(innerCol), convertColour(dashCol), triFlagShape), innerRoundedRectAlpha);
+                }
+
+                outColor = vec4(finalColor * outerRoundedRectAlpha) * scissor;
 				return;
 			}
 			float strokeAlpha = strokeMask(lineStyle);
