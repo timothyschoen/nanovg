@@ -313,7 +313,10 @@ typedef enum {
 
 int mtlnvg_packStateDataUniform(PackType packType, int value) {
     switch (packType) {
-            
+        case PACK_OBJECT_STYLE:
+            return (value & 0x01) << 11;
+        case PACK_FLAG_TYPE:
+            return (value & 0x03) << 9;
         case PACK_LINE_STYLE:
             return (value & 0x03) << 7;
         case PACK_TEX_TYPE:
