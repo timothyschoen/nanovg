@@ -37,13 +37,19 @@ enum PackType {
     PACK_LINE_STYLE,
     PACK_TEX_TYPE,
     PACK_TYPE,
-    PACK_REVERSE
+    PACK_REVERSE,
+    PACK_FLAG_TYPE,
+    PACK_OBJECT_STYLE
 };
 
 // This allows us to place 4 int values into a single int to save space and improve speed for CPU->GPU upload
 // and openGL checking of uniform state as it only needs to do this for 1 int uniform as opposed to 4
 int packStateDataUniform(PackType packType, int value) {
     switch (packType) {
+        case PACK_OBJECT_STYLE:
+            return (value & 0x01) << 11;
+        case PACK_FLAG_TYPE:
+            return (value & 0x03) << 9;
         case PACK_LINE_STYLE:
             return (value & 0x03) << 7;
         case PACK_TEX_TYPE:
@@ -100,6 +106,7 @@ enum GLNVGshaderType {
 	NSVG_SHADER_IMG,
 	NSVG_SHADER_DOTS,
 	NSVG_SHADER_FAST_ROUNDEDRECT,
+	NSVG_SHADER_OBJECT_RECT,
 	NSVG_SHADER_FILLCOLOR,
     NSVG_SMOOTH_GLOW,
     NSVG_DOUBLE_STROKE,
@@ -457,6 +464,7 @@ static int glnvg__renderCreate(void* uptr)
                  << "#define NSVG_SHADER_IMG                    " << NSVG_SHADER_IMG << "\n"
                  << "#define NSVG_SHADER_DOTS                   " << NSVG_SHADER_DOTS << "\n"
                  << "#define NSVG_SHADER_FAST_ROUNDEDRECT       " << NSVG_SHADER_FAST_ROUNDEDRECT << "\n"
+                 << "#define NSVG_SHADER_OBJECT_RECT            " << NSVG_SHADER_OBJECT_RECT << "\n"
                  << "#define NSVG_SHADER_FILLCOLOR              " << NSVG_SHADER_FILLCOLOR << "\n"
                  << "#define NSVG_SMOOTH_GLOW                   " << NSVG_SMOOTH_GLOW << "\n"
                  << "#define NSVG_DOUBLE_STROKE                 " << NSVG_DOUBLE_STROKE << "\n"
@@ -512,7 +520,7 @@ static int glnvg__renderCreate(void* uptr)
             col.g = float((rgba >> 16) & 0xFF) / 255.0f;
             col.b = float((rgba >> 8) & 0xFF) / 255.0f;
             float a = float(rgba & 0xFF) / 255.0f;
-
+            // premultiply colour here
             return vec4((col * a).rgb, a);
         }
 		float sdroundrect(vec2 pt, vec2 ext, float rad) {
@@ -520,6 +528,15 @@ static int glnvg__renderCreate(void* uptr)
 			vec2 d = abs(pt) - ext2;
 			return min(max(d.x,d.y),0.0f) + length(max(d,0.0f)) - rad;
 		}
+        vec2 rotatePoint(vec2 p, float angle) {
+            float cosAngle = cos(angle);
+            float sinAngle = sin(angle);
+            mat2 rotationMatrix = mat2(
+                cosAngle, -sinAngle,
+                sinAngle,  cosAngle
+            );
+            return rotationMatrix * p;
+        }
         float sdSegment(vec2 p, vec2 a, vec2 b ) {
             vec2 pa = p-a, ba = b-a;
             float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0f, 1.0f );
@@ -534,9 +551,6 @@ static int glnvg__renderCreate(void* uptr)
 			sc = vec2(0.5f,0.5f) - sc * scissorScale;
 			return clamp(sc.x,0.0f,1.0f) * clamp(sc.y,0.0f,1.0f);
 		}
-		float gradientNoise(vec2 uv){
-            return fract(52.9829189 * fract(dot(uv, vec2(0.06711056, 0.00583715))));
-        }
         vec4 normalBlend(vec4 src, vec4 dst) {
             float finalAlpha = src.a + dst.a * (1.0 - src.a);
             return vec4((src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / finalAlpha, finalAlpha);
@@ -562,9 +576,6 @@ static int glnvg__renderCreate(void* uptr)
             float radThick = rad * .25f;
             float seg = sdSegment(vec2(uv.x, fy), vec2(0.0f, radThick + thickness), vec2(0.0f, (rad * 0.5f) + radThick - thickness)) - thickness;
             float delta = fwidth(seg) * 0.5f;
-            //vec2 dx = dFdx(uv);
-            //vec2 dy = dFdy(uv);
-            //float alias = 0.5f * length(max(abs(dx), abs(dy)));
             float aa = delta;
             float w = clamp(inverseLerp(aa, -aa, seg), 0.0f, 1.0f);
             return w;
@@ -591,11 +602,7 @@ static int glnvg__renderCreate(void* uptr)
 			return mask;
 		}
 		#endif
-
 		void main(void) {
-            // Unpack the state data uniform
-            // We hold 4 values in this int to save space & improve performance for CPU->GPU upload of uniform block
-
             int lineStyle = (stateData >> 7) & 0x03;     // 2 bits
             int texType   = (stateData >> 5) & 0x03;     // 2 bits
             int type      = (stateData >> 1) & 0x0F;     // 4 bits
@@ -607,17 +614,86 @@ static int glnvg__renderCreate(void* uptr)
 		        outColor = vec4(0, 0, 0, 0);
 			}
 			if (type == NSVG_SHADER_FAST_ROUNDEDRECT) {
-				// Calculate distance to edge.
 				vec2 pt = (paintMat * vec3(fpos,1.0f)).xy;
                 float oD = sdroundrect(pt, extent, radius) - 0.04f;
 				float outerD = fwidth(oD) * 0.5f;
-                // Use same SDF but reduce by 1px
 				float iD = oD + 1.0f;
                 float innerD = fwidth(iD) * 0.5f;
 				float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
                 float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
 				result = vec4(mix(convertColour(outerCol).rgba, convertColour(innerCol).rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
 				outColor = result;
+				return;
+			}
+			if (type == NSVG_SHADER_OBJECT_RECT) {
+				vec2 pt = (paintMat * vec3(fpos,1.0f)).xy;
+                int flagType = (stateData >> 9) & 0x03;     // 2 bits
+
+                vec2 flagPoints[3];
+                float flagSize = 5.0f;
+                flagPoints[2] = vec2(0.0f, -1.0f) * flagSize;
+
+                bool objectOutline = bool((stateData >> 11) & 0x01); // 1 bit (off or on)
+
+                float offset = objectOutline ? 0.2f : -0.5f;
+
+                float flag;
+                switch (flagType){
+                    case 1: // triangle flag top bottom
+                        flagPoints[1] = vec2(-1.0f, -1.0f) * flagSize;
+
+                        vec2 flagPosTopBottom = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y);
+                        vec2 rPoint = rotatePoint(flagPosTopBottom, 0.7854f); // 45 in radians
+                        flag = sdroundrect(rPoint, vec2(flagSize), 0.0f);
+                        break;
+                    case 2: // triangle flag top only
+                        flagPoints[1] = vec2(-1.0f, -1.0f) * flagSize;
+
+                        vec2 flagPosTop = pt - vec2(extent.x + offset, -extent.y);
+                        vec2 rPoint2 = rotatePoint(flagPosTop, 0.7854f); // 45 in radians
+                        flag = sdroundrect(rPoint2, vec2(flagSize), 0.0f);
+                        break;
+                    case 3: // composite square & triangle top / bottom
+                        flagSize = 3.5f;
+                        flagPoints[1] = vec2(-1.0f, 0.0f) * flagSize;
+
+                        float hypot = length(vec2(flagSize));
+                        vec2 messageFlag = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y + hypot);
+                        vec2 rPoint3 = rotatePoint(messageFlag, 0.7854f); // 45 in radians
+                        float triangle = sdroundrect(rPoint3, vec2(flagSize), 0.0f);
+                        float squareMid = (extent.y - flagSize) * 0.5f;
+                        float square = sdroundrect(vec2(messageFlag.x, messageFlag.y - squareMid), vec2(hypot, squareMid), 0.0f);
+                        flag = min(triangle, square); // union
+                        break;
+                    default:
+                        break;
+                    }
+
+                float oD = sdroundrect(pt, extent, radius) - 0.04f; // Calculate outer rectangle
+
+                if (objectOutline) {
+                    oD = max(oD, -flag); // subtract flag shape from background
+                }
+
+                float flagD = fwidth(flag) * 0.5f;
+                float triFlagShape = clamp(inverseLerp(flagD, -flagD, flag), 0.0f, 1.0f);
+
+                float outerD = fwidth(oD) * 0.5f;
+                // Use same SDF and reduce by 1px for border
+                float iD = oD + 1.0f;
+                float innerD = fwidth(iD) * 0.5f;
+
+                float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
+                float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
+
+                vec4 finalColor;
+                if (objectOutline) {
+                    finalColor = mix(convertColour(outerCol), convertColour(innerCol), innerRoundedRectAlpha);
+                } else {
+                    finalColor = mix(convertColour(outerCol), mix(convertColour(innerCol), convertColour(dashCol), triFlagShape), innerRoundedRectAlpha);
+                }
+
+                outColor = vec4(finalColor * outerRoundedRectAlpha) * scissor;
 				return;
 			}
 			float strokeAlpha = strokeMask(lineStyle);
@@ -978,6 +1054,17 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         nvgTransformInverse(invxform, paint->xform);
         frag->scissorExt[0] = scissor->extent[0];
 		frag->scissorExt[1] = scissor->extent[1];
+        frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
+        frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
+        frag->radius = paint->radius;
+    } else if(paint->object_rect) {
+        frag->stateData |= packStateDataUniform(PACK_TYPE, NSVG_SHADER_OBJECT_RECT);
+        frag->stateData |= packStateDataUniform(PACK_FLAG_TYPE, paint->flag_type);
+        frag->stateData |= packStateDataUniform(PACK_OBJECT_STYLE, paint->flag_outline);
+        frag->dashCol = paint->dashColor.rgba32;
+        nvgTransformInverse(invxform, paint->xform);
+        frag->scissorExt[0] = scissor->extent[0];
+        frag->scissorExt[1] = scissor->extent[1];
         frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
         frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
         frag->radius = paint->radius;

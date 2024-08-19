@@ -2949,6 +2949,37 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
     nvgFillRect(ctx, x, y, w, h);
 }
 
+void nvgDrawObjectWithFlag(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, NVGcolor flagCol, float radius, ObjectFlagType flagType, bool flagOutline)
+{
+    float shortestSide = std::min(w, h);
+
+    x -= 1.5f;
+    y -= 1.5f;
+    w += 3.0f;
+    h += 3.0f;
+
+    NVGpaint p;
+    memset(&p, 0, sizeof(p));
+    nvgTransformIdentity(p.xform);
+    p.xform[4] = x+w*0.5f;
+    p.xform[5] = y+h*0.5f;
+
+    p.object_rect = 1;
+    // If the radius is less than half of the shortest side, it will no longer be rounded
+    // So force rounding here. Sorry not sorry.
+    p.radius = std::min(radius, shortestSide * 0.5f);
+    p.flag_type = flagType;
+    p.flag_outline = flagOutline;
+    p.innerColor = icol;
+    p.outerColor = ocol;
+    p.dashColor = flagCol;
+    p.extent[0] = (w * 0.5f) - 1.5f;
+    p.extent[1] = (h * 0.5f) - 1.5f;
+
+    nvgFillPaint(ctx, p);
+    nvgFillRect(ctx, x, y, w, h);
+}
+
 void nvgFillRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, float radius)
 {
     nvgDrawRoundedRect(ctx, x, y, w, h, nvg__getState(ctx)->fill.innerColor, nvg__getState(ctx)->fill.innerColor, radius);
