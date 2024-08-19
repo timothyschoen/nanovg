@@ -941,7 +941,6 @@ void* mnvgDevice(NVGcontext* ctx) {
     }
 
     mtlnvg__xformToMat3x3(&frag->paintMat, invxform);
-
     return 1;
 }
 
@@ -1483,12 +1482,10 @@ void* mnvgDevice(NVGcontext* ctx) {
             vertOffset++;
         }
         if (path->nstroke > 0) {
-            memcpy(strokeVert, path->stroke, sizeof(NVGvertex));
-            ++strokeVert;
+            *(strokeVert++) = *path->stroke;
             memcpy(strokeVert, path->stroke, sizeof(NVGvertex) * path->nstroke);
             strokeVert += path->nstroke;
-            memcpy(strokeVert, path->stroke + path->nstroke - 1, sizeof(NVGvertex));
-            ++strokeVert;
+            *(strokeVert++) = path->stroke[path->nstroke - 1];
         }
     }
 
