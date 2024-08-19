@@ -37,7 +37,8 @@ typedef enum {
   MNVG_SHADER_SMOOTH_GLOW,
   MNVG_SHADER_DOUBLE_STROKE_GRAD,
   MNVG_SHADER_DOUBLE_STROKE_ACTIVITY,
-  MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY
+  MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY,
+  MNVG_SHADER_OBJECT_RECT
 } FragmentShaderCall;
 
 typedef struct {
@@ -116,10 +117,6 @@ float circleDist(float2 p, float2 center, float d) {
   return distance(center, p) - d;
 }
 
-float gradientNoise(float2 uv){
-    return fract(52.9829189 * fract(dot(uv, float2(0.06711056, 0.00583715))));
-}
-
 float4 convertColour(int rgba){
     float3 col;
     col.r = float((rgba >> 24) & 0xFF) / 255.0f;
@@ -137,6 +134,16 @@ float sdSegment(float2 p, float2 a, float2 b ) {
     float2 pa = p-a, ba = b-a;
     float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0f, 1.0f );
     return length( pa - ba*h );
+}
+
+float2 rotatePoint(float2 p, float angle) {
+    float cosAngle = cos(angle);
+    float sinAngle = sin(angle);
+    float2x2 rotationMatrix = float2x2(
+        float2(cosAngle, -sinAngle),
+        float2(sinAngle,  cosAngle)
+    );
+    return rotationMatrix * p;
 }
 
 float dashed(float2 uv, float rad, float thickness, float featherVal) {
@@ -292,7 +299,80 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     color *= scissor;
     color *= strokeAlpha;
     return color;
-  } else {  // MNVG_SHADER_FILLIMG
+  }
+  if (type == MNVG_SHADER_OBJECT_RECT) {
+	float2 pt = (uniforms.paintMat * float3(in.fpos,1.0f)).xy;
+    int flagType = (uniforms.stateData >> 9) & 0x03;     // 2 bits
+
+    float2 flagPoints[3];
+    float flagSize = 5.0f;
+    flagPoints[2] = float2(0.0f, -1.0f) * flagSize;
+
+    bool objectOutline = bool((uniforms.stateData >> 11) & 0x01); // 1 bit (off or on)
+
+    float offset = objectOutline ? 0.2f : -0.5f;
+
+    float flag = 0.0f;
+    switch (flagType){
+        case 1: { // triangle flag top bottom
+            flagPoints[1] = float2(-1.0f, -1.0f) * flagSize;
+            float2 flagPosTopBottom = float2(pt.x, -abs(pt.y)) - float2(uniforms.extent.x + offset, -uniforms.extent.y);
+            float2 rPoint = rotatePoint(flagPosTopBottom, 0.7854f); // 45 in radians
+            flag = sdroundrect(rPoint, float2(flagSize), 0.0f);
+            break;
+        }
+        case 2: { // triangle flag top only
+            flagPoints[1] = float2(-1.0f, -1.0f) * flagSize;
+
+            float2 flagPosTop = pt - float2(uniforms.extent.x + offset, -uniforms.extent.y);
+            float2 rPoint2 = rotatePoint(flagPosTop, 0.7854f); // 45 in radians
+            flag = sdroundrect(rPoint2, float2(flagSize), 0.0f);
+            break;
+        }
+        case 3: { // composite square & triangle top / bottom
+            flagSize = 3.5f;
+            flagPoints[1] = float2(-1.0f, 0.0f) * flagSize;
+
+            float hypot = length(float2(flagSize));
+            float2 messageFlag = float2(pt.x, -abs(pt.y)) - float2(uniforms.extent.x + offset, -uniforms.extent.y + hypot);
+            float2 rPoint3 = rotatePoint(messageFlag, 0.7854f); // 45 in radians
+            float triangle = sdroundrect(rPoint3, float2(flagSize), 0.0f);
+            float squareMid = (uniforms.extent.y - flagSize) * 0.5f;
+            float square = sdroundrect(float2(messageFlag.x, messageFlag.y - squareMid), float2(hypot, squareMid), 0.0f);
+            flag = min(triangle, square); // union
+            break;
+        }
+        default:
+            break;
+        }
+
+    float oD = sdroundrect(pt, uniforms.extent, uniforms.radius) - 0.04f; // Calculate outer rectangle
+
+    if (objectOutline) {
+        oD = max(oD, -flag); // subtract flag shape from background
+    }
+
+    float flagD = fwidth(flag) * 0.5f;
+    float triFlagShape = clamp(inverseLerp(flagD, -flagD, flag), 0.0f, 1.0f);
+
+    float outerD = fwidth(oD) * 0.5f;
+    // Use same SDF and reduce by 1px for border
+    float iD = oD + 1.0f;
+    float innerD = fwidth(iD) * 0.5f;
+
+    float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
+    float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
+
+    float4 finalColor;
+    if (objectOutline) {
+        finalColor = mix(convertColour(uniforms.outerCol), convertColour(uniforms.innerCol), innerRoundedRectAlpha);
+    } else {
+        finalColor = mix(convertColour(uniforms.outerCol), mix(convertColour(uniforms.innerCol), convertColour(uniforms.dashCol), triFlagShape), innerRoundedRectAlpha);
+    }
+
+    return float4(finalColor * outerRoundedRectAlpha) * scissor;
+}
+  else {  // MNVG_SHADER_FILLIMG
     float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy / uniforms.extent;
     float4 color = texture.sample(sampler, pt);
     if (texType == 1)

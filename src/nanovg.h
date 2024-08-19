@@ -516,7 +516,7 @@ enum ObjectFlagType {
 };
 
 // Fills and stroke a plugdata object, with ability to draw it's own flag either filled (plugdata style) or outlined (vanilla style)
-void nvgDrawObjectWithFlag(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, NVGcolor flagCol, float radius, ObjectFlagType flagType, bool flagOutline);
+void nvgDrawObjectWithFlag(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, NVGcolor flagCol, float radius, enum ObjectFlagType flagType, bool flagOutline);
 
 // Fills a rounded rectangle using rounded rectangle shader, also bypassing paths system. Uses current fill colour
 void nvgFillRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, float radius);

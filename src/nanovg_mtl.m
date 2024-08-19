@@ -71,7 +71,8 @@ typedef enum MNVGshaderType {
     MNVG_SHADER_SMOOTH_GLOW,
     MNVG_SHADER_DOUBLE_STROKE_GRAD,
     MNVG_SHADER_DOUBLE_STROKE_ACTIVITY,
-    MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY
+    MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY,
+    MNVG_SHADER_OBJECT_RECT
 } MNVGshaderType;
 
 enum MNVGcallType {
@@ -305,11 +306,14 @@ typedef enum {
     PACK_LINE_STYLE,
     PACK_TEX_TYPE,
     PACK_TYPE,
-    PACK_REVERSE
+    PACK_REVERSE,
+    PACK_FLAG_TYPE,
+    PACK_OBJECT_STYLE
 } PackType;
 
 int mtlnvg_packStateDataUniform(PackType packType, int value) {
     switch (packType) {
+            
         case PACK_LINE_STYLE:
             return (value & 0x03) << 7;
         case PACK_TEX_TYPE:
@@ -891,7 +895,8 @@ void* mnvgDevice(NVGcontext* ctx) {
         frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
         frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
         frag->radius = paint->radius;
-    } else if(paint->double_stroke) {
+    }
+    else if(paint->double_stroke) {
         if (paint->gradient_stroke) {
             if (paint->connection_activity) {
                 frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY);
@@ -912,6 +917,18 @@ void* mnvgDevice(NVGcontext* ctx) {
         frag->radius = paint->radius;
         frag->stateData |= mtlnvg_packStateDataUniform(PACK_REVERSE, lineReversed);
         nvgTransformInverse(invxform, paint->xform);
+    }
+    else if(paint->object_rect) {
+            frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_OBJECT_RECT);
+            frag->stateData |= mtlnvg_packStateDataUniform(PACK_FLAG_TYPE, paint->flag_type);
+            frag->stateData |= mtlnvg_packStateDataUniform(PACK_OBJECT_STYLE, paint->flag_outline);
+            frag->dashCol = paint->dashColor.rgba32;
+            nvgTransformInverse(invxform, paint->xform);
+            frag->scissorExt[0] = scissor->extent[0];
+            frag->scissorExt[1] = scissor->extent[1];
+            frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
+            frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
+            frag->radius = paint->radius;
     }
     else if(paint->smooth_glow) {
         frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_SMOOTH_GLOW);
