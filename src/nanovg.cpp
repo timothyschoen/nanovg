@@ -499,14 +499,6 @@ NVGcolor nvgRGBA(unsigned char r, unsigned char g, unsigned char b, unsigned cha
     return outCol;
 }
 
-float srgbToLinear(float srgb) {
-    if (srgb <= 0.04045f) {
-        return srgb / 12.92f;
-    } else {
-        return std::powf((srgb + 0.055f) / 1.055f, 2.4f);
-    }
-}
-
 NVGcolor nvgRGBAf(float r, float g, float b, float a)
 {
     NVGcolor color;
