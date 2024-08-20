@@ -2834,8 +2834,6 @@ void nvgStroke(NVGcontext* ctx)
 
 static void nvg__renderTrianglesSimple(NVGcontext* ctx, const NVGvertex* verts, int nverts, NVGpaint fillPaint)
 {
-    auto start = std::chrono::high_resolution_clock::now();
-    
     NVGstate* state = nvg__getState(ctx);
     NVGscissor scissor = state->scissor;
 
