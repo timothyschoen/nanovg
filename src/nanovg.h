@@ -85,12 +85,30 @@ struct NVGcolor {
 };
 typedef struct NVGcolor NVGcolor;
 
+typedef enum
+{
+    PAINT_TYPE_FILLGRAD,
+    PAINT_TYPE_FILLIMG,
+    PAINT_TYPE_IMG,
+    PAINT_TYPE_DOTS,
+    PAINT_TYPE_FAST_ROUNDEDRECT,
+    PAINT_TYPE_FILLCOLOR,
+    PAINT_TYPE_DOUBLE_STROKE,
+    PAINT_TYPE_SMOOTH_GLOW,
+    PAINT_TYPE_DOUBLE_STROKE_GRAD,
+    PAINT_TYPE_DOUBLE_STROKE_ACTIVITY,
+    PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY,
+    PAINT_TYPE_OBJECT_RECT
+} NVGPaintType;
+
 struct NVGpaint {
+    NVGPaintType type;
 	float xform[6];
 	float extent[2];
 	float radius;
-    int flag_type;
-    bool flag_outline : 1;
+    bool connection_activity:1;
+    bool flag_outline:1;
+    int flag_type:4;
 	float feather;
 	NVGcolor innerColor;
 	NVGcolor outerColor;
@@ -98,13 +116,6 @@ struct NVGpaint {
 	int image;
     float dot_pattern_size;
     float offset;
-    bool dots : 1;
-    bool rounded_rect : 1;
-    bool object_rect : 1;
-    bool double_stroke : 1;
-    bool gradient_stroke : 1;
-    bool smooth_glow : 1;
-    bool connection_activity : 1;
 };
 typedef struct NVGpaint NVGpaint;
 
@@ -144,17 +155,17 @@ enum NVGalign {
 };
 
 enum NVGblendFactor {
-	NVG_ZERO = 1<<0,
-	NVG_ONE = 1<<1,
-	NVG_SRC_COLOR = 1<<2,
-	NVG_ONE_MINUS_SRC_COLOR = 1<<3,
-	NVG_DST_COLOR = 1<<4,
-	NVG_ONE_MINUS_DST_COLOR = 1<<5,
-	NVG_SRC_ALPHA = 1<<6,
-	NVG_ONE_MINUS_SRC_ALPHA = 1<<7,
-	NVG_DST_ALPHA = 1<<8,
-	NVG_ONE_MINUS_DST_ALPHA = 1<<9,
-	NVG_SRC_ALPHA_SATURATE = 1<<10,
+	NVG_ZERO = 1,
+	NVG_ONE,
+	NVG_SRC_COLOR,
+	NVG_ONE_MINUS_SRC_COLOR,
+	NVG_DST_COLOR,
+	NVG_ONE_MINUS_DST_COLOR,
+	NVG_SRC_ALPHA,
+	NVG_ONE_MINUS_SRC_ALPHA,
+	NVG_DST_ALPHA,
+	NVG_ONE_MINUS_DST_ALPHA,
+	NVG_SRC_ALPHA_SATURATE
 };
 
 enum NVGcompositeOperation {

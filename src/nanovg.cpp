@@ -682,6 +682,7 @@ static void nvg__setPaintColor(NVGpaint* p, NVGcolor color)
 	p->feather = 1.0f;
 	p->innerColor = color;
 	p->outerColor = color;
+    p->type = PAINT_TYPE_FILLCOLOR;
 }
 
 
@@ -953,7 +954,7 @@ NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patt
     memset(&p, 0, sizeof(p));
 
 	nvgTransformIdentity(p.xform);
-    p.dots = 1;
+    p.type = PAINT_TYPE_DOTS;
     p.radius = dotRadius;
     p.feather = feather;
     p.dot_pattern_size = patternSize;
@@ -977,8 +978,8 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor
     p.outerColor = ocol;
     p.dashColor = dashCol;
     p.offset = activityOffset;
-    p.double_stroke = 1;
-    p.gradient_stroke = isGradientStroke;
+    if(showActivity) p.type = isGradientStroke ? PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY : PAINT_TYPE_DOUBLE_STROKE_ACTIVITY;
+    else p.type = isGradientStroke ? PAINT_TYPE_DOUBLE_STROKE_GRAD : PAINT_TYPE_DOUBLE_STROKE;
     p.connection_activity = showActivity;
     
     NVGstate* state = nvg__getState(ctx);
@@ -992,7 +993,7 @@ void nvgSmoothGlow(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor
     memset(&p, 0, sizeof(p));
     nvgTransformIdentity(p.xform);
     
-    p.smooth_glow = 1;
+    p.type = PAINT_TYPE_SMOOTH_GLOW;
     p.radius = radius;
     p.feather = feather;
     p.innerColor = icol;
@@ -1041,6 +1042,7 @@ NVGpaint nvgLinearGradient(NVGcontext* ctx,
 
 	p.innerColor = icol;
 	p.outerColor = ocol;
+    p.type = PAINT_TYPE_FILLGRAD;
 
 	return p;
 }
@@ -1068,6 +1070,7 @@ NVGpaint nvgRadialGradient(NVGcontext* ctx,
 
 	p.innerColor = icol;
 	p.outerColor = ocol;
+    p.type = PAINT_TYPE_FILLGRAD;
 
 	return p;
 }
@@ -1122,6 +1125,7 @@ NVGpaint nvgImagePattern(NVGcontext* ctx,
 	p.extent[0] = w;
 	p.extent[1] = h;
 
+    p.type = PAINT_TYPE_FILLIMG;
 	p.image = image;
 
 	p.innerColor = p.outerColor = nvgRGBA(255,255,255,alpha * 255);
@@ -2925,7 +2929,7 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
     p.xform[4] = x+w*0.5f;
     p.xform[5] = y+h*0.5f;
 
-    p.rounded_rect = 1;
+    p.type = PAINT_TYPE_FAST_ROUNDEDRECT;
     p.extent[0] = (w * 0.5f) - 1.5f;
     p.extent[1] = (h * 0.5f) - 1.5f;
     
@@ -2954,7 +2958,7 @@ void nvgDrawObjectWithFlag(NVGcontext* ctx, float x, float y, float w, float h, 
     p.xform[4] = x+w*0.5f;
     p.xform[5] = y+h*0.5f;
 
-    p.object_rect = 1;
+    p.type = PAINT_TYPE_OBJECT_RECT;
     // If the radius is less than half of the shortest side, it will no longer be rounded
     // So force rounding here. Sorry not sorry.
     p.radius = std::min(radius, shortestSide * 0.5f);
@@ -3120,6 +3124,7 @@ static void nvg__renderText(NVGcontext* ctx, NVGvertex* verts, int nverts)
 	NVGpaint paint = state->fill;
 
 	// Render triangles.
+    paint.type = PAINT_TYPE_IMG;
 	paint.image = ctx->fontImages[ctx->fontImageIdx];
 
 	// Apply global alpha

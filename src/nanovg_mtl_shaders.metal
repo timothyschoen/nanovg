@@ -54,13 +54,13 @@ typedef struct {
 } RasterizerData;
 
 typedef struct  {
-  float3x3 scissorMat;
-  float3x3 paintMat;
+  int type;
   int innerCol;
   int outerCol;
   int dashCol;
+  float scissorMat[6];
+  float paintMat[6];
   float2 scissorExt;
-  float2 scissorScale;
   float2 extent;
   float radius;
   float feather;
@@ -79,19 +79,22 @@ float inverseLerp(float a, float b, float value) {
     return (value - a) / (b - a);
 }
 
-float roundedScissorMask(constant Uniforms& uniforms, float2 p, float rad) {
-  float2 sc = (abs((uniforms.scissorMat * float3(p,1.0f)).xy));
+float3x3 transformInverse(const constant float t[6]) {
+    float det = t[0] * t[3] + t[1] * -t[2];
+    if(det == 0.0f) float3x3(float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1));
+
+    float invdet = 1.0f / det;
+    return float3x3(float3(t[3], -t[1], 0.0f),
+                    float3(-t[2], t[0], 0.0f),
+                    float3(t[5] * t[2] - t[3] * t[4], -t[5] * t[0] + t[1] * t[4], t[3] * t[0] - t[1] * t[2])) * invdet;
+}
+
+
+float scissorMask(constant Uniforms& uniforms, float2 p, float rad) {
+  float2 sc = (abs((transformInverse(uniforms.scissorMat) * float3(p,1.0f)).xy));
   float sc2 = sdroundrect(sc, uniforms.scissorExt, rad) - 0.04f;
   float sc3 = fwidth(sc2) * 0.5;
   return clamp(inverseLerp(sc3, -sc3, sc2), 0.0f, 1.0f);
-}
-
-float scissorMask(constant Uniforms& uniforms, float2 p) {
-  float2 sc = (abs((uniforms.scissorMat * float3(p, 1.0f)).xy)
-                  - uniforms.scissorExt) \
-              * uniforms.scissorScale;
-  sc = saturate(float2(0.5f) - sc);
-  return sc.x * sc.y;
 }
 
 float sdroundrect(float2 pt, float2 ext, float rad) {
@@ -180,12 +183,12 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
                                  constant Uniforms& uniforms [[buffer(0)]],
                                  texture2d<float> texture [[texture(0)]],
                                  sampler sampler [[sampler(0)]]) {
-  float scissor = uniforms.scissorRadius == 0.0f ? scissorMask(uniforms, in.fpos) : roundedScissorMask(uniforms, in.fpos, uniforms.scissorRadius);
+  float scissor = scissorMask(uniforms, in.fpos, uniforms.scissorRadius);
   if (scissor == 0) discard_fragment();
 
   uint8_t lineStyle = (uniforms.stateData >> 7) & 0x03;     // 2 bits
   uint8_t texType   = (uniforms.stateData >> 5) & 0x03;     // 2 bits
-  uint8_t type      = (uniforms.stateData >> 1) & 0x0F;     // 4 bits
+  uint8_t type      = uniforms.type;
   bool reverse      = bool(uniforms.stateData & 0x01);      // 1 bit
 
   if (type == MNVG_SHADER_IMG) {  // MNVG_SHADER_IMG
@@ -207,7 +210,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   if(lineStyle == 4) strokeAlpha*=glow(in.uv);
 
   if (type == MNVG_SHADER_FAST_ROUNDEDRECT) {
-    float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
+    float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy;
     float oD = sdroundrect(pt, uniforms.extent, uniforms.radius) - 0.04f;
 	float outerD = fwidth(oD) * 0.5f;
 	float iD = sdroundrect(pt, uniforms.extent - float2(1.0f), uniforms.radius - 1.0f) - 0.04f;
@@ -267,7 +270,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     }
 }
   if(type == MNVG_SHADER_SMOOTH_GLOW) {
-        float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
+        float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy;
         float blurRadius = clamp(uniforms.radius, 2.0, 20.0) + uniforms.feather;
         float distShadow = clamp(sigmoid(sdroundrect(pt, uniforms.extent - float2(blurRadius), blurRadius) / uniforms.feather), 0.0, 1.0);
         float distRect = clamp(sdroundrect(pt, uniforms.extent - float2(5.5), uniforms.radius), 0.0, 1.0);
@@ -279,7 +282,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
       return convertColour(uniforms.innerCol) * strokeAlpha * scissor;
   }
   if(type == MNVG_SHADER_DOTS) {
-    float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0f)).xy - (0.5f * uniforms.patternSize);
+    float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0f)).xy - (0.5f * uniforms.patternSize);
     float2 center = pt.xy - fmod(pt.xy, uniforms.patternSize) + (0.5f * uniforms.patternSize);
     float dist = circleDist(pt.xy, center, uniforms.radius);
     float delta = fwidth(dist);
@@ -292,7 +295,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     return dotColor * scissor;
     }
   if (type == MNVG_SHADER_FILLGRAD) {
-    float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy;
+    float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy;
     float d = saturate((uniforms.feather * 0.5 + sdroundrect(pt, uniforms.extent, uniforms.radius))
                         / uniforms.feather);
     float4 color = mix(convertColour(uniforms.innerCol), convertColour(uniforms.outerCol), d);
@@ -301,7 +304,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     return color;
   }
   if (type == MNVG_SHADER_OBJECT_RECT) {
-	float2 pt = (uniforms.paintMat * float3(in.fpos,1.0f)).xy;
+	float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos,1.0f)).xy;
     int flagType = (uniforms.stateData >> 9) & 0x03;     // 2 bits
 
     float2 flagPoints[3];
@@ -373,7 +376,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     return float4(finalColor * outerRoundedRectAlpha) * scissor;
 }
   else {  // MNVG_SHADER_FILLIMG
-    float2 pt = (uniforms.paintMat * float3(in.fpos, 1.0)).xy / uniforms.extent;
+    float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
     float4 color = texture.sample(sampler, pt);
     if (texType == 1)
       color = float4(color.xyz * color.w, color.w);

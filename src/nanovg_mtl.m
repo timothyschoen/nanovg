@@ -60,27 +60,27 @@ typedef enum MNVGvertexInputIndex {
     MNVG_VERTEX_INPUT_INDEX_VIEW_SIZE = 1,
 } MNVGvertexInputIndex;
 
-typedef enum MNVGshaderType {
-    MNVG_SHADER_FILLGRAD,
-    MNVG_SHADER_FILLIMG,
-    MNVG_SHADER_IMG,
-    MNVG_SHADER_DOTS,
-    MNVG_SHADER_FAST_ROUNDEDRECT,
-    MNVG_SHADER_FILLCOLOR,
-    MNVG_SHADER_DOUBLE_STROKE,
-    MNVG_SHADER_SMOOTH_GLOW,
-    MNVG_SHADER_DOUBLE_STROKE_GRAD,
-    MNVG_SHADER_DOUBLE_STROKE_ACTIVITY,
-    MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY,
-    MNVG_SHADER_OBJECT_RECT
-} MNVGshaderType;
-
 enum MNVGcallType {
     MNVG_NONE = 0,
     MNVG_FILL,
     MNVG_CONVEXFILL,
     MNVG_STROKE,
     MNVG_TRIANGLES,
+};
+
+const MTLBlendFactor MNVGBlendFactors[12] = {
+    0,
+    MTLBlendFactorZero,
+    MTLBlendFactorOne,
+    MTLBlendFactorSourceColor,
+    MTLBlendFactorOneMinusSourceColor,
+    MTLBlendFactorDestinationColor,
+    MTLBlendFactorOneMinusDestinationColor,
+    MTLBlendFactorSourceAlpha,
+    MTLBlendFactorOneMinusSourceAlpha,
+    MTLBlendFactorDestinationAlpha,
+    MTLBlendFactorOneMinusDestinationAlpha,
+    MTLBlendFactorSourceAlphaSaturated
 };
 
 struct MNVGblend {
@@ -108,13 +108,13 @@ struct MNVGcall {
 typedef struct MNVGcall MNVGcall;
 
 struct MNVGfragUniforms {
-    matrix_float3x3 scissorMat;
-    matrix_float3x3 paintMat;
+    int type;
     int innerCol;
     int outerCol;
     int dashCol;
+    float scissorMat[6];
+    float paintMat[6];
     vector_float2 scissorExt;
-    vector_float2 scissorScale;
     vector_float2 extent;
     float radius;
     float feather;
@@ -330,34 +330,6 @@ int mtlnvg_packStateDataUniform(PackType packType, int value) {
     }
 }
 
-static BOOL mtlnvg_convertBlendFuncFactor(int factor, MTLBlendFactor* result) {
-    if (factor == NVG_ZERO)
-        *result = MTLBlendFactorZero;
-    else if (factor == NVG_ONE)
-        *result = MTLBlendFactorOne;
-    else if (factor == NVG_SRC_COLOR)
-        *result = MTLBlendFactorSourceColor;
-    else if (factor == NVG_ONE_MINUS_SRC_COLOR)
-        *result = MTLBlendFactorOneMinusSourceColor;
-    else if (factor == NVG_DST_COLOR)
-        *result = MTLBlendFactorDestinationColor;
-    else if (factor == NVG_ONE_MINUS_DST_COLOR)
-        *result = MTLBlendFactorOneMinusDestinationColor;
-    else if (factor == NVG_SRC_ALPHA)
-        *result = MTLBlendFactorSourceAlpha;
-    else if (factor == NVG_ONE_MINUS_SRC_ALPHA)
-        *result = MTLBlendFactorOneMinusSourceAlpha;
-    else if (factor == NVG_DST_ALPHA)
-        *result = MTLBlendFactorDestinationAlpha;
-    else if (factor == NVG_ONE_MINUS_DST_ALPHA)
-        *result = MTLBlendFactorOneMinusDestinationAlpha;
-    else if (factor == NVG_SRC_ALPHA_SATURATE)
-        *result = MTLBlendFactorSourceAlphaSaturated;
-    else
-        return NO;
-    return YES;
-}
-
 static int mtlnvg__maxi(int a, int b) { return a > b ? a : b; }
 
 static int mtlnvg__maxVertCount(const NVGpath* paths, int npaths,
@@ -514,8 +486,8 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     if (![metalDevice supportsTextureSampleCount:MTLPixelFormatRGBA8Unorm]) {
         pixelFormat = MTLPixelFormatBGRA8Unorm;
     }
-    
-    
+
+
     [metalLayer setPixelFormat:pixelFormat];
     [metalLayer setDevice: metalDevice];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
@@ -536,7 +508,7 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     if (![metalDevice supportsTextureSampleCount:MTLPixelFormatRGBA8Unorm]) {
         pixelFormat = MTLPixelFormatBGRA8Unorm;
     }
-    
+
     ((__bridge NSView*) view).layer = metalLayer;
     [metalLayer setPixelFormat:pixelFormat];
     [metalLayer setDevice: metalDevice];
@@ -575,7 +547,7 @@ NVGcontext* nvgCreateMTL(void* metalLayer, int flags) {
 #if __aarch64__ && !TARGET_OS_SIMULATOR
     mtl.fragSize = sizeof(MNVGfragUniforms);
 #else
-    mtl.fragSize = 256;
+    mtl.fragSize = 128;
 #endif
     mtl.lastUniformOffset = 0;
     mtl.lastBoundTexture = -1;
@@ -644,10 +616,10 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
 void mnvgReadPixels(NVGcontext* ctx, int image, int x, int y, int width,
                     int height, void* data) {
   MNVGcontext* mtl = (__bridge MNVGcontext*)nvgInternalParams(ctx)->userPtr;
-    
+
   MNVGtexture* tex = [mtl findTexture:image];
   if (tex == nil) return;
-    
+
   NSUInteger bytesPerRow;
   if (tex->type == NVG_TEXTURE_RGBA) {
     bytesPerRow = tex->tex.width * 4;
@@ -807,15 +779,20 @@ void* mnvgDevice(NVGcontext* ctx) {
 
 - (MNVGblend)blendCompositeOperation:(NVGcompositeOperationState)op {
     MNVGblend blend;
-    if (!mtlnvg_convertBlendFuncFactor(op.srcRGB, &blend.srcRGB) ||
-        !mtlnvg_convertBlendFuncFactor(op.dstRGB, &blend.dstRGB) ||
-        !mtlnvg_convertBlendFuncFactor(op.srcAlpha, &blend.srcAlpha) ||
-        !mtlnvg_convertBlendFuncFactor(op.dstAlpha, &blend.dstAlpha)) {
+    if (op.srcRGB == 0 || op.dstRGB == 0 || op.srcAlpha == 0 || op.dstAlpha == 0)
+    {
         blend.srcRGB = MTLBlendFactorOne;
         blend.dstRGB = MTLBlendFactorOneMinusSourceAlpha;
         blend.srcAlpha = MTLBlendFactorOne;
         blend.dstAlpha = MTLBlendFactorOneMinusSourceAlpha;
     }
+    else {
+        blend.srcRGB = MNVGBlendFactors[op.srcRGB];
+        blend.dstRGB = MNVGBlendFactors[op.dstRGB];
+        blend.srcAlpha = MNVGBlendFactors[op.srcAlpha];
+        blend.dstAlpha = MNVGBlendFactors[op.dstAlpha];
+    }
+
     return blend;
 }
 
@@ -835,132 +812,69 @@ void* mnvgDevice(NVGcontext* ctx) {
                  lineStyle:(int)lineStyle
                 lineLength:(float)lineLength
               lineReversed: (int)lineReversed {
-    MNVGtexture* tex = nil;
-    float invxform[6];
-    int is_gradient = paint->innerColor.rgba32 != paint->outerColor.rgba32;
-
     memset(frag, 0, sizeof(*frag));
 
+    frag->type = paint->type;
     frag->innerCol = paint->innerColor.rgba32;
     frag->outerCol = paint->outerColor.rgba32;
     frag->dashCol = paint->dashColor.rgba32;
     frag->stateData = mtlnvg_packStateDataUniform(PACK_LINE_STYLE, lineStyle);
     frag->radius = paint->radius;
+    frag->feather = paint->feather;
+    frag->extent = (vector_float2){paint->extent[0], paint->extent[1]};
+    frag->strokeMult = (width * 0.5f + fringe * 0.5f) / fringe;
+    frag->lineLength = lineLength;
+    memcpy(frag->paintMat, paint->xform, 6 * sizeof(float));
 
     if (scissor->extent[0] < -0.5f || scissor->extent[1] < -0.5f) {
-        frag->scissorMat = matrix_from_rows((vector_float3){0, 0, 0},
-                                            (vector_float3){0, 0, 0},
-                                            (vector_float3){0, 0, 0});
+        memset(frag->scissorMat, 0, 6 * sizeof(float));
         frag->scissorExt.x = 1.0f;
         frag->scissorExt.y = 1.0f;
-        frag->scissorScale.x = 1.0f;
-        frag->scissorScale.y = 1.0f;
         frag->scissorRadius = 0.0f;
     } else {
-        nvgTransformInverse(invxform, scissor->xform);
-        mtlnvg__xformToMat3x3(&frag->scissorMat, invxform);
+        memcpy(frag->scissorMat, scissor->xform, 6 * sizeof(float));
         frag->scissorExt.x = scissor->extent[0];
         frag->scissorExt.y = scissor->extent[1];
-        frag->scissorScale.x = sqrtf(scissor->xform[0] * scissor->xform[0] + scissor->xform[2] * scissor->xform[2]) / fringe;
-        frag->scissorScale.y = sqrtf(scissor->xform[1] * scissor->xform[1] + scissor->xform[3] * scissor->xform[3]) / fringe;
         frag->scissorRadius = scissor->radius;
     }
 
-    frag->extent = (vector_float2){paint->extent[0], paint->extent[1]};
-    frag->strokeMult = (width * 0.5f + fringe * 0.5f) / fringe;
-
-    if (paint->image != 0) {
-        tex = [self findTexture:paint->image];
-        if (tex == nil) return 0;
-        if (tex->flags & NVG_IMAGE_FLIPY) {
-            float m1[6], m2[6];
-            nvgTransformTranslate(m1, 0.0f, frag->extent.y * 0.5f);
-            nvgTransformMultiply(m1, paint->xform);
-            nvgTransformScale(m2, 1.0f, -1.0f);
-            nvgTransformMultiply(m2, m1);
-            nvgTransformTranslate(m1, 0.0f, -frag->extent.y * 0.5f);
-            nvgTransformMultiply(m1, m2);
-            nvgTransformInverse(invxform, m1);
-        } else {
-            nvgTransformInverse(invxform, paint->xform);
-        }
-        frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_FILLIMG);
-
-        if (tex->type == NVG_TEXTURE_RGBA)
-            frag->stateData |= mtlnvg_packStateDataUniform(PACK_TEX_TYPE, (tex->flags & NVG_IMAGE_PREMULTIPLIED) ? 0 : 1);
-        else
-            frag->stateData |= mtlnvg_packStateDataUniform(PACK_TEX_TYPE, 2);
-    } else if(paint->rounded_rect) {
-        frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_FAST_ROUNDEDRECT);
-        nvgTransformInverse(invxform, paint->xform);
-        frag->scissorExt[0] = scissor->extent[0];
-        frag->scissorExt[1] = scissor->extent[1];
-        frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
-        frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
-        frag->radius = paint->radius;
-    }
-    else if(paint->double_stroke) {
-        if (paint->gradient_stroke) {
-            if (paint->connection_activity) {
-                frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY);
-                frag->offset = paint->offset;
-            } else {
-                frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_DOUBLE_STROKE_GRAD);
+    switch (paint->type) {
+        case PAINT_TYPE_FILLIMG: {
+            MNVGtexture* tex = [self findTexture:paint->image];
+            if (tex == nil) return 0;
+            if (tex->flags & NVG_IMAGE_FLIPY) {
+                float m1[6], m2[6];
+                nvgTransformTranslate(m1, 0.0f, frag->extent.y * 0.5f);
+                nvgTransformMultiply(m1, paint->xform);
+                nvgTransformScale(m2, 1.0f, -1.0f);
+                nvgTransformMultiply(m2, m1);
+                nvgTransformTranslate(m1, 0.0f, -frag->extent.y * 0.5f);
+                nvgTransformMultiply(m1, m2);
+                memcpy(&frag->paintMat, m1, 6 * sizeof(float));
             }
-        } else {
-            if (paint->connection_activity){
-                frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_DOUBLE_STROKE_ACTIVITY);
-                frag->offset = paint->offset;
-            } else {
-                frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_DOUBLE_STROKE);
-            }
+            if (tex->type == NVG_TEXTURE_RGBA)
+                frag->stateData |= mtlnvg_packStateDataUniform(PACK_TEX_TYPE, (tex->flags & NVG_IMAGE_PREMULTIPLIED) ? 0 : 1);
+            else
+                frag->stateData |= mtlnvg_packStateDataUniform(PACK_TEX_TYPE, 2);
+            break;
         }
-        frag->lineLength = lineLength;
-        frag->feather = paint->feather;
-        frag->radius = paint->radius;
-        frag->stateData |= mtlnvg_packStateDataUniform(PACK_REVERSE, lineReversed);
-        nvgTransformInverse(invxform, paint->xform);
-    }
-    else if(paint->object_rect) {
-            frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_OBJECT_RECT);
+        case PAINT_TYPE_OBJECT_RECT: {
             frag->stateData |= mtlnvg_packStateDataUniform(PACK_FLAG_TYPE, paint->flag_type);
             frag->stateData |= mtlnvg_packStateDataUniform(PACK_OBJECT_STYLE, paint->flag_outline);
             frag->dashCol = paint->dashColor.rgba32;
-            nvgTransformInverse(invxform, paint->xform);
-            frag->scissorExt[0] = scissor->extent[0];
-            frag->scissorExt[1] = scissor->extent[1];
-            frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
-            frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
-            frag->radius = paint->radius;
+            break;
+        }
+        case PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY:
+        case PAINT_TYPE_DOUBLE_STROKE_ACTIVITY: {
+            frag->offset = paint->offset;
+            break;
+        }
+        case PAINT_TYPE_DOTS: {
+            frag->patternSize = paint->dot_pattern_size;
+            break;
+        }
+        default: break;
     }
-    else if(paint->smooth_glow) {
-        frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_SMOOTH_GLOW);
-        frag->radius = paint->radius;
-        frag->feather = paint->feather;
-        frag->scissorExt[0] = scissor->extent[0];
-        frag->scissorExt[1] = scissor->extent[1];
-        frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
-        frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
-        nvgTransformInverse(invxform, paint->xform);
-    }
-    else if(paint->dots) {
-        frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_DOTS);
-        frag->feather = paint->feather;
-        frag->patternSize = paint->dot_pattern_size;
-        frag->radius = paint->radius;
-        nvgTransformInverse(invxform, paint->xform);
-    } else if (paint->image == 0 && lineStyle == NVG_LINE_SOLID && !is_gradient) {
-        frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_FILLCOLOR);
-        nvgTransformInverse(invxform, paint->xform);
-    } else {
-        frag->stateData |= mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_FILLGRAD);
-        frag->radius = paint->radius;
-        frag->feather = paint->feather;
-        frag->lineLength = lineLength;
-        nvgTransformInverse(invxform, paint->xform);
-    }
-
-    mtlnvg__xformToMat3x3(&frag->paintMat, invxform);
     return 1;
 }
 
@@ -1766,7 +1680,8 @@ error:
                  lineReversed:0];
 
     if(text) {
-        frag->stateData = mtlnvg_packStateDataUniform(PACK_TYPE, MNVG_SHADER_IMG) | mtlnvg_packStateDataUniform(PACK_TEX_TYPE, 2);
+        frag->type = PAINT_TYPE_IMG;
+        frag->stateData = mtlnvg_packStateDataUniform(PACK_TEX_TYPE, 2);
     }
 
     return;
