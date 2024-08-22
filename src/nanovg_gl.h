@@ -466,7 +466,9 @@ static int glnvg__renderCreate(void* uptr)
         }
     )";
 
-    static const char* fillFragShader = R"(
+    std::stringstream fillFragShader;
+
+    fillFragShader << R"(
         // Has easier alignment than mat3x2 or float[6]
         struct affine_transform
         {
@@ -598,6 +600,7 @@ static int glnvg__renderCreate(void* uptr)
             return mask;
         }
         #endif
+        )" << R"(
         void main(void) {
             int lineStyle = (stateData >> 7) & 0x03;     // 2 bits
             int texType   = (stateData >> 5) & 0x03;     // 2 bits
@@ -806,10 +809,10 @@ static int glnvg__renderCreate(void* uptr)
     glnvg__checkError(gl, "init");
 
     if (gl->flags & NVG_ANTIALIAS) {
-        if (glnvg__createShader(&gl->shader, "shader", shaderHeader.str().c_str(), "#define EDGE_AA 1\n", fillVertShader, fillFragShader) == 0)
+        if (glnvg__createShader(&gl->shader, "shader", shaderHeader.str().c_str(), "#define EDGE_AA 1\n", fillVertShader, fillFragShader.str().c_str()) == 0)
             return 0;
     } else {
-        if (glnvg__createShader(&gl->shader, "shader", shaderHeader.str().c_str(), NULL, fillVertShader, fillFragShader) == 0)
+        if (glnvg__createShader(&gl->shader, "shader", shaderHeader.str().c_str(), NULL, fillVertShader, fillFragShader.str().c_str()) == 0)
             return 0;
     }
 
