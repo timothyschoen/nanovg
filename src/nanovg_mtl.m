@@ -501,6 +501,7 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     [metalLayer setPixelFormat:pixelFormat];
     [metalLayer setDevice: metalDevice];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
+    [metalLayer setPresentsWithTransaction:TRUE];
     return nvgCreateMTL((__bridge void*)((__bridge NSView*) view).layer, flags);
 }
 #endif
@@ -1541,7 +1542,7 @@ error:
         [_buffers.commandBuffer waitUntilScheduled];
         [drawable present];
     }
-
+    
     _lastBoundTexture = -1;
 }
 
