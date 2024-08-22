@@ -466,7 +466,9 @@ static int glnvg__renderCreate(void* uptr)
         }
     )";
 
-    static const char* fillFragShader = R"(
+    std::stringstream fillFragShader;
+
+    fillFragShader << R"(
         // Has easier alignment than mat3x2 or float[6]
         struct affine_transform
         {
@@ -598,6 +600,7 @@ static int glnvg__renderCreate(void* uptr)
             return mask;
         }
         #endif
+        )" << R"(
         void main(void) {
             int lineStyle = (stateData >> 7) & 0x03;     // 2 bits
             int texType   = (stateData >> 5) & 0x03;     // 2 bits
@@ -772,6 +775,7 @@ static int glnvg__renderCreate(void* uptr)
                 vec4 color = texture(tex, pt);
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
                 if (texType == 2) color = vec4(color.x);
+                if (texType == 3) color = color.bgra; // swizzle for JUCE colour image
                 // Apply color tint and alpha.
                 color *= convertColour(innerCol);
                 // Combine alpha
@@ -783,6 +787,7 @@ static int glnvg__renderCreate(void* uptr)
                 vec4 color = texture(tex, ftcoord);
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
                 if (texType == 2) color = vec4(color.x);
+                if (texType == 3) color = color.bgra; // swizzle for JUCE colour image
                 if (color.x < 0.02f) discard;
                 color *= scissor;
                 result = color * convertColour(innerCol);
@@ -806,10 +811,10 @@ static int glnvg__renderCreate(void* uptr)
     glnvg__checkError(gl, "init");
 
     if (gl->flags & NVG_ANTIALIAS) {
-        if (glnvg__createShader(&gl->shader, "shader", shaderHeader.str().c_str(), "#define EDGE_AA 1\n", fillVertShader, fillFragShader) == 0)
+        if (glnvg__createShader(&gl->shader, "shader", shaderHeader.str().c_str(), "#define EDGE_AA 1\n", fillVertShader, fillFragShader.str().c_str()) == 0)
             return 0;
     } else {
-        if (glnvg__createShader(&gl->shader, "shader", shaderHeader.str().c_str(), NULL, fillVertShader, fillFragShader) == 0)
+        if (glnvg__createShader(&gl->shader, "shader", shaderHeader.str().c_str(), NULL, fillVertShader, fillFragShader.str().c_str()) == 0)
             return 0;
     }
 
@@ -860,7 +865,7 @@ static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h, int im
     glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
 #endif
 
-    if (type == NVG_TEXTURE_RGBA)
+    if (type == NVG_TEXTURE_RGBA || type == NVG_TEXTURE_ARGB)
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     else
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
@@ -934,7 +939,7 @@ static int glnvg__renderUpdateTexture(void* uptr, int image, int x, int y, int w
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, x);
     glPixelStorei(GL_UNPACK_SKIP_ROWS, y);
 
-    if (tex->type == NVG_TEXTURE_RGBA)
+    if (tex->type == NVG_TEXTURE_RGBA || tex->type == NVG_TEXTURE_ARGB)
         glTexSubImage2D(GL_TEXTURE_2D, 0, x,y, w,h, GL_RGBA, GL_UNSIGNED_BYTE, data);
     else
         glTexSubImage2D(GL_TEXTURE_2D, 0, x,y, w,h, GL_RED, GL_UNSIGNED_BYTE, data);
@@ -1013,10 +1018,16 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
                 nvgTransformMultiply(m1, m2);
                 memcpy(&frag->paintMat, m1, 6 * sizeof(float));
             }
-            if (tex->type == NVG_TEXTURE_RGBA)
-                frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, (tex->flags & NVG_IMAGE_PREMULTIPLIED) ? 0 : 1);
-            else
-                frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, 2);
+            switch(tex->type){
+                case NVG_TEXTURE_RGBA:
+                    frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, (tex->flags & NVG_IMAGE_PREMULTIPLIED) ? 0 : 1);
+                    break;
+                case NVG_TEXTURE_ARGB:
+                    frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, 3);
+                default:
+                    frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, 2);
+                    break;
+            }
             frag->type = PAINT_TYPE_FILLIMG;
             break;
         }
