@@ -197,6 +197,8 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
       color = float4(color.xyz * color.w, color.w);
     else if (texType == 2)
       color = float4(color.x);
+    else if (texType == 3)
+        color = color.bgra;
     color *= scissor;
     return color * convertColour(uniforms.innerCol);
   }
@@ -382,6 +384,8 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
       color = float4(color.xyz * color.w, color.w);
     else if (texType == 2)
       color = float4(color.x);
+    else if (texType == 3)
+      color = color.bgra;
     color *= scissor;
     color *= strokeAlpha;
     return color * convertColour(uniforms.innerCol);

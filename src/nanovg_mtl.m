@@ -609,7 +609,7 @@ void mnvgReadPixels(NVGcontext* ctx, int image, int x, int y, int width,
   if (tex == nil) return;
 
   NSUInteger bytesPerRow;
-  if (tex->type == NVG_TEXTURE_RGBA) {
+  if (tex->type == NVG_TEXTURE_RGBA || tex->type == NVG_TEXTURE_ARGB) {
     bytesPerRow = tex->tex.width * 4;
   } else {
     bytesPerRow = tex->tex.width;
@@ -842,6 +842,8 @@ void* mnvgDevice(NVGcontext* ctx) {
             }
             if (tex->type == NVG_TEXTURE_RGBA)
                 frag->stateData |= mtlnvg_packStateDataUniform(PACK_TEX_TYPE, (tex->flags & NVG_IMAGE_PREMULTIPLIED) ? 0 : 1);
+            else if(tex->type == NVG_TEXTURE_ARGB)
+                frag->stateData |= mtlnvg_packStateDataUniform(PACK_TEX_TYPE, 3);
             else
                 frag->stateData |= mtlnvg_packStateDataUniform(PACK_TEX_TYPE, 2);
             break;
@@ -1222,7 +1224,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 
     if (data != NULL) {
         NSUInteger bytesPerRow;
-        if (tex->type == NVG_TEXTURE_RGBA) {
+        if (tex->type == NVG_TEXTURE_RGBA || tex->type == NVG_TEXTURE_ARGB) {
             bytesPerRow = width * 4;
         } else {
             bytesPerRow = width;
@@ -1703,7 +1705,7 @@ error:
 
     unsigned char* bytes;
     NSUInteger bytesPerRow;
-    if (tex->type == NVG_TEXTURE_RGBA) {
+    if (tex->type == NVG_TEXTURE_RGBA || tex->type == NVG_TEXTURE_ARGB) {
         bytesPerRow = tex->tex.width * 4;
         bytes = (unsigned char*)data + y * bytesPerRow + x * 4;
     } else {
