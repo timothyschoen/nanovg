@@ -36,7 +36,6 @@ enum NVGcreateFlags {
 enum PackType {
     PACK_LINE_STYLE,
     PACK_TEX_TYPE,
-    PACK_TYPE,
     PACK_REVERSE,
     PACK_FLAG_TYPE,
     PACK_OBJECT_STYLE
@@ -54,8 +53,6 @@ int glnvg__packStateDataUniform(PackType packType, int value) {
             return (value & 0x03) << 7;
         case PACK_TEX_TYPE:
             return (value & 0x03) << 5;
-        case PACK_TYPE:
-            return (value & 0x0F) << 1;
         case PACK_REVERSE:
             return value & 0x01;
         default:
@@ -475,7 +472,7 @@ static int glnvg__renderCreate(void* uptr)
         {
             float t0, t1, t2, t3, t4, t5;
         };
-    
+
         layout(std140) uniform frag {
             affine_transform scissorMat;
             affine_transform paintMat;
@@ -531,7 +528,7 @@ static int glnvg__renderCreate(void* uptr)
         float inverseLerp(float a, float b, float value) {
             return (value - a) / (b - a);
         }
-    
+
         mat3 transformInverse(const affine_transform t) {
             /*
             float det = t[0][0] * t[1][1] + t[0][1] * -t[1][0];
@@ -989,7 +986,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
     frag->strokeMult = (width * 0.5f + fringe * 0.5f) / fringe;
     frag->lineLength = lineLength;
     memcpy(frag->paintMat, paint->xform, 6 * sizeof(float));
-    
+
     if (scissor->extent[0] < -0.5f || scissor->extent[1] < -0.5f) {
         memset(frag->scissorMat, 0, sizeof(frag->scissorMat));
         frag->scissorExt[0] = 1.0f;
@@ -1001,7 +998,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         frag->scissorExt[1] = scissor->extent[1];
         frag->scissorRadius = scissor->radius;
     }
-    
+
     switch (paint->type) {
         case PAINT_TYPE_FILLIMG: {
             GLNVGtexture* tex = glnvg__findTexture(gl, paint->image);

@@ -307,7 +307,6 @@ const MTLPixelFormat kStencilFormat = MTLPixelFormatStencil8;
 typedef enum {
     PACK_LINE_STYLE,
     PACK_TEX_TYPE,
-    PACK_TYPE,
     PACK_REVERSE,
     PACK_FLAG_TYPE,
     PACK_OBJECT_STYLE
@@ -323,8 +322,6 @@ int mtlnvg_packStateDataUniform(PackType packType, int value) {
             return (value & 0x03) << 7;
         case PACK_TEX_TYPE:
             return (value & 0x03) << 5;
-        case PACK_TYPE:
-            return (value & 0x0F) << 1;
         case PACK_REVERSE:
             return value & 0x01;
         default:
@@ -461,12 +458,6 @@ static void mtlnvg__renderViewport(void* uptr, float width, float height,
     [mtl renderViewportWithWidth:width
                           height:height
                 devicePixelRatio:devicePixelRatio];
-}
-
-static void mtlnvg__xformToMat3x3(matrix_float3x3* m3, float* t) {
-    *m3 = matrix_from_columns((vector_float3){t[0], t[1], 0.0f},
-                              (vector_float3){t[2], t[3], 0.0f},
-                              (vector_float3){t[4], t[5], 1.0f});
 }
 
 #if TARGET_OS_IPHONE
@@ -834,7 +825,6 @@ void* mnvgDevice(NVGcontext* ctx) {
         frag->scissorExt.y = scissor->extent[1];
         frag->scissorRadius = scissor->radius;
     }
-
     
     switch (paint->type) {
         case PAINT_TYPE_FILLIMG: {
@@ -941,6 +931,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 
 - (void)renderCancel {
     MNVGrenderData* renderData = _buffers.renderData;
+    
     _buffers.isBusy = NO;
     if(renderData) {
         renderData->image = 0;
@@ -949,6 +940,11 @@ void* mnvgDevice(NVGcontext* ctx) {
         renderData->ncalls = 0;
         renderData->nuniforms = 0;
     }
+    
+    // terrible, but it fixes a crash when closing the MNVGContext
+    // we need to be very sure that _semaphore has a value of at least 3
+    dispatch_semaphore_signal(_semaphore);
+    dispatch_semaphore_signal(_semaphore);
     dispatch_semaphore_signal(_semaphore);
 }
 
@@ -1478,7 +1474,7 @@ error:
             [weakBuffers setIsBusy:NO];
             [weakBuffers setCommandBuffer:nil];
         }
-        if (weakSelf) {
+        if(weakSelf) {
             dispatch_semaphore_signal([weakSelf semaphore]);
         }
     }];
