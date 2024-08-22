@@ -146,6 +146,7 @@ struct MNVGrenderData {
 };
 typedef struct MNVGrenderData MNVGrenderData;
 
+__attribute__((objc_direct_members))
 @interface MNVGtexture : NSObject {
 @public
     int id;
@@ -170,6 +171,7 @@ __attribute__((objc_direct_members))
 @property (nonatomic, assign) MNVGrenderData* renderData;
 @end
 
+__attribute__((objc_direct_members))
 @interface MNVGcontext : NSObject
 
 @property (nonatomic, strong) id<MTLCommandQueue> commandQueue;
@@ -402,9 +404,6 @@ static void mtlnvg__renderFill(void* uptr, NVGpaint* paint,
 
 static void mtlnvg__renderFlush(void* uptr) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
-#if TARGET_OS_OSX
-    [[mtl renderEncoder] textureBarrier];
-#endif
     [mtl renderFlush];
 }
 
@@ -505,9 +504,7 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
 
     // Set pixel format to RGBA8Unorm if available, otherwise use BGRA8Unorm
     MTLPixelFormat pixelFormat = MTLPixelFormatRGBA8Unorm;
-    if (![metalDevice supportsTextureSampleCount:MTLPixelFormatRGBA8Unorm]) {
-        pixelFormat = MTLPixelFormatBGRA8Unorm;
-    }
+    //pixelFormat = MTLPixelFormatBGRA8Unorm;
 
     ((__bridge NSView*) view).layer = metalLayer;
     [metalLayer setPixelFormat:pixelFormat];
@@ -838,6 +835,7 @@ void* mnvgDevice(NVGcontext* ctx) {
         frag->scissorRadius = scissor->radius;
     }
 
+    
     switch (paint->type) {
         case PAINT_TYPE_FILLIMG: {
             MNVGtexture* tex = [self findTexture:paint->image];
@@ -1465,7 +1463,7 @@ error:
     vector_uint2 textureSize;
     _buffers.commandBuffer = commandBuffer;
     __block MNVGbuffers* buffers = _buffers;
-    __weak id weakSelf = self;
+    __weak MNVGcontext* weakSelf = self;
     __weak MNVGbuffers* weakBuffers = buffers;
 
     [commandBuffer enqueue];
@@ -1506,12 +1504,17 @@ error:
     }
 
     _renderEncoder = [self renderCommandEncoderWithColorTexture:colorTexture];
+    
+    // This should ensure that framebuffer writes have been completed
+    [_renderEncoder memoryBarrierWithScope:MTLBarrierScopeTextures afterStages:MTLRenderStageVertex beforeStages:MTLRenderStageFragment];
+    
+    [self updateRenderPipelineStatesForBlend:_blendFunc
+                                 pixelFormat:colorTexture.pixelFormat];
     if(_pipelineState != nil) [_renderEncoder setRenderPipelineState:_pipelineState];
+    if (_renderEncoder == nil) return;
     _lastUniformOffset = 0;
 
-    if (_renderEncoder == nil) {
-        return;
-    }
+
     MNVGcall* call = &renderData->calls[0];
     for (int i = renderData->ncalls; i--; ++call) {
         MNVGblend* blend = &call->blendFunc;
