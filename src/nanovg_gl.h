@@ -772,7 +772,7 @@ static int glnvg__renderCreate(void* uptr)
             } else if (type == NSVG_SHADER_FILLIMG) {
                 // Calculate color fron texture
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
-                vec4 color = texture(tex, pt);
+                vec4 color = texture(tex, vec2(pt.x, reverse ? 1.0f - pt.y : pt.y));
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
                 if (texType == 2) color = vec4(color.x);
                 if (texType == 3) color = color.bgra; // swizzle for JUCE colour image
@@ -1009,14 +1009,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
             GLNVGtexture* tex = glnvg__findTexture(gl, paint->image);
             if (tex == NULL) return 0;
             if ((tex->flags & NVG_IMAGE_FLIPY) != 0) {
-                float m1[6], m2[6];
-                nvgTransformTranslate(m1, 0.0f, frag->extent[1] * 0.5f);
-                nvgTransformMultiply(m1, paint->xform);
-                nvgTransformScale(m2, 1.0f, -1.0f);
-                nvgTransformMultiply(m2, m1);
-                nvgTransformTranslate(m1, 0.0f, -frag->extent[1] * 0.5f);
-                nvgTransformMultiply(m1, m2);
-                memcpy(&frag->paintMat, m1, 6 * sizeof(float));
+                frag->stateData |= glnvg__packStateDataUniform(PACK_REVERSE, true);
             }
             switch(tex->type){
                 case NVG_TEXTURE_RGBA:
