@@ -48,6 +48,32 @@ void nvgluDeleteFramebuffer(NVGLUframebuffer* fb);
 
 static GLint defaultFBO = -1;
 
+void nvgluBlitFramebuffer(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, int w, int h)
+{
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    
+    int x2 = x + w;
+    int y2 = y + h;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fb->fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, defaultFBO);
+    glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    glBlitFramebuffer(x, y, x2, y2, x, y, x2, y2, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glFinish();
+    
+    GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        printf("OpenGL Error after glBlitFramebuffer: %d\n", error);
+    }
+    
+    glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
+    
+    glEnable(GL_SCISSOR_TEST);
+    glEnable(GL_BLEND);
+    glEnable(GL_CULL_FACE);
+}
+
 NVGLUframebuffer* nvgluCreateFramebuffer(NVGcontext* ctx, int w, int h, int imageFlags)
 {
 #ifdef NANOVG_FBO_VALID
@@ -139,7 +165,7 @@ static void nvgluReadPixels(NVGcontext* ctx, int image, int x, int y, int width,
 
     // Read the pixels from the texture
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-    
+
     // Unbind texture
     glBindTexture(GL_TEXTURE_2D, 0);
 }

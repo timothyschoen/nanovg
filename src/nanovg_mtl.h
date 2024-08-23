@@ -85,6 +85,8 @@ void nvgDeleteMTL(NVGcontext* ctx);
 // Binds the specified framebuffer as the current render pass.
 void mnvgBindFramebuffer(MNVGframebuffer* framebuffer);
 
+int mnvgBlitFramebuffer(NVGcontext* ctx, MNVGframebuffer* fb, int x, int y, int w, int h);
+
 // Creates a new framebuffer.
 MNVGframebuffer* mnvgCreateFramebuffer(NVGcontext* ctx, int width,
                                        int height, int imageFlags);

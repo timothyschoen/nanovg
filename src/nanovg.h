@@ -32,6 +32,8 @@ extern "C" {
 #pragma warning(disable: 4201)  // nonstandard extension used : nameless struct/union
 #endif
 
+void* nvg__getUptr(void* ctx);
+
 #if defined NANOVG_GL2_IMPLEMENTATION
   #define NANOVG_GL_IMPLEMENTATION 1
   #define nvgCreateContext(flags) nvgCreateGL2(flags)
@@ -57,6 +59,7 @@ extern "C" {
   #define nvgViewport(x, y, w, h) NVG_NOTUSED(x); NVG_NOTUSED(y); NVG_NOTUSED(w); NVG_NOTUSED(h)
   #define nvgClear(nvg) mnvgClearWithColor(nvg, nvgRGBA(0, 0, 0, 0))
   #define nvgReadPixels(nvg, image, x, y, w, h, data) mnvgReadPixels(nvg, image, x, y, w, h, data)
+  #define nvgBlitFramebuffer(nvg, fb, x, y, w, h) mnvgBlitFramebuffer(nvg, fb, x, y, w, h)
   #define NVGframebuffer MNVGframebuffer
 #endif
 #if defined NANOVG_GL_IMPLEMENTATION
@@ -65,6 +68,7 @@ extern "C" {
 #define nvgDeleteFramebuffer(fb) nvgluDeleteFramebuffer(fb)
 #define nvgViewport(x, y, w, h) glViewport(x, y, w, h)
 #define nvgReadPixels(nvg, image, x, y, w, h, data) nvgluReadPixels(nvg, image, x, y, w, h, data)
+#define nvgBlitFramebuffer(nvg, fb, x, y, w, h) nvgluBlitFramebuffer(nvg, fb, x, y, w, h)
 #define nvgClear(nvg) glClearColor (0, 0, 0, 0); \
                       glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
 #define NVGframebuffer NVGLUframebuffer
@@ -546,6 +550,9 @@ void nvgSmoothGlow(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor
 // Scissoring allows you to clip the rendering into a rectangle. This is useful for various
 // user interface cases like rendering a text edit or a timeline.
 
+
+void nvgGlobalScissor(NVGcontext* ctx, float x, float y, float w, float h);
+
 // Sets the current scissor rectangle.
 // The scissor rectangle is transformed by the current transform.
 void nvgScissor(NVGcontext* ctx, float x, float y, float w, float h);
@@ -832,7 +839,7 @@ struct NVGparams {
 	int (*renderGetImageTextureId)(void* uptr, int handle);
 	void (*renderViewport)(void* uptr, float width, float height, float devicePixelRatio);
 	void (*renderCancel)(void* uptr);
-	void (*renderFlush)(void* uptr);
+    void (*renderFlush)(void* uptr, NVGscissorBounds scissor);
 	void (*renderFill)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, const float* bounds, const NVGpath* paths, int npaths);
 	void (*renderStroke)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths, int npaths);
 	void (*renderTriangles)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe, int text);

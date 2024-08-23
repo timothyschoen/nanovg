@@ -90,9 +90,9 @@ float3x3 transformInverse(const constant float t[6]) {
 }
 
 
-float scissorMask(constant Uniforms& uniforms, float2 p, float rad) {
+float scissorMask(constant Uniforms& uniforms, float2 p) {
   float2 sc = (abs((transformInverse(uniforms.scissorMat) * float3(p,1.0f)).xy));
-  float sc2 = sdroundrect(sc, uniforms.scissorExt, rad) - 0.04f;
+  float sc2 = sdroundrect(sc, uniforms.scissorExt, uniforms.scissorRadius) - 0.04f;
   float sc3 = fwidth(sc2) * 0.5;
   return clamp(inverseLerp(sc3, -sc3, sc2), 0.0f, 1.0f);
 }
@@ -183,7 +183,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
                                  constant Uniforms& uniforms [[buffer(0)]],
                                  texture2d<float> texture [[texture(0)]],
                                  sampler sampler [[sampler(0)]]) {
-  float scissor = scissorMask(uniforms, in.fpos, uniforms.scissorRadius);
+  float scissor = scissorMask(uniforms, in.fpos);
   if (scissor == 0) discard_fragment();
 
   uint8_t lineStyle = (uniforms.stateData >> 7) & 0x03;     // 2 bits

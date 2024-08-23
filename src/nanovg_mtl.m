@@ -248,11 +248,13 @@ stencilOnlyPipelineState;
                       paths:(const NVGpath*)paths
                      npaths:(int)npaths;
 
-- (void)renderFlush;
+- (void)renderFlush:(MTLScissorRect)scissorRect;
 
 - (int)renderGetTextureSizeForImage:(int)image
                               width:(int*)width
                              height:(int*)height;
+
+- (void)blitTextureToScreen:(MNVGtexture*)mnvgTexture;
 
 - (void)renderStrokeWithPaint:(NVGpaint*)paint
            compositeOperation:(NVGcompositeOperationState)compositeOperation
@@ -399,9 +401,10 @@ static void mtlnvg__renderFill(void* uptr, NVGpaint* paint,
                       npaths:npaths];
 }
 
-static void mtlnvg__renderFlush(void* uptr) {
+static void mtlnvg__renderFlush(void* uptr, NVGscissorBounds scissor) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
-    [mtl renderFlush];
+    MTLScissorRect scissorRect = { .x = scissor.x, .y = scissor.y, .width = scissor.w, .height = scissor.h, };
+    [mtl renderFlush: scissorRect];
 }
 
 
@@ -481,6 +484,7 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     [metalLayer setPixelFormat:pixelFormat];
     [metalLayer setDevice: metalDevice];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
+    [metalLayer setFramebufferOnly:FALSE];
     return nvgCreateMTL((__bridge void*)metalLayer, flags);
 }
 #else
@@ -502,6 +506,7 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     [metalLayer setDevice: metalDevice];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
     [metalLayer setPresentsWithTransaction:TRUE];
+    [metalLayer setFramebufferOnly:FALSE];
     return nvgCreateMTL((__bridge void*)((__bridge NSView*) view).layer, flags);
 }
 #endif
@@ -590,6 +595,14 @@ void mnvgDeleteFramebuffer(MNVGframebuffer* framebuffer) {
         nvgDeleteImage(framebuffer->ctx, framebuffer->image);
     }
     free(framebuffer);
+}
+
+int mnvgBlitFramebuffer(NVGcontext* ctx, MNVGframebuffer* fb, int x, int y, int w, int h)
+{
+    MNVGcontext* mtl = (__bridge MNVGcontext*)nvg__getUptr(ctx);
+    MNVGtexture* tex = [mtl findTexture:fb->image];
+    [mtl blitTextureToScreen:tex];
+    return 1;
 }
 
 void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
@@ -1116,6 +1129,7 @@ void* mnvgDevice(NVGcontext* ctx) {
     _defaultStencilState = [device
                             newDepthStencilStateWithDescriptor:stencilDescriptor];
 
+    
     // Fill shape stencil.
     MTLStencilDescriptor* frontFaceStencilDescriptor = [MTLStencilDescriptor new];
     frontFaceStencilDescriptor.stencilCompareFunction = MTLCompareFunctionAlways;
@@ -1450,7 +1464,7 @@ error:
     if (renderData->ncalls > 0) renderData->ncalls--;
 }
 
-- (void)renderFlush {
+- (void)renderFlush:(MTLScissorRect)scissorRect {
     // Cancelled if the drawable is invisible.
     if (_viewPortSize.x == 0 || _viewPortSize.y == 0) {
         [self renderCancel];
@@ -1503,9 +1517,7 @@ error:
     }
 
     _renderEncoder = [self renderCommandEncoderWithColorTexture:colorTexture];
-    
-    // This should ensure that framebuffer writes have been completed
-    [_renderEncoder memoryBarrierWithScope:MTLBarrierScopeTextures afterStages:MTLRenderStageVertex beforeStages:MTLRenderStageFragment];
+    [_renderEncoder setScissorRect:scissorRect];
     
     [self updateRenderPipelineStatesForBlend:_blendFunc
                                  pixelFormat:colorTexture.pixelFormat];
@@ -1555,6 +1567,44 @@ error:
     *height = (int)tex->tex.height;
     return 1;
 }
+
+- (void)blitTextureToScreen:(MNVGtexture *)mnvgTexture
+{
+    // Create a blit command encoder
+    id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
+    id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
+
+    id<CAMetalDrawable> drawable = nil;
+    drawable = _metalLayer.nextDrawable;
+    
+    // Get the texture from the drawable (the screen or render target)
+    id<MTLTexture> drawableTexture = drawable.texture;
+
+    // Blit the texture onto the drawable texture
+    [blitEncoder copyFromTexture:mnvgTexture->tex
+                     sourceSlice:0
+                     sourceLevel:0
+                    sourceOrigin:MTLOriginMake(0, 0, 0)
+                      sourceSize:MTLSizeMake(mnvgTexture->tex.width, mnvgTexture->tex.height, 1)
+                       toTexture:drawableTexture
+                destinationSlice:0
+                destinationLevel:0
+               destinationOrigin:MTLOriginMake(0, 0, 0)];
+
+    // End encoding
+    [blitEncoder endEncoding];
+    
+    if (drawable && _metalLayer.presentsWithTransaction) {
+        [commandBuffer commit];
+        [commandBuffer waitUntilScheduled];
+        [drawable present];
+    }
+    else if(drawable) {
+        [commandBuffer presentDrawable:drawable];
+        [commandBuffer commit];
+    }
+}
+
 
 - (void)renderStrokeWithPaint:(NVGpaint*)paint
            compositeOperation:(NVGcompositeOperationState)compositeOperation

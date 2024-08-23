@@ -161,9 +161,12 @@ struct NVGcontext {
 	int textTriCount;
 #endif
     struct NVGscissorBounds scissor;
+    struct NVGscissorBounds globalScissor;
     int numCached;
     StrokeCache* strokeCache;
 };
+
+void* nvg__getUptr(void* ctx) { return ((NVGcontext*)ctx)->params.userPtr; }
 
 static inline float nvg__sqrtf(float a) { return sqrtf(a); }
 static inline float nvg__modf(float a, float b) { return fmodf(a, b); }
@@ -424,7 +427,7 @@ void nvgBeginFrame(NVGcontext* ctx, float windowWidth, float windowHeight, float
 	nvg__setDevicePixelRatio(ctx, devicePixelRatio);
 
 	ctx->params.renderViewport(ctx->params.userPtr, windowWidth, windowHeight, devicePixelRatio);
-
+    ctx->globalScissor = {.x = 0, .y = 0, .w = 0, .h = 0};
 #if DEBUG
 	ctx->drawCallCount = 0;
 	ctx->fillTriCount = 0;
@@ -440,7 +443,7 @@ void nvgCancelFrame(NVGcontext* ctx)
 
 void nvgEndFrame(NVGcontext* ctx)
 {
-	ctx->params.renderFlush(ctx->params.userPtr);
+    ctx->params.renderFlush(ctx->params.userPtr, ctx->globalScissor);
 	if (ctx->fontImageIdx != 0) {
 		int fontImage = ctx->fontImages[ctx->fontImageIdx];
 		ctx->fontImages[ctx->fontImageIdx] = 0;
@@ -1136,6 +1139,12 @@ NVGpaint nvgImagePattern(NVGcontext* ctx,
 	p.innerColor = p.outerColor = nvgRGBA(255,255,255,alpha * 255);
 
 	return p;
+}
+
+void nvgGlobalScissor(NVGcontext* ctx, float x, float y, float w, float h)
+{
+    NVGstate* state = nvg__getState(ctx);
+    ctx->globalScissor = {x, y, w, h};
 }
 
 // Scissoring

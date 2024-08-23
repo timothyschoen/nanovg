@@ -194,6 +194,7 @@ struct GLNVGcontext {
     GLNVGshader shader;
     GLNVGtexture* textures;
     float view[2];
+    float devicePixelRatio;
     int ntextures;
     int ctextures;
     int textureId;
@@ -1077,10 +1078,10 @@ static void glnvg__setUniforms(GLNVGcontext* gl, int uniformOffset, int image)
 
 static void glnvg__renderViewport(void* uptr, float width, float height, float devicePixelRatio)
 {
-    NVG_NOTUSED(devicePixelRatio);
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
     gl->view[0] = width;
     gl->view[1] = height;
+    gl->devicePixelRatio = devicePixelRatio;
 }
 
 static void glnvg__fill(GLNVGcontext* gl, GLNVGcall* call)
@@ -1224,7 +1225,7 @@ static GLNVGblend glnvg__blendCompositeOperation(NVGcompositeOperationState op)
     return blend;
 }
 
-static void glnvg__renderFlush(void* uptr)
+static void glnvg__renderFlush(void* uptr, NVGscissorBounds scissor)
 {
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
     int i;
@@ -1240,17 +1241,16 @@ static void glnvg__renderFlush(void* uptr)
         glFrontFace(GL_CCW);
         glEnable(GL_BLEND);
         glDisable(GL_DEPTH_TEST);
-        glDisable(GL_SCISSOR_TEST);
+        glEnable(GL_SCISSOR_TEST);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glStencilMask(0xffffffff);
         glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
         glStencilFunc(GL_ALWAYS, 0, 0xffffffff);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, 0);
-#ifdef TARGET_OS_IPHONE
-    // Avoid performance analysis warning on iOS.
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-#endif
+
+        glScissor(scissor.x, (gl->view[1] * gl->devicePixelRatio) - (scissor.y + scissor.h), scissor.w, scissor.h);
+        
         gl->boundTexture = 0;
         gl->stencilMask = 0xffffffff;
         gl->stencilFunc = GL_ALWAYS;
@@ -1296,7 +1296,7 @@ static void glnvg__renderFlush(void* uptr)
         glUniform2fv(gl->shader.loc[GLNVG_LOC_VIEWSIZE], 1, gl->view);
 
         glBindBuffer(GL_UNIFORM_BUFFER, gl->fragBuf);
-
+        
         for (i = 0; i < gl->ncalls; i++) {
             GLNVGcall* call = &gl->calls[i];
             glnvg__blendFuncSeparate(gl,&call->blendFunc);
