@@ -70,7 +70,8 @@ enum NVGcommands {
 	NVG_LINETO = 1,
 	NVG_BEZIERTO = 2,
 	NVG_CLOSE = 3,
-	NVG_WINDING = 4,
+    NVG_WINDING_CW = 4,
+	NVG_WINDING_CCW = 5,
 };
 
 enum NVGpointFlags
@@ -1327,7 +1328,7 @@ static void nvg__appendCommand(NVGcontext* ctx, int command, float* vals, int nv
         ctx->ccommands = ccommands;
     }
     
-    if (command != NVG_CLOSE && command != NVG_WINDING) {
+    if (command < NVG_CLOSE) {
         ctx->commandx = vals[nvals-2];
         ctx->commandy = vals[nvals-1];
         
@@ -1360,7 +1361,7 @@ static void nvg__appendCommands(NVGcontext* ctx, uint8_t* commands, int ncommand
 		ctx->ccommands = ccommands;
 	}
 
-	if (commands[0] != NVG_CLOSE && commands[0] != NVG_WINDING) {
+	if (commands[0] < NVG_CLOSE) {
 		ctx->commandx = vals[nvals-2];
 		ctx->commandy = vals[nvals-1];
 	}
@@ -1629,67 +1630,55 @@ void nvg__tesselateBezierAFD(NVGcontext* ctx, float x1, float y1, float x2, floa
 static void nvg__flattenPaths(NVGcontext* ctx)
 {
 	NVGpathCache* cache = ctx->cache;
-	NVGpoint* last;
-	NVGpoint* p0;
-	NVGpoint* p1;
-	NVGpoint* pts;
-	NVGpath* path;
-	int i, j;
-	float* cp1;
-	float* cp2;
-	float* p;
-	float area;
-
+    NVGpoint* last;
+    
 	if (cache->npaths > 0)
 		return;
 
 	// Flatten
-    int value_pos = 0;
+    float* values = ctx->commandValues;
     for (int i = 0; i < ctx->ncommands; i++) {
 		uint8_t cmd = ctx->commands[i];
 		switch (cmd) {
 		case NVG_MOVETO:
 			nvg__addPath(ctx);
-			p = &ctx->commandValues[value_pos];
-			nvg__addPoint(ctx, p[0], p[1], NVG_PT_CORNER);
-            value_pos += 2;
+			nvg__addPoint(ctx, values[0], values[1], NVG_PT_CORNER);
+            values += 2;
 			break;
 		case NVG_LINETO:
-			p = &ctx->commandValues[value_pos];
-			nvg__addPoint(ctx, p[0], p[1], NVG_PT_CORNER);
-            value_pos += 2;
+			nvg__addPoint(ctx, values[0], values[1], NVG_PT_CORNER);
+            values += 2;
 			break;
 		case NVG_BEZIERTO:
 			last = nvg__lastPoint(ctx);
 			if (last != NULL) {
-				cp1 = &ctx->commandValues[value_pos];
-				cp2 = &ctx->commandValues[value_pos + 2];
-				p = &ctx->commandValues[value_pos + 4];
-                nvg__tesselateBezierAFD(ctx, last->x,last->y, cp1[0],cp1[1], cp2[0],cp2[1], p[0],p[1]);
+                nvg__tesselateBezierAFD(ctx, last->x,last->y, values[0], values[1], values[2], values[3], values[4], values[5]);
 			}
-            value_pos += 6;
+            values += 6;
 			break;
 		case NVG_CLOSE:
 			nvg__closePath(ctx);
 			break;
-		case NVG_WINDING:
-			nvg__pathWinding(ctx, (NVGwinding)ctx->commandValues[value_pos]);
-            value_pos += 1;
+		case NVG_WINDING_CW:
+			nvg__pathWinding(ctx, NVG_HOLE);
 			break;
-		}
+        case NVG_WINDING_CCW:
+            nvg__pathWinding(ctx, NVG_SOLID);
+            break;
+        }
 	}
 
 	cache->bounds[0] = cache->bounds[1] = 1e6f;
 	cache->bounds[2] = cache->bounds[3] = -1e6f;
 
 	// Calculate the direction and length of line segments.
-	for (j = 0; j < cache->npaths; j++) {
-		path = &cache->paths[j];
-		pts = &cache->points[path->first];
+	for (int j = 0; j < cache->npaths; j++) {
+        NVGpath* path = &cache->paths[j];
+        NVGpoint* pts = &cache->points[path->first];
 
 		// If the first and last points are the same, remove the last, mark as closed path.
-		p0 = &pts[path->count-1];
-		p1 = &pts[0];
+        NVGpoint* p0 = &pts[path->count-1];
+        NVGpoint* p1 = &pts[0];
 		if (nvg__ptEquals(p0->x,p0->y, p1->x,p1->y, ctx->distTol)) {
 			path->count--;
 			p0 = &pts[path->count-1];
@@ -1699,7 +1688,7 @@ static void nvg__flattenPaths(NVGcontext* ctx)
 		// Enforce winding.
         path->reversed = 0;
 		if (path->count > 2) {
-			area = nvg__polyArea(pts, path->count);
+			float area = nvg__polyArea(pts, path->count);
 			if (path->winding == NVG_SOLID && area < 0.0f) {
 				nvg__polyReverse(pts, path->count);
 				path->reversed = 1;
@@ -1710,7 +1699,7 @@ static void nvg__flattenPaths(NVGcontext* ctx)
 			}
 		}
 
-		for(i = 0; i < path->count; i++) {
+		for(int i = 0; i < path->count; i++) {
 			// Calculate segment direction and length
 			p0->dx = p1->x - p0->x;
 			p0->dy = p1->y - p0->y;
@@ -2481,7 +2470,7 @@ void nvgClosePath(NVGcontext* ctx)
 void nvgPathWinding(NVGcontext* ctx, NVGwinding dir)
 {
 	float vals[] = { (float)dir };
-	nvg__appendCommand(ctx, NVG_WINDING, vals, 1);
+    nvg__appendCommand(ctx, dir ? NVG_WINDING_CW : NVG_WINDING_CCW, NULL, 0);
 }
 
 void nvgArc(NVGcontext* ctx, float cx, float cy, float r, float a0, float a1, int dir)
