@@ -1042,6 +1042,10 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
             frag->offset = paint->offset;
             break;
         }
+        case PAINT_TYPE_DOUBLE_STROKE: {
+            frag->stateData |= glnvg__packStateDataUniform(PACK_REVERSE, lineReversed);
+            break;
+        }
         case PAINT_TYPE_DOTS: {
             frag->patternSize = paint->dot_pattern_size;
             break;
