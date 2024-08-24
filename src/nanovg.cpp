@@ -961,22 +961,6 @@ void nvgDeleteImage(NVGcontext* ctx, int image)
 	ctx->params.renderDeleteTexture(ctx->params.userPtr, image);
 }
 
-NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patternSize, float dotRadius, float feather)
-{
-    NVGpaint p;
-    NVG_NOTUSED(ctx);
-    memset(&p, 0, sizeof(p));
-
-	nvgTransformIdentity(p.xform);
-    p.type = PAINT_TYPE_DOTS;
-    p.radius = dotRadius;
-    p.feather = feather;
-    p.dot_pattern_size = patternSize;
-	p.innerColor = icol;
-	p.outerColor = ocol;
-    return p;
-}
-
 NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor dashCol, float dashSize, bool isGradientStroke, bool showActivity, float activityOffset)
 {
     NVGpaint p;

@@ -67,7 +67,6 @@ typedef struct  {
   float feather;
   float strokeMult;
   float scissorRadius;
-  float patternSize;
   float offset;
   float lineLength;
   int stateData;
@@ -293,28 +292,6 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   if(type == MNVG_SHADER_FILLCOLOR) {
       return convertColour(uniforms.innerCol) * strokeAlpha * scissor;
   }
-  if(type == MNVG_SHADER_DOTS) {
-    float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0f)).xy - (0.5f * uniforms.patternSize);
-    float2 center = pt.xy - fmod(pt.xy, uniforms.patternSize) + (0.5f * uniforms.patternSize);
-    float dist = circleDist(pt.xy, center, uniforms.radius);
-    float delta = fwidth(dist);
-
-    // We can use this variation for zoom >= 1.0f however, it may be fine as is on retina?
-    //float alpha = smoothstep(0.45f - delta, 0.45f, dist);
-
-	float alpha = smoothstep(uniforms.feather - delta, uniforms.feather + delta, dist);
-    float4 dotColor = mix(convertColour(uniforms.innerCol), convertColour(uniforms.outerCol), alpha);
-    return dotColor * scissor;
-    }
-  if (type == MNVG_SHADER_FILLGRAD) {
-    float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy;
-    float d = saturate((uniforms.feather * 0.5 + sdroundrect(pt, uniforms.extent, uniforms.radius))
-                        / uniforms.feather);
-    float4 color = mix(convertColour(uniforms.innerCol), convertColour(uniforms.outerCol), d);
-    color *= scissor;
-    color *= strokeAlpha;
-    return color;
-  }
   if (type == MNVG_SHADER_OBJECT_RECT) {
 	float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos,1.0f)).xy;
     int flagType = (uniforms.stateData >> 10) & 0x03;     // 2 bits
@@ -387,6 +364,15 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
 
     return float4(finalColor * outerRoundedRectAlpha) * scissor;
 }
+ if (type == MNVG_SHADER_FILLGRAD) {
+    float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy;
+    float d = saturate((uniforms.feather * 0.5 + sdroundrect(pt, uniforms.extent, uniforms.radius))
+                        / uniforms.feather);
+    float4 color = mix(convertColour(uniforms.innerCol), convertColour(uniforms.outerCol), d);
+    color *= scissor;
+    color *= strokeAlpha;
+    return color;
+}
 else if (type == MNVG_SHADER_FILLIMG_ALPHA) {
         // Calculate alpha from texture
         float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
@@ -402,14 +388,9 @@ else if (type == MNVG_SHADER_FILLIMG_ALPHA) {
   else {  // MNVG_SHADER_FILLIMG
     float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
     float4 color = texture.sample(sampler, float2(pt.x, reverse ? 1.0f - pt.y : pt.y));
-    if (texType == 1)
-      color = float4(color.xyz * color.w, color.w);
-    else if (texType == 2)
-      color = float4(color.x);
-    else if (texType == 3)
-      color = color.bgra;
-    color *= scissor;
-    color *= strokeAlpha;
-    return color * convertColour(uniforms.innerCol);
+    if (texType == 1) color = float4(color.xyz * color.w, color.w);
+    else if (texType == 2) color = float4(color.x);
+    else if (texType == 3) color = color.bgra;
+    return color * scissor * strokeAlpha;
   }
 }

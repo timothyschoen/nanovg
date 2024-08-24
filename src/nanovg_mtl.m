@@ -120,7 +120,6 @@ struct MNVGfragUniforms {
     float feather;
     float strokeMult;
     float scissorRadius;
-    float patternSize;
     float offset;
     float lineLength;
     int stateData;
@@ -868,10 +867,6 @@ void* mnvgDevice(NVGcontext* ctx) {
         case PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY:
         case PAINT_TYPE_DOUBLE_STROKE_ACTIVITY: {
             frag->offset = paint->offset;
-            break;
-        }
-        case PAINT_TYPE_DOTS: {
-            frag->patternSize = paint->dot_pattern_size;
             break;
         }
         default: break;

@@ -182,7 +182,6 @@ struct GLNVGfragUniforms {
         float radius;
         float feather;
         float strokeMult;
-        float patternSize;
         float scissorRadius;
         float lineLength;
         float offset;
@@ -441,7 +440,6 @@ static int glnvg__renderCreate(void* uptr)
                  << "#define NSVG_SHADER_FILLIMG                " << PAINT_TYPE_FILLIMG << "\n"
                  << "#define NSVG_SHADER_FILLCOLOR              " << PAINT_TYPE_FILLCOLOR << "\n"
                  << "#define NSVG_SHADER_IMG                    " << PAINT_TYPE_IMG << "\n"
-                 << "#define NSVG_SHADER_DOTS                   " << PAINT_TYPE_DOTS << "\n"
                  << "#define NSVG_SHADER_FAST_ROUNDEDRECT       " << PAINT_TYPE_FAST_ROUNDEDRECT << "\n"
                  << "#define NSVG_SHADER_OBJECT_RECT            " << PAINT_TYPE_OBJECT_RECT << "\n"
                  << "#define NSVG_SMOOTH_GLOW                   " << PAINT_TYPE_SMOOTH_GLOW << "\n"
@@ -489,7 +487,6 @@ static int glnvg__renderCreate(void* uptr)
             float radius;
             float feather;
             float strokeMult;
-            float patternSize;
             float scissorRadius;
             float lineLength;
             float offset;
@@ -782,11 +779,7 @@ static int glnvg__renderCreate(void* uptr)
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
                 if (texType == 2) color = vec4(color.x);
                 if (texType == 3) color = color.bgra; // swizzle for JUCE colour image
-                // Apply color tint and alpha.
-                color *= convertColour(innerCol);
-                // Combine alpha
-                color *= strokeAlpha * scissor;
-                result = color;
+                result = color * strokeAlpha * scissor;
             } else if (type == NSVG_SHADER_FILLIMG_ALPHA) {
                 // Calculate alpha from texture
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
@@ -805,21 +798,7 @@ static int glnvg__renderCreate(void* uptr)
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
                 if (texType == 2) color = vec4(color.x);
                 if (texType == 3) color = color.bgra; // swizzle for JUCE colour image
-                if (color.x < 0.02f) discard;
-                color *= scissor;
-                result = color * convertColour(innerCol);
-            } else if (type == NSVG_SHADER_DOTS) { // Dot pattern for plugdata
-                vec2 pt = (transformInverse(paintMat) * vec3(fpos, 1.0f)).xy - (0.5f * patternSize);
-                vec2 center = pt.xy - mod(pt.xy, patternSize) + (0.5f * patternSize);
-                float dist = circleDist(pt.xy, center, radius);
-                float delta = fwidth(dist);
-
-                // We can use this variation for zoom >= 1.0f however, it may be fine as is on retina?
-                //float alpha = smoothstep(0.45f - delta, 0.45f, dist);
-
-                float alpha = smoothstep(feather - delta, feather + delta, dist);
-                vec4 dotColor = mix(convertColour(innerCol), convertColour(outerCol), alpha);
-                result = dotColor * scissor;
+                result = color * scissor * convertColour(innerCol);
             }
             outColor = result;
         }
@@ -1044,10 +1023,6 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         }
         case PAINT_TYPE_DOUBLE_STROKE: {
             frag->stateData |= glnvg__packStateDataUniform(PACK_REVERSE, lineReversed);
-            break;
-        }
-        case PAINT_TYPE_DOTS: {
-            frag->patternSize = paint->dot_pattern_size;
             break;
         }
         default: break;
