@@ -939,6 +939,11 @@ int nvgCreateImageARGB(NVGcontext* ctx, int w, int h, int imageFlags, const unsi
     return ctx->params.renderCreateTexture(ctx->params.userPtr, NVG_TEXTURE_ARGB, w, h, imageFlags, data);
 }
 
+int nvgCreateImageAlpha(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data)
+{
+    return ctx->params.renderCreateTexture(ctx->params.userPtr, NVG_TEXTURE_ALPHA, w, h, imageFlags, data);
+}
+
 void nvgUpdateImage(NVGcontext* ctx, int image, const unsigned char* data)
 {
 	int w, h;
@@ -1140,6 +1145,17 @@ NVGpaint nvgImagePattern(NVGcontext* ctx,
 	p.innerColor = p.outerColor = nvgRGBA(255,255,255,alpha * 255);
 
 	return p;
+}
+
+NVGpaint nvgImageAlphaPattern(NVGcontext* ctx,
+                         float cx, float cy, float w, float h, float angle,
+                         int image, NVGcolor iCol)
+{
+    auto p = nvgImagePattern(ctx, cx, cy, w,  h, angle, image, 1.0f);
+    p.innerColor = iCol;
+    p.type = PAINT_TYPE_FILLIMG_ALPHA;
+
+    return p;
 }
 
 void nvgGlobalScissor(NVGcontext* ctx, float x, float y, float w, float h)

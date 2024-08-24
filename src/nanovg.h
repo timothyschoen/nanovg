@@ -102,7 +102,8 @@ typedef enum
     PAINT_TYPE_DOUBLE_STROKE_GRAD,
     PAINT_TYPE_DOUBLE_STROKE_ACTIVITY,
     PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY,
-    PAINT_TYPE_OBJECT_RECT
+    PAINT_TYPE_OBJECT_RECT,
+    PAINT_TYPE_FILLIMG_ALPHA
 } NVGPaintType;
 
 struct NVGpaint {
@@ -472,6 +473,10 @@ int nvgCreateImageRGBA(NVGcontext* ctx, int w, int h, int imageFlags, const unsi
 // Returns handle to the image.
 int nvgCreateImageARGB(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data);
 
+// Creates image from specified image data in single channel format
+// Returns handle to the image.
+int nvgCreateImageAlpha(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data);
+
 // Updates image data specified by image handle.
 void nvgUpdateImage(NVGcontext* ctx, int image, const unsigned char* data);
 
@@ -512,6 +517,11 @@ NVGpaint nvgRadialGradient(NVGcontext* ctx, float cx, float cy, float inr, float
 // The gradient is transformed by the current transform when it is passed to nvgFillPaint() or nvgStrokePaint().
 NVGpaint nvgImagePattern(NVGcontext* ctx, float ox, float oy, float ex, float ey,
 						 float angle, int image, float alpha);
+
+// Creates and returns an image pattern using alpha component of image with custom color. Parameters (ox,oy) specify the left-top location of the image pattern,
+// (ex,ey) the size of one image, angle rotation around the top-left corner, image is handle to the image to render.
+NVGpaint nvgImageAlphaPattern(NVGcontext* ctx, float ox, float oy, float ex, float ey,
+                        float angle, int image, NVGcolor iCol);
 
 // Creates a dot pattern, that is rendered on shader (used for plugdata canvas background)
 NVGpaint nvgDotPattern(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, float patternSize, float dotRadius, float feather);

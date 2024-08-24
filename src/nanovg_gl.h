@@ -46,13 +46,13 @@ enum PackType {
 int glnvg__packStateDataUniform(PackType packType, int value) {
     switch (packType) {
         case PACK_OBJECT_STYLE:
-            return (value & 0x01) << 11;
+            return (value & 0x01) << 12;
         case PACK_FLAG_TYPE:
-            return (value & 0x03) << 9;
+            return (value & 0x03) << 10;
         case PACK_LINE_STYLE:
-            return (value & 0x03) << 7;
+            return (value & 0x03) << 8;
         case PACK_TEX_TYPE:
-            return (value & 0x03) << 5;
+            return (value & 0x07) << 5;
         case PACK_REVERSE:
             return value & 0x01;
         default:
@@ -449,6 +449,7 @@ static int glnvg__renderCreate(void* uptr)
                  << "#define NSVG_DOUBLE_STROKE_GRAD            " << PAINT_TYPE_DOUBLE_STROKE_GRAD << "\n"
                  << "#define NSVG_DOUBLE_STROKE_ACTIVITY        " << PAINT_TYPE_DOUBLE_STROKE_ACTIVITY << "\n"
                  << "#define NSVG_DOUBLE_STROKE_GRAD_ACTIVITY   " << PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY << "\n"
+                 << "#define NSVG_SHADER_FILLIMG_ALPHA          " << PAINT_TYPE_FILLIMG_ALPHA << "\n"
                  << "\n";
 
     static char const* fillVertShader = R"(
@@ -500,14 +501,18 @@ static int glnvg__renderCreate(void* uptr)
         smooth in vec2 uv;
         out vec4 outColor;
 
-        vec4 convertColour(int rgba){
-            vec3 col;
+        vec4 getRawColour(int rgba){
+            vec4 col;
             col.r = float((rgba >> 24) & 0xFF) / 255.0f;
             col.g = float((rgba >> 16) & 0xFF) / 255.0f;
             col.b = float((rgba >> 8) & 0xFF) / 255.0f;
-            float a = float(rgba & 0xFF) / 255.0f;
+            col.a = float(rgba & 0xFF) / 255.0f;
+            return col;
+        }
+        vec4 convertColour(int rgba){
+            vec4 col = getRawColour(rgba);
             // premultiply colour here
-            return vec4((col * a).rgb, a);
+            return vec4((col.rgb * col.a).rgb, col.a);
         }
         float sdroundrect(vec2 pt, vec2 ext, float rad) {
             vec2 ext2 = ext - vec2(rad,rad);
@@ -603,8 +608,8 @@ static int glnvg__renderCreate(void* uptr)
         #endif
         )" << R"(
         void main(void) {
-            int lineStyle = (stateData >> 7) & 0x03;     // 2 bits
-            int texType   = (stateData >> 5) & 0x03;     // 2 bits
+            int lineStyle = (stateData >> 8) & 0x03;     // 2 bits
+            int texType   = (stateData >> 5) & 0x07;     // 3 bits (0,1,2,3,4)
             bool reverse  = bool(stateData & 0x01);      // 1 bit
 
             vec4 result;
@@ -626,13 +631,13 @@ static int glnvg__renderCreate(void* uptr)
             }
             if (type == NSVG_SHADER_OBJECT_RECT) {
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy;
-                int flagType = (stateData >> 9) & 0x03;     // 2 bits
+                int flagType = (stateData >> 10) & 0x03;     // 2 bits
 
                 vec2 flagPoints[3];
                 float flagSize = 5.0f;
                 flagPoints[2] = vec2(0.0f, -1.0f) * flagSize;
 
-                bool objectOutline = bool((stateData >> 11) & 0x01); // 1 bit (off or on)
+                bool objectOutline = bool((stateData >> 12) & 0x01); // 1 bit (off or on)
 
                 float offset = objectOutline ? 0.2f : -0.5f;
 
@@ -771,7 +776,7 @@ static int glnvg__renderCreate(void* uptr)
                 color *= strokeAlpha * scissor;
                 result = color;
             } else if (type == NSVG_SHADER_FILLIMG) {
-                // Calculate color fron texture
+                // Calculate color from texture
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
                 vec4 color = texture(tex, pt);
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
@@ -782,6 +787,17 @@ static int glnvg__renderCreate(void* uptr)
                 // Combine alpha
                 color *= strokeAlpha * scissor;
                 result = color;
+            } else if (type == NSVG_SHADER_FILLIMG_ALPHA) {
+                // Calculate alpha from texture
+                vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
+                vec4 color = texture(tex, pt);
+                float alpha = color.a;
+                if (texType == 1) alpha = color.w;
+                if (texType == 2) alpha = color.x;
+                if (texType == 4) alpha = color.r; // single channel GL_RED
+                // Apply color tint and alpha.
+                vec3 maskColor = getRawColour(innerCol).rgb;
+                result = vec4(maskColor * alpha, alpha) * strokeAlpha * scissor;
             } if (type == NSVG_SHADER_FILLCOLOR) { // fill color
                 result = convertColour(innerCol) * strokeAlpha * scissor;
             } else if (type == NSVG_SHADER_IMG) { // Textured tris
@@ -845,6 +861,14 @@ static int glnvg__renderCreate(void* uptr)
     return 1;
 }
 
+static void glnvg__updateTexPixelStoreiVals(int alignement, int x, int y, int w)
+{
+    glPixelStorei(GL_UNPACK_ALIGNMENT, alignement);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, w);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, x);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, y);
+}
+
 static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h, int imageFlags, const unsigned char* data)
 {
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
@@ -859,18 +883,12 @@ static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h, int im
     tex->flags = imageFlags;
     glnvg__bindTexture(gl, tex->tex);
 
-    glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-#ifndef NANOVG_GLES2
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, tex->width);
-    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-#endif
+    glnvg__updateTexPixelStoreiVals(4, 0, 0, 0);
 
     if (type == NVG_TEXTURE_RGBA || type == NVG_TEXTURE_ARGB)
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     else
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
-
 
     if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS) {
         if (imageFlags & NVG_IMAGE_NEAREST) {
@@ -902,12 +920,6 @@ static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h, int im
     else
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-
     // The new way to build mipmaps on GLES and GL3
     if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS) {
         glGenerateMipmap(GL_TEXTURE_2D);
@@ -934,21 +946,12 @@ static int glnvg__renderUpdateTexture(void* uptr, int image, int x, int y, int w
     if (tex == NULL) return 0;
     glnvg__bindTexture(gl, tex->tex);
 
-    glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, tex->width);
-    glPixelStorei(GL_UNPACK_SKIP_PIXELS, x);
-    glPixelStorei(GL_UNPACK_SKIP_ROWS, y);
+    glnvg__updateTexPixelStoreiVals(4, x, y, tex->width);
 
     if (tex->type == NVG_TEXTURE_RGBA || tex->type == NVG_TEXTURE_ARGB)
         glTexSubImage2D(GL_TEXTURE_2D, 0, x,y, w,h, GL_RGBA, GL_UNSIGNED_BYTE, data);
     else
         glTexSubImage2D(GL_TEXTURE_2D, 0, x,y, w,h, GL_RED, GL_UNSIGNED_BYTE, data);
-
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
 
     glnvg__bindTexture(gl, 0);
 
@@ -1006,6 +1009,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
     }
 
     switch (paint->type) {
+        case PAINT_TYPE_FILLIMG_ALPHA:
         case PAINT_TYPE_FILLIMG: {
             GLNVGtexture* tex = glnvg__findTexture(gl, paint->image);
             if (tex == NULL) return 0;
@@ -1025,11 +1029,15 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
                     break;
                 case NVG_TEXTURE_ARGB:
                     frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, 3);
+                    break;
+                case NVG_TEXTURE_ALPHA:
+                    frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, 4);
+                    break;
                 default:
                     frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, 2);
                     break;
             }
-            frag->type = PAINT_TYPE_FILLIMG;
+            frag->type = paint->type == PAINT_TYPE_FILLIMG ? PAINT_TYPE_FILLIMG : PAINT_TYPE_FILLIMG_ALPHA;
             break;
         }
         case PAINT_TYPE_OBJECT_RECT: {
