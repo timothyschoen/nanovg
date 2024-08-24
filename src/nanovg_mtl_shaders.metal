@@ -31,7 +31,6 @@ typedef enum {
   MNVG_SHADER_FILLIMG,
   MNVG_SHADER_FILLIMG_ALPHA,
   MNVG_SHADER_IMG,
-  MNVG_SHADER_DOTS,
   MNVG_SHADER_FAST_ROUNDEDRECT,
   MNVG_SHADER_FILLCOLOR,
   MNVG_SHADER_DOUBLE_STROKE,
@@ -364,7 +363,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
 
     return float4(finalColor * outerRoundedRectAlpha) * scissor;
 }
- if (type == MNVG_SHADER_FILLGRAD) {
+if (type == MNVG_SHADER_FILLGRAD) {
     float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy;
     float d = saturate((uniforms.feather * 0.5 + sdroundrect(pt, uniforms.extent, uniforms.radius))
                         / uniforms.feather);
@@ -373,7 +372,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     color *= strokeAlpha;
     return color;
 }
-else if (type == MNVG_SHADER_FILLIMG_ALPHA) {
+if (type == MNVG_SHADER_FILLIMG_ALPHA) {
         // Calculate alpha from texture
         float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
         float4 color = texture.sample(sampler, float2(pt.x, reverse ? 1.0f - pt.y : pt.y));
