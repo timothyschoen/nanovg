@@ -1030,7 +1030,6 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
                     frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, 2);
                     break;
             }
-            frag->type = paint->type == PAINT_TYPE_FILLIMG ? PAINT_TYPE_FILLIMG : PAINT_TYPE_FILLIMG_ALPHA;
             break;
         }
         case PAINT_TYPE_OBJECT_RECT: {
@@ -1255,7 +1254,7 @@ static void glnvg__renderFlush(void* uptr, NVGscissorBounds scissor)
         glBindTexture(GL_TEXTURE_2D, 0);
 
         glScissor(scissor.x, (gl->view[1] * gl->devicePixelRatio) - (scissor.y + scissor.h), scissor.w, scissor.h);
-        
+
         gl->boundTexture = 0;
         gl->stencilMask = 0xffffffff;
         gl->stencilFunc = GL_ALWAYS;
@@ -1301,7 +1300,7 @@ static void glnvg__renderFlush(void* uptr, NVGscissorBounds scissor)
         glUniform2fv(gl->shader.loc[GLNVG_LOC_VIEWSIZE], 1, gl->view);
 
         glBindBuffer(GL_UNIFORM_BUFFER, gl->fragBuf);
-        
+
         for (i = 0; i < gl->ncalls; i++) {
             GLNVGcall* call = &gl->calls[i];
             glnvg__blendFuncSeparate(gl,&call->blendFunc);

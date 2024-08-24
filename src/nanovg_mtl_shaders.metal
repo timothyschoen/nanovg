@@ -29,6 +29,7 @@ using namespace metal;
 typedef enum {
   MNVG_SHADER_FILLGRAD,
   MNVG_SHADER_FILLIMG,
+  MNVG_SHADER_FILLIMG_ALPHA,
   MNVG_SHADER_IMG,
   MNVG_SHADER_DOTS,
   MNVG_SHADER_FAST_ROUNDEDRECT,
@@ -38,7 +39,7 @@ typedef enum {
   MNVG_SHADER_DOUBLE_STROKE_GRAD,
   MNVG_SHADER_DOUBLE_STROKE_ACTIVITY,
   MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY,
-  MNVG_SHADER_OBJECT_RECT
+  MNVG_SHADER_OBJECT_RECT,
 } FragmentShaderCall;
 
 typedef struct {
@@ -120,6 +121,15 @@ float circleDist(float2 p, float2 center, float d) {
   return distance(center, p) - d;
 }
 
+float4 getRawColour(int rgba){
+    float4 col;
+    col.r = float((rgba >> 24) & 0xFF) / 255.0f;
+    col.g = float((rgba >> 16) & 0xFF) / 255.0f;
+    col.b = float((rgba >> 8) & 0xFF) / 255.0f;
+    col.a = float(rgba & 0xFF) / 255.0f;
+    return col;
+}
+
 float4 convertColour(int rgba){
     float3 col;
     col.r = float((rgba >> 24) & 0xFF) / 255.0f;
@@ -186,13 +196,13 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   float scissor = scissorMask(uniforms, in.fpos);
   if (scissor == 0) discard_fragment();
 
-  uint8_t lineStyle = (uniforms.stateData >> 7) & 0x03;     // 2 bits
-  uint8_t texType   = (uniforms.stateData >> 5) & 0x03;     // 2 bits
+  uint8_t lineStyle = (uniforms.stateData >> 8) & 0x03;     // 2 bits
+  uint8_t texType   = (uniforms.stateData >> 5) & 0x07;     // 2 bits
   uint8_t type      = uniforms.type;
   bool reverse      = bool(uniforms.stateData & 0x01);      // 1 bit
 
   if (type == MNVG_SHADER_IMG) {  // MNVG_SHADER_IMG
-    float4 color = texture.sample(sampler, in.ftcoord);
+    float4 color = texture.sample(sampler, float2(in.ftcoord.x, reverse ? 1.0f - in.ftcoord.y : in.ftcoord.y));
     if (texType == 1)
       color = float4(color.xyz * color.w, color.w);
     else if (texType == 2)
@@ -307,13 +317,13 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   }
   if (type == MNVG_SHADER_OBJECT_RECT) {
 	float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos,1.0f)).xy;
-    int flagType = (uniforms.stateData >> 9) & 0x03;     // 2 bits
+    int flagType = (uniforms.stateData >> 10) & 0x03;     // 2 bits
 
     float2 flagPoints[3];
     float flagSize = 5.0f;
     flagPoints[2] = float2(0.0f, -1.0f) * flagSize;
 
-    bool objectOutline = bool((uniforms.stateData >> 11) & 0x01); // 1 bit (off or on)
+    bool objectOutline = bool((uniforms.stateData >> 12) & 0x01); // 1 bit (off or on)
 
     float offset = objectOutline ? 0.2f : -0.5f;
 
@@ -377,9 +387,21 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
 
     return float4(finalColor * outerRoundedRectAlpha) * scissor;
 }
+else if (type == MNVG_SHADER_FILLIMG_ALPHA) {
+        // Calculate alpha from texture
+        float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
+        float4 color = texture.sample(sampler, float2(pt.x, reverse ? 1.0f - pt.y : pt.y));
+        float alpha = color.a;
+        if (texType == 1) alpha = color.w;
+        if (texType == 2) alpha = color.x;
+        if (texType == 4) alpha = color.r; // single channel GL_RED
+        // Apply color tint and alpha.
+        float3 maskColor = getRawColour(uniforms.innerCol).rgb;
+        return float4(maskColor * alpha, alpha) * strokeAlpha * scissor;
+    }
   else {  // MNVG_SHADER_FILLIMG
     float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
-    float4 color = texture.sample(sampler, pt);
+    float4 color = texture.sample(sampler, float2(pt.x, reverse ? 1.0f - pt.y : pt.y));
     if (texType == 1)
       color = float4(color.xyz * color.w, color.w);
     else if (texType == 2)

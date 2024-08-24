@@ -314,16 +314,16 @@ typedef enum {
     PACK_OBJECT_STYLE
 } PackType;
 
-int mtlnvg_packStateDataUniform(PackType packType, int value) {
+int mtlnvg__packStateDataUniform(PackType packType, int value) {
     switch (packType) {
         case PACK_OBJECT_STYLE:
-            return (value & 0x01) << 11;
+            return (value & 0x01) << 12;
         case PACK_FLAG_TYPE:
-            return (value & 0x03) << 9;
+            return (value & 0x03) << 10;
         case PACK_LINE_STYLE:
-            return (value & 0x03) << 7;
+            return (value & 0x03) << 8;
         case PACK_TEX_TYPE:
-            return (value & 0x03) << 5;
+            return (value & 0x07) << 5;
         case PACK_REVERSE:
             return value & 0x01;
         default:
@@ -820,7 +820,7 @@ void* mnvgDevice(NVGcontext* ctx) {
     frag->innerCol = paint->innerColor.rgba32;
     frag->outerCol = paint->outerColor.rgba32;
     frag->dashCol = paint->dashColor.rgba32;
-    frag->stateData = mtlnvg_packStateDataUniform(PACK_LINE_STYLE, lineStyle);
+    frag->stateData = mtlnvg__packStateDataUniform(PACK_LINE_STYLE, lineStyle);
     frag->radius = paint->radius;
     frag->feather = paint->feather;
     frag->extent = (vector_float2){paint->extent[0], paint->extent[1]};
@@ -841,30 +841,27 @@ void* mnvgDevice(NVGcontext* ctx) {
     }
     
     switch (paint->type) {
+        case PAINT_TYPE_FILLIMG_ALPHA:
         case PAINT_TYPE_FILLIMG: {
             MNVGtexture* tex = [self findTexture:paint->image];
             if (tex == nil) return 0;
             if (tex->flags & NVG_IMAGE_FLIPY) {
-                float m1[6], m2[6];
-                nvgTransformTranslate(m1, 0.0f, frag->extent.y * 0.5f);
-                nvgTransformMultiply(m1, paint->xform);
-                nvgTransformScale(m2, 1.0f, -1.0f);
-                nvgTransformMultiply(m2, m1);
-                nvgTransformTranslate(m1, 0.0f, -frag->extent.y * 0.5f);
-                nvgTransformMultiply(m1, m2);
-                memcpy(&frag->paintMat, m1, 6 * sizeof(float));
+                frag->stateData |= mtlnvg__packStateDataUniform(PACK_REVERSE, true);
             }
             if (tex->type == NVG_TEXTURE_RGBA)
-                frag->stateData |= mtlnvg_packStateDataUniform(PACK_TEX_TYPE, (tex->flags & NVG_IMAGE_PREMULTIPLIED) ? 0 : 1);
+                frag->stateData |= mtlnvg__packStateDataUniform(PACK_TEX_TYPE, (tex->flags & NVG_IMAGE_PREMULTIPLIED) ? 0 : 1);
+            else if(tex->type == NVG_TEXTURE_ALPHA)
+                frag->stateData |= mtlnvg__packStateDataUniform(PACK_TEX_TYPE, 4);
             else if(tex->type == NVG_TEXTURE_ARGB)
-                frag->stateData |= mtlnvg_packStateDataUniform(PACK_TEX_TYPE, 3);
+                frag->stateData |= mtlnvg__packStateDataUniform(PACK_TEX_TYPE, 3);
             else
-                frag->stateData |= mtlnvg_packStateDataUniform(PACK_TEX_TYPE, 2);
+                frag->stateData |= mtlnvg__packStateDataUniform(PACK_TEX_TYPE, 2);
+            
             break;
         }
         case PAINT_TYPE_OBJECT_RECT: {
-            frag->stateData |= mtlnvg_packStateDataUniform(PACK_FLAG_TYPE, paint->flag_type);
-            frag->stateData |= mtlnvg_packStateDataUniform(PACK_OBJECT_STYLE, paint->flag_outline);
+            frag->stateData |= mtlnvg__packStateDataUniform(PACK_FLAG_TYPE, paint->flag_type);
+            frag->stateData |= mtlnvg__packStateDataUniform(PACK_OBJECT_STYLE, paint->flag_outline);
             frag->dashCol = paint->dashColor.rgba32;
             break;
         }
@@ -1242,7 +1239,7 @@ void* mnvgDevice(NVGcontext* ctx) {
         if (tex->type == NVG_TEXTURE_RGBA || tex->type == NVG_TEXTURE_ARGB) {
             bytesPerRow = width * 4;
         } else {
-            bytesPerRow = width;
+            bytesPerRow = (width + 3) & ~3;
         }
 
         if (textureDescriptor.storageMode == MTLStorageModePrivate) {
@@ -1733,7 +1730,7 @@ error:
 
     if(text) {
         frag->type = PAINT_TYPE_IMG;
-        frag->stateData = mtlnvg_packStateDataUniform(PACK_TEX_TYPE, 2);
+        frag->stateData = mtlnvg__packStateDataUniform(PACK_TEX_TYPE, 2);
     }
 
     return;
