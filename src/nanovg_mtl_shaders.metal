@@ -71,8 +71,15 @@ typedef struct  {
   int stateData;
 } Uniforms;
 
-float sdroundrect(float2 pt, float2 ext, float rad);
-float strokeMask(constant Uniforms& uniforms, float2 ftcoord);
+int getLineStyle(constant Uniforms& uniforms){
+    return (uniforms.stateData >> 8) & 0x03;     // 2 bits
+}
+int getTexType(constant Uniforms& uniforms){
+    return (uniforms.stateData >> 5) & 0x07;     // 3 bits (0,1,2,3,4)
+}
+bool getReverse(constant Uniforms& uniforms){
+    return bool(uniforms.stateData & 0x01);      // 1 bit
+}
 
 float inverseLerp(float a, float b, float value) {
     return (value - a) / (b - a);
@@ -88,6 +95,11 @@ float3x3 transformInverse(const constant float t[6]) {
                     float3(t[5] * t[2] - t[3] * t[4], -t[5] * t[0] + t[1] * t[4], t[3] * t[0] - t[1] * t[2])) * invdet;
 }
 
+float sdroundrect(float2 pt, float2 ext, float rad) {
+	float2 ext2 = ext - float2(rad, rad);
+	float2 d = abs(pt) - ext2;
+	return min(max(d.x,d.y),0.0) + length(max(d,0.0)) - rad;
+}
 
 float scissorMask(constant Uniforms& uniforms, float2 p) {
   float2 sc = (abs((transformInverse(uniforms.scissorMat) * float3(p,1.0f)).xy));
@@ -96,19 +108,40 @@ float scissorMask(constant Uniforms& uniforms, float2 p) {
   return clamp(inverseLerp(sc3, -sc3, sc2), 0.0f, 1.0f);
 }
 
-float sdroundrect(float2 pt, float2 ext, float rad) {
-	float2 ext2 = ext - float2(rad, rad);
-	float2 d = abs(pt) - ext2;
-	return min(max(d.x,d.y),0.0) + length(max(d,0.0)) - rad;
+float sdSegment(float2 p, float2 a, float2 b ) {
+    float2 pa = p-a, ba = b-a;
+    float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0f, 1.0f );
+    return length( pa - ba*h );
 }
 
-float strokeMask(constant Uniforms& uniforms, float2 ftcoord) {
-  return min(1.0, (1.0 - abs(ftcoord.x * 2.0 - 1.0)) * uniforms.strokeMult) * min(1.0, ftcoord.y);
+float dashed(float2 uv, float rad, float thickness, float featherVal) {
+	float fy = fmod(uv.y, rad);
+    float radThick = rad * .25f;
+    float seg = sdSegment(float2(uv.x, fy), float2(0.0f, radThick + thickness), float2(0.0f, (rad * 0.5f) + radThick - thickness)) - thickness;
+    float delta = fwidth(seg) * 0.5f;
+    float aa = delta;
+    float w = clamp(inverseLerp(aa, -aa, seg), 0.0f, 1.0f);
+    return w;
 }
+
+float dotted(float2 uv) {
+  float fy = 4.0 * fract(uv.y / 4.0) - 0.5;
+  return smoothstep(0.0, 1.0, 6.0 * (0.25 - dot(uv, uv + float2(0.0, fy))));
+}
+
 
 float glow(float2 uv) {
   return smoothstep(0.0, 1.0, 1.0 - 2.0 * abs(uv.x));
 }
+
+float strokeMask(constant Uniforms& uniforms, thread RasterizerData& in) {
+  float mask = min(1.0, (1.0 - abs(in.ftcoord.x * 2.0 - 1.0)) * uniforms.strokeMult) * min(1.0, in.ftcoord.y);
+  if(getLineStyle(uniforms) == 2) mask*=dashed(float2(in.uv.x, in.uv.y * uniforms.lineLength - uniforms.offset), uniforms.radius, 0.45f, 0.0f);
+  if(getLineStyle(uniforms) == 3) mask*=dotted(in.uv);
+  if(getLineStyle(uniforms) == 4) mask*=glow(in.uv);
+  return mask;
+}
+
 
 float capAlpha(float dist) {
   // Replace with your smoothstep function (consider basing it on line thickness)
@@ -141,12 +174,6 @@ float sigmoid(float t) {
     return 1.0 / (1.0 + exp(-t));
 }
 
-float sdSegment(float2 p, float2 a, float2 b ) {
-    float2 pa = p-a, ba = b-a;
-    float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0f, 1.0f );
-    return length( pa - ba*h );
-}
-
 float2 rotatePoint(float2 p, float angle) {
     float cosAngle = cos(angle);
     float sinAngle = sin(angle);
@@ -155,21 +182,6 @@ float2 rotatePoint(float2 p, float angle) {
         float2(sinAngle,  cosAngle)
     );
     return rotationMatrix * p;
-}
-
-float dashed(float2 uv, float rad, float thickness, float featherVal) {
-	float fy = fmod(uv.y, rad);
-    float radThick = rad * .25f;
-    float seg = sdSegment(float2(uv.x, fy), float2(0.0f, radThick + thickness), float2(0.0f, (rad * 0.5f) + radThick - thickness)) - thickness;
-    float delta = fwidth(seg) * 0.5f;
-    float aa = delta;
-    float w = clamp(inverseLerp(aa, -aa, seg), 0.0f, 1.0f);
-    return w;
-}
-
-float dotted(float2 uv) {
-  float fy = 4.0 * fract(uv.y / 4.0) - 0.5;
-  return smoothstep(0.0, 1.0, 6.0 * (0.25 - dot(uv, uv + float2(0.0, fy))));
 }
 
 // Vertex Function
@@ -194,92 +206,86 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   float scissor = scissorMask(uniforms, in.fpos);
   if (scissor == 0) discard_fragment();
 
-  uint8_t lineStyle = (uniforms.stateData >> 8) & 0x03;     // 2 bits
-  uint8_t texType   = (uniforms.stateData >> 5) & 0x07;     // 2 bits
-  uint8_t type      = uniforms.type;
-  bool reverse      = bool(uniforms.stateData & 0x01);      // 1 bit
-
-  if (type == MNVG_SHADER_IMG) {  // MNVG_SHADER_IMG
-    float4 color = texture.sample(sampler, float2(in.ftcoord.x, reverse ? 1.0f - in.ftcoord.y : in.ftcoord.y));
-    if (texType == 1)
-      color = float4(color.xyz * color.w, color.w);
-    else if (texType == 2)
-      color = float4(color.x);
-    else if (texType == 3)
-        color = color.bgra;
-    color *= scissor;
-    return color * convertColour(uniforms.innerCol);
-  }
-
-  float strokeAlpha = strokeMask(uniforms, in.ftcoord);
-  if (lineStyle > 1 && strokeAlpha < -1.0f) {
-     discard_fragment();
-  }
-  if(lineStyle == 2) strokeAlpha*=dashed(float2(in.uv.x, in.uv.y * uniforms.lineLength - uniforms.offset), uniforms.radius, 0.45f, 0.0f);
-  if(lineStyle == 3) strokeAlpha*=dotted(in.uv);
-  if(lineStyle == 4) strokeAlpha*=glow(in.uv);
-
-  if (type == MNVG_SHADER_FAST_ROUNDEDRECT) {
-    float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy;
-    float oD = sdroundrect(pt, uniforms.extent, uniforms.radius) - 0.04f;
-	float outerD = fwidth(oD) * 0.5f;
-	float iD = sdroundrect(pt, uniforms.extent - float2(1.0f), uniforms.radius - 1.0f) - 0.04f;
-    float innerD = fwidth(iD) * 0.5f;
-	float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
-    float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
-    float4 result = float4(mix(convertColour(uniforms.outerCol).rgba, convertColour(uniforms.innerCol).rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
-    return result * strokeAlpha;
-  }
-  if (type == MNVG_SHADER_DOUBLE_STROKE || type == MNVG_SHADER_DOUBLE_STROKE_GRAD || type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY || type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
-    // deal with path flipping here - instead of in geometry
-    float revUVy = (reverse > 0.5f) ? 0.5f - in.uv.y : in.uv.y;
-    float2 uvLine = float2(in.uv.x, revUVy * uniforms.lineLength);
-    float seg = sdSegment(uvLine, float2(0.0f), float2(0.0f, uniforms.lineLength * 0.5f));
-    float outerSeg = seg - 0.45f;
-    float outerDelta = fwidth(outerSeg);
-    float outerShape = clamp(inverseLerp(outerDelta, -outerDelta, outerSeg), 0.0f, 1.0f);
-    float innerSeg = seg - 0.22f;
-    float innerDelta = fwidth(innerSeg);
-    float innerShape = clamp(inverseLerp(innerDelta, -innerDelta, innerSeg), 0.0f, 1.0f);
-    float pattern = 0.0f;
-    if (uniforms.radius > 0.0f) {
-        pattern = dashed(uvLine, uniforms.radius, 0.22f, uniforms.feather);
+  switch(uniforms.type)
+  {
+    case MNVG_SHADER_IMG: {
+        float4 color = texture.sample(sampler, float2(in.ftcoord.x, getReverse(uniforms) ? 1.0f - in.ftcoord.y : in.ftcoord.y));
+        if (getTexType(uniforms) == 1)
+            color = float4(color.xyz * color.w, color.w);
+        else if (getTexType(uniforms) == 2)
+            color = float4(color.x);
+        else if (getTexType(uniforms) == 3)
+            color = color.bgra;
+        color *= scissor;
+        return color * convertColour(uniforms.innerCol);
     }
-    float activity = 0.0f;
-    if (type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY || type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
-        activity = dashed(float2(uvLine.x, uvLine.y - (uniforms.offset * 3.0f)), 3.0f, 0.4f, uniforms.feather);
+    case MNVG_SHADER_FAST_ROUNDEDRECT:
+    {
+        float strokeAlpha = strokeMask(uniforms, in);
+        float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy;
+        float oD = sdroundrect(pt, uniforms.extent, uniforms.radius) - 0.04f;
+    	float outerD = fwidth(oD) * 0.5f;
+    	float iD = sdroundrect(pt, uniforms.extent - float2(1.0f), uniforms.radius - 1.0f) - 0.04f;
+        float innerD = fwidth(iD) * 0.5f;
+    	float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
+        float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
+        float4 result = float4(mix(convertColour(uniforms.outerCol).rgba, convertColour(uniforms.innerCol).rgba, innerRoundedRectAlpha).rgba * outerRoundedRectAlpha) * scissor;
+        return result * strokeAlpha;
     }
-    if (type == MNVG_SHADER_DOUBLE_STROKE) {
-        return mix(mix(convertColour(uniforms.outerCol), convertColour(uniforms.innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(uniforms.dashCol), pattern * innerShape) * outerShape;
-    } else if (type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY) {
-        float4 overlay = mix(convertColour(uniforms.outerCol), float4(convertColour(uniforms.innerCol).rgb * 0.8f, 1.0f), activity);
-        float4 mixedResult = mix(overlay, convertColour(uniforms.innerCol), innerShape);
-        return mixedResult * outerShape;
-    } else if (type == MNVG_SHADER_DOUBLE_STROKE_GRAD || type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
-        float4 cable;
-        if (type == MNVG_SHADER_DOUBLE_STROKE_GRAD) {
-            cable = mix(mix(convertColour(uniforms.outerCol), convertColour(uniforms.innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(uniforms.dashCol), pattern * innerShape);
-        } else {
+    case MNVG_SHADER_DOUBLE_STROKE:
+    case MNVG_SHADER_DOUBLE_STROKE_GRAD:
+    case MNVG_SHADER_DOUBLE_STROKE_ACTIVITY:
+    case MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY:
+    {
+        // deal with path flipping here - instead of in geometry
+        float revUVy = (getReverse(uniforms) > 0.5f) ? 0.5f - in.uv.y : in.uv.y;
+        float2 uvLine = float2(in.uv.x, revUVy * uniforms.lineLength);
+        float seg = sdSegment(uvLine, float2(0.0f), float2(0.0f, uniforms.lineLength * 0.5f));
+        float outerSeg = seg - 0.45f;
+        float outerDelta = fwidth(outerSeg);
+        float outerShape = clamp(inverseLerp(outerDelta, -outerDelta, outerSeg), 0.0f, 1.0f);
+        float innerSeg = seg - 0.22f;
+        float innerDelta = fwidth(innerSeg);
+        float innerShape = clamp(inverseLerp(innerDelta, -innerDelta, innerSeg), 0.0f, 1.0f);
+        float pattern = 0.0f;
+        if (uniforms.radius > 0.0f) {
+            pattern = dashed(uvLine, uniforms.radius, 0.22f, uniforms.feather);
+        }
+        float activity = 0.0f;
+        if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
+            activity = dashed(float2(uvLine.x, uvLine.y - (uniforms.offset * 3.0f)), 3.0f, 0.4f, uniforms.feather);
+        }
+        if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE) {
+            return mix(mix(convertColour(uniforms.outerCol), convertColour(uniforms.innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(uniforms.dashCol), pattern * innerShape) * outerShape;
+        } else if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY) {
             float4 overlay = mix(convertColour(uniforms.outerCol), float4(convertColour(uniforms.innerCol).rgb * 0.8f, 1.0f), activity);
             float4 mixedResult = mix(overlay, convertColour(uniforms.innerCol), innerShape);
-            cable = mixedResult * outerShape;
+            return mixedResult * outerShape;
+        } else if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
+            float4 cable;
+            if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD) {
+                cable = mix(mix(convertColour(uniforms.outerCol), convertColour(uniforms.innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(uniforms.dashCol), pattern * innerShape);
+            } else {
+                float4 overlay = mix(convertColour(uniforms.outerCol), float4(convertColour(uniforms.innerCol).rgb * 0.8f, 1.0f), activity);
+                float4 mixedResult = mix(overlay, convertColour(uniforms.innerCol), innerShape);
+                cable = mixedResult * outerShape;
+            }
+            float scaledUV = in.uv.y * 2.0f * uniforms.lineLength;
+            // Define the proportion of the line length where the fade should occur
+            float fadeProportion = 0.3;
+
+            // Calculate the fade range based on the line length, and make connections shorter than 60px solid
+            float fadeRange = max(fadeProportion * uniforms.lineLength, 60.0f);
+
+            float fade = smoothstep(0.4, fadeRange, scaledUV) * smoothstep(0.4, fadeRange, uniforms.lineLength - scaledUV);
+
+            // limit fade transparency so it doesn't become fully transparent
+            fade = min(fade, 0.7f);
+
+            return (mix(cable, float4(0.0), fade)) * outerShape * scissor;
         }
-        float scaledUV = in.uv.y * 2.0f * uniforms.lineLength;
-        // Define the proportion of the line length where the fade should occur
-        float fadeProportion = 0.3;
-
-        // Calculate the fade range based on the line length, and make connections shorter than 60px solid
-        float fadeRange = max(fadeProportion * uniforms.lineLength, 60.0f);
-
-        float fade = smoothstep(0.4, fadeRange, scaledUV) * smoothstep(0.4, fadeRange, uniforms.lineLength - scaledUV);
-
-        // limit fade transparency so it doesn't become fully transparent
-        fade = min(fade, 0.7f);
-
-        return (mix(cable, float4(0.0), fade)) * outerShape * scissor;
     }
-}
-  if(type == MNVG_SHADER_SMOOTH_GLOW) {
+    case MNVG_SHADER_SMOOTH_GLOW: {
         float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy;
         float blurRadius = clamp(uniforms.radius, 2.0, 20.0) + uniforms.feather;
         float distShadow = clamp(sigmoid(sdroundrect(pt, uniforms.extent - float2(blurRadius), blurRadius) / uniforms.feather), 0.0, 1.0);
@@ -287,109 +293,119 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         float4 col = float4(convertColour(uniforms.innerCol) * (1.0 - distShadow));
         col = mix(float4(0.0), col, distRect);
         return col;
-  }
-  if(type == MNVG_SHADER_FILLCOLOR) {
-      return convertColour(uniforms.innerCol) * strokeAlpha * scissor;
-  }
-  if (type == MNVG_SHADER_OBJECT_RECT) {
-	float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos,1.0f)).xy;
-    int flagType = (uniforms.stateData >> 10) & 0x03;     // 2 bits
-
-    float2 flagPoints[3];
-    float flagSize = 5.0f;
-    flagPoints[2] = float2(0.0f, -1.0f) * flagSize;
-
-    bool objectOutline = bool((uniforms.stateData >> 12) & 0x01); // 1 bit (off or on)
-
-    float offset = objectOutline ? 0.2f : -0.5f;
-
-    float flag = 0.0f;
-    switch (flagType){
-        case 1: { // triangle flag top bottom
-            flagPoints[1] = float2(-1.0f, -1.0f) * flagSize;
-            float2 flagPosTopBottom = float2(pt.x, -abs(pt.y)) - float2(uniforms.extent.x + offset, -uniforms.extent.y);
-            float2 rPoint = rotatePoint(flagPosTopBottom, 0.7854f); // 45 in radians
-            flag = sdroundrect(rPoint, float2(flagSize), 0.0f);
-            break;
-        }
-        case 2: { // triangle flag top only
-            flagPoints[1] = float2(-1.0f, -1.0f) * flagSize;
-
-            float2 flagPosTop = pt - float2(uniforms.extent.x + offset, -uniforms.extent.y);
-            float2 rPoint2 = rotatePoint(flagPosTop, 0.7854f); // 45 in radians
-            flag = sdroundrect(rPoint2, float2(flagSize), 0.0f);
-            break;
-        }
-        case 3: { // composite square & triangle top / bottom
-            flagSize = 3.5f;
-            flagPoints[1] = float2(-1.0f, 0.0f) * flagSize;
-
-            float hypot = length(float2(flagSize));
-            float2 messageFlag = float2(pt.x, -abs(pt.y)) - float2(uniforms.extent.x + offset, -uniforms.extent.y + hypot);
-            float2 rPoint3 = rotatePoint(messageFlag, 0.7854f); // 45 in radians
-            float triangle = sdroundrect(rPoint3, float2(flagSize), 0.0f);
-            float squareMid = (uniforms.extent.y - flagSize) * 0.5f;
-            float square = sdroundrect(float2(messageFlag.x, messageFlag.y - squareMid), float2(hypot, squareMid), 0.0f);
-            flag = min(triangle, square); // union
-            break;
-        }
-        default:
-            break;
-        }
-
-    float oD = sdroundrect(pt, uniforms.extent, uniforms.radius) - 0.04f; // Calculate outer rectangle
-
-    if (objectOutline) {
-        oD = max(oD, -flag); // subtract flag shape from background
     }
-
-    float flagD = fwidth(flag) * 0.5f;
-    float triFlagShape = clamp(inverseLerp(flagD, -flagD, flag), 0.0f, 1.0f);
-
-    float outerD = fwidth(oD) * 0.5f;
-    // Use same SDF and reduce by 1px for border
-    float iD = oD + 1.0f;
-    float innerD = fwidth(iD) * 0.5f;
-
-    float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
-    float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
-
-    float4 finalColor;
-    if (objectOutline) {
-        finalColor = mix(convertColour(uniforms.outerCol), convertColour(uniforms.innerCol), innerRoundedRectAlpha);
-    } else {
-        finalColor = mix(convertColour(uniforms.outerCol), mix(convertColour(uniforms.innerCol), convertColour(uniforms.dashCol), triFlagShape), innerRoundedRectAlpha);
+    case MNVG_SHADER_FILLCOLOR:
+    {
+        float strokeAlpha = strokeMask(uniforms, in);
+        return convertColour(uniforms.innerCol) * strokeAlpha * scissor;
     }
+    case MNVG_SHADER_OBJECT_RECT:
+    {
+        float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos,1.0f)).xy;
+        int flagType = (uniforms.stateData >> 10) & 0x03;     // 2 bits
 
-    return float4(finalColor * outerRoundedRectAlpha) * scissor;
-}
-if (type == MNVG_SHADER_FILLGRAD) {
-    float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy;
-    float d = saturate((uniforms.feather * 0.5 + sdroundrect(pt, uniforms.extent, uniforms.radius))
-                        / uniforms.feather);
-    float4 color = mix(convertColour(uniforms.innerCol), convertColour(uniforms.outerCol), d);
-    color *= scissor;
-    color *= strokeAlpha;
-    return color;
-}
-if (type == MNVG_SHADER_FILLIMG_ALPHA) {
+        float2 flagPoints[3];
+        float flagSize = 5.0f;
+        flagPoints[2] = float2(0.0f, -1.0f) * flagSize;
+
+        bool objectOutline = bool((uniforms.stateData >> 12) & 0x01); // 1 bit (off or on)
+
+        float offset = objectOutline ? 0.2f : -0.5f;
+
+        float flag = 0.0f;
+        switch (flagType){
+            case 1: { // triangle flag top bottom
+                flagPoints[1] = float2(-1.0f, -1.0f) * flagSize;
+                float2 flagPosTopBottom = float2(pt.x, -abs(pt.y)) - float2(uniforms.extent.x + offset, -uniforms.extent.y);
+                float2 rPoint = rotatePoint(flagPosTopBottom, 0.7854f); // 45 in radians
+                flag = sdroundrect(rPoint, float2(flagSize), 0.0f);
+                break;
+            }
+            case 2: { // triangle flag top only
+                flagPoints[1] = float2(-1.0f, -1.0f) * flagSize;
+
+                float2 flagPosTop = pt - float2(uniforms.extent.x + offset, -uniforms.extent.y);
+                float2 rPoint2 = rotatePoint(flagPosTop, 0.7854f); // 45 in radians
+                flag = sdroundrect(rPoint2, float2(flagSize), 0.0f);
+                break;
+            }
+            case 3: { // composite square & triangle top / bottom
+                flagSize = 3.5f;
+                flagPoints[1] = float2(-1.0f, 0.0f) * flagSize;
+
+                float hypot = length(float2(flagSize));
+                float2 messageFlag = float2(pt.x, -abs(pt.y)) - float2(uniforms.extent.x + offset, -uniforms.extent.y + hypot);
+                float2 rPoint3 = rotatePoint(messageFlag, 0.7854f); // 45 in radians
+                float triangle = sdroundrect(rPoint3, float2(flagSize), 0.0f);
+                float squareMid = (uniforms.extent.y - flagSize) * 0.5f;
+                float square = sdroundrect(float2(messageFlag.x, messageFlag.y - squareMid), float2(hypot, squareMid), 0.0f);
+                flag = min(triangle, square); // union
+                break;
+            }
+            default:
+                break;
+            }
+
+        float oD = sdroundrect(pt, uniforms.extent, uniforms.radius) - 0.04f; // Calculate outer rectangle
+
+        if (objectOutline) {
+            oD = max(oD, -flag); // subtract flag shape from background
+        }
+
+        float flagD = fwidth(flag) * 0.5f;
+        float triFlagShape = clamp(inverseLerp(flagD, -flagD, flag), 0.0f, 1.0f);
+
+        float outerD = fwidth(oD) * 0.5f;
+        // Use same SDF and reduce by 1px for border
+        float iD = oD + 1.0f;
+        float innerD = fwidth(iD) * 0.5f;
+
+        float outerRoundedRectAlpha = clamp(inverseLerp(outerD, -outerD, oD), 0.0f, 1.0f);
+        float innerRoundedRectAlpha = clamp(inverseLerp(innerD, -innerD, iD), 0.0f, 1.0f);
+
+        float4 finalColor;
+        if (objectOutline) {
+            finalColor = mix(convertColour(uniforms.outerCol), convertColour(uniforms.innerCol), innerRoundedRectAlpha);
+        } else {
+            finalColor = mix(convertColour(uniforms.outerCol), mix(convertColour(uniforms.innerCol), convertColour(uniforms.dashCol), triFlagShape), innerRoundedRectAlpha);
+        }
+
+        return float4(finalColor * outerRoundedRectAlpha) * scissor;
+    }
+    case MNVG_SHADER_FILLGRAD: {
+        float strokeAlpha = strokeMask(uniforms, in);
+        float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy;
+        float d = saturate((uniforms.feather * 0.5 + sdroundrect(pt, uniforms.extent, uniforms.radius))
+                            / uniforms.feather);
+        float4 color = mix(convertColour(uniforms.innerCol), convertColour(uniforms.outerCol), d);
+        color *= scissor;
+        color *= strokeAlpha;
+        return color;
+    }
+    case MNVG_SHADER_FILLIMG_ALPHA: {
         // Calculate alpha from texture
+        float strokeAlpha = strokeMask(uniforms, in);
         float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
-        float4 color = texture.sample(sampler, float2(pt.x, reverse ? 1.0f - pt.y : pt.y));
+        float4 color = texture.sample(sampler, float2(pt.x, getReverse(uniforms) ? 1.0f - pt.y : pt.y));
         float alpha = color.a;
-        if (texType == 1) alpha = color.w;
-        if (texType == 2) alpha = color.x;
-        if (texType == 4) alpha = color.r; // single channel GL_RED
+        if (getTexType(uniforms) == 1) alpha = color.w;
+        if (getTexType(uniforms) == 2) alpha = color.x;
+        if (getTexType(uniforms) == 4) alpha = color.r; // single channel GL_RED
         // Apply color tint and alpha.
         float3 maskColor = getRawColour(uniforms.innerCol).rgb;
         return float4(maskColor * alpha, alpha) * strokeAlpha * scissor;
     }
-  else {  // MNVG_SHADER_FILLIMG
-    float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
-    float4 color = texture.sample(sampler, float2(pt.x, reverse ? 1.0f - pt.y : pt.y));
-    if (texType == 1) color = float4(color.xyz * color.w, color.w);
-    else if (texType == 2) color = float4(color.x);
-    else if (texType == 3) color = color.bgra;
-    return color * scissor * strokeAlpha;
+    case MNVG_SHADER_FILLIMG:
+    {
+        float strokeAlpha = strokeMask(uniforms, in);
+        float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
+        float4 color = texture.sample(sampler, float2(pt.x, getReverse(uniforms) ? 1.0f - pt.y : pt.y));
+        if (getTexType(uniforms) == 1) color = float4(color.xyz * color.w, color.w);
+        else if (getTexType(uniforms) == 2) color = float4(color.x);
+        else if (getTexType(uniforms) == 3) color = color.bgra;
+        return color * scissor * strokeAlpha;
+    }
   }
+
+  return 0;
 }
