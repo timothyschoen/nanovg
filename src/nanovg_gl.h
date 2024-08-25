@@ -603,18 +603,24 @@ static int glnvg__renderCreate(void* uptr)
             return mask;
         }
         #endif
+        int getLineStyle(){
+            return (stateData >> 8) & 0x03;     // 2 bits
+        }
+        int getTexType(){
+            return (stateData >> 5) & 0x07;     // 3 bits (0,1,2,3,4)
+        }
+        bool getReverse(){
+            return bool(stateData & 0x01);      // 1 bit
+        }
         )" << R"(
         void main(void) {
-            int lineStyle = (stateData >> 8) & 0x03;     // 2 bits
-            int texType   = (stateData >> 5) & 0x07;     // 3 bits (0,1,2,3,4)
-            bool reverse  = bool(stateData & 0x01);      // 1 bit
-
             vec4 result;
             float scissor = scissorMask(fpos, scissorRadius);
             if(scissor == 0.0f) {
                 outColor = vec4(0, 0, 0, 0);
             }
-            if (type == NSVG_SHADER_FAST_ROUNDEDRECT) {
+            switch(type) {
+            case NSVG_SHADER_FAST_ROUNDEDRECT: {
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy;
                 float oD = sdroundrect(pt, extent, radius) - 0.04f;
                 float outerD = fwidth(oD) * 0.5f;
@@ -626,7 +632,7 @@ static int glnvg__renderCreate(void* uptr)
                 outColor = result;
                 return;
             }
-            if (type == NSVG_SHADER_OBJECT_RECT) {
+            case NSVG_SHADER_OBJECT_RECT: {
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy;
                 int flagType = (stateData >> 10) & 0x03;     // 2 bits
 
@@ -696,19 +702,18 @@ static int glnvg__renderCreate(void* uptr)
                 outColor = vec4(finalColor * outerRoundedRectAlpha) * scissor;
                 return;
             }
-            float strokeAlpha = strokeMask(lineStyle);
-        #ifdef EDGE_AA
-            if (strokeAlpha < -1.0f) discard;
-        #else
-            if (lineStyle > 1 && strokeAlpha < -1.0f) discard;
-        #endif
-            if (type == NSVG_SHADER_FILLCOLOR) { // fill color
-                result = convertColour(innerCol) * strokeAlpha * scissor;
+            case NSVG_SHADER_FILLCOLOR: { // fill color
+                float strokeAlpha = strokeMask(getLineStyle());
+                outColor = convertColour(innerCol) * strokeAlpha * scissor;
+                return;
             }
-            if (type == NSVG_DOUBLE_STROKE || type == NSVG_DOUBLE_STROKE_GRAD || type == NSVG_DOUBLE_STROKE_ACTIVITY || type == NSVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
+            case NSVG_DOUBLE_STROKE:
+            case NSVG_DOUBLE_STROKE_GRAD:
+            case NSVG_DOUBLE_STROKE_ACTIVITY:
+            case NSVG_DOUBLE_STROKE_GRAD_ACTIVITY: {
                 // Deal with path flipping here - instead of in geometry
                 // We only need to flip the Y as the X (width) of the line is symmetrical currently
-                float revUVy = (reverse) ? 0.5f - uv.y : uv.y;
+                float revUVy = (getReverse()) ? 0.5f - uv.y : uv.y;
                 vec2 uvLine = vec2(uv.x, revUVy * lineLength);
                 float seg = sdSegment(uvLine, vec2(0.0f), vec2(0.0f, lineLength * 0.5f));
                 float outerSeg = seg - 0.45f;
@@ -754,53 +759,71 @@ static int glnvg__renderCreate(void* uptr)
 
                     result = (mix(cable, vec4(0.0), fade)) * outerShape * scissor;
                 }
+                outColor = result;
+                return;
             }
-            if(type == NSVG_SMOOTH_GLOW) {
+            case NSVG_SMOOTH_GLOW: {
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos, 1.0)).xy;
                 float blurRadius = clamp(radius, 2.0f, 20.0f) + feather;
                 float distShadow = clamp(sigmoid(sdroundrect(pt, extent - vec2(blurRadius), blurRadius) / feather), 0.0f, 1.0f);
                 float distRect = clamp(sdroundrect(pt, extent - vec2(5.5f), radius), 0.0f, 1.0f);
                 vec4 col = vec4(convertColour(innerCol) * (1.0f - distShadow));
                 col = mix(vec4(0.0f), col, distRect);
-                result = normalBlend(vec4(0.0f), col);
+                outColor = normalBlend(vec4(0.0f), col);
+                return;
             }
-            if (type == NSVG_SHADER_FILLGRAD) {
+            case NSVG_SHADER_FILLGRAD: {
+                int lineStyle = getLineStyle();
+                float strokeAlpha = strokeMask(lineStyle);
                 // Calculate gradient color using box gradient
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy;
                 float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5f) / feather, 0.0f, 1.0f);
                 vec4 color = mix(convertColour(innerCol), convertColour(outerCol), d);
                 // Combine alpha
                 color *= strokeAlpha * scissor;
-                result = color;
-            } else if (type == NSVG_SHADER_FILLIMG) {
+                outColor = color;
+                return;
+            }
+            case NSVG_SHADER_FILLIMG: {
+
+                float strokeAlpha = strokeMask(getLineStyle());
                 // Calculate color from texture
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
-                vec4 color = texture(tex, vec2(pt.x, reverse ? 1.0f - pt.y : pt.y));
+                vec4 color = texture(tex, vec2(pt.x, getReverse() ? 1.0f - pt.y : pt.y));
+                int texType = getTexType();
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
                 if (texType == 2) color = vec4(color.x);
                 if (texType == 3) color = color.bgra; // swizzle for JUCE colour image
-                result = color * strokeAlpha * scissor;
-            } else if (type == NSVG_SHADER_FILLIMG_ALPHA) {
+                outColor = color * strokeAlpha * scissor;
+                return;
+            }
+            case NSVG_SHADER_FILLIMG_ALPHA: {
+                float strokeAlpha = strokeMask(getLineStyle());
                 // Calculate alpha from texture
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
                 vec4 color = texture(tex, pt);
                 float alpha = color.a;
+                int texType = getTexType();
                 if (texType == 1) alpha = color.w;
                 if (texType == 2) alpha = color.x;
                 if (texType == 4) alpha = color.r; // single channel GL_RED
                 // Apply color tint and alpha.
                 vec3 maskColor = getRawColour(innerCol).rgb;
-                result = vec4(maskColor * alpha, alpha) * strokeAlpha * scissor;
-            } if (type == NSVG_SHADER_FILLCOLOR) { // fill color
-                result = convertColour(innerCol) * strokeAlpha * scissor;
-            } else if (type == NSVG_SHADER_IMG) { // Textured tris
+                outColor = vec4(maskColor * alpha, alpha) * strokeAlpha * scissor;
+                return;
+            }
+            case NSVG_SHADER_IMG: { // Textured tris
                 vec4 color = texture(tex, ftcoord);
+                int texType = getTexType();
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
                 if (texType == 2) color = vec4(color.x);
                 if (texType == 3) color = color.bgra; // swizzle for JUCE colour image
-                result = color * scissor * convertColour(innerCol);
+                outColor = color * scissor * convertColour(innerCol);
+                return;
             }
-            outColor = result;
+            default:
+                return;
+            }
         }
     )";
 
@@ -1021,6 +1044,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
             frag->offset = paint->offset;
             break;
         }
+        case PAINT_TYPE_DOUBLE_STROKE_GRAD:
         case PAINT_TYPE_DOUBLE_STROKE: {
             frag->stateData |= glnvg__packStateDataUniform(PACK_REVERSE, lineReversed);
             break;
