@@ -66,6 +66,8 @@ int glnvg__packStateDataUniform(PackType packType, int value) {
 NVGcontext* nvgCreateGL3(int flags);
 void nvgDeleteGL3(NVGcontext* ctx);
 
+void nvglClearColor(NVGcontext*, NVGcolor);
+
 int nvglCreateImageFromHandleGL3(NVGcontext* ctx, GLuint textureId, int w, int h, int flags);
 GLuint nvglImageHandleGL3(NVGcontext* ctx, int image);
 
@@ -785,7 +787,6 @@ static int glnvg__renderCreate(void* uptr)
                 return;
             }
             case NSVG_SHADER_FILLIMG: {
-
                 float strokeAlpha = strokeMask(getLineStyle());
                 // Calculate color from texture
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
@@ -807,7 +808,6 @@ static int glnvg__renderCreate(void* uptr)
                 if (texType == 1) alpha = color.w;
                 if (texType == 2) alpha = color.x;
                 if (texType == 4) alpha = color.r; // single channel GL_RED
-                // Apply color tint and alpha.
                 vec3 maskColor = getRawColour(innerCol).rgb;
                 outColor = vec4(maskColor * alpha, alpha) * strokeAlpha * scissor;
                 return;
@@ -1680,6 +1680,16 @@ error:
 void nvgDeleteGL3(NVGcontext* ctx)
 {
     nvgDeleteInternal(ctx);
+}
+
+void nvglClearColor(NVGcontext* ctx, NVGcolor col)
+{
+    glDisable(GL_SCISSOR_TEST);
+
+    glClearColor(col.r / 255.0f, col.g / 255.0f, col.b / 255.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glEnable(GL_SCISSOR_TEST);
 }
 
 int nvglCreateImageFromHandleGL3(NVGcontext* ctx, GLuint textureId, int w, int h, int imageFlags)
