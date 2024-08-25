@@ -603,12 +603,17 @@ static int glnvg__renderCreate(void* uptr)
             return mask;
         }
         #endif
+        int getLineStyle(){
+            return (stateData >> 8) & 0x03;     // 2 bits
+        }
+        int getTexType(){
+            return (stateData >> 5) & 0x07;     // 3 bits (0,1,2,3,4)
+        }
+        bool getReverse(){
+            return bool(stateData & 0x01);      // 1 bit
+        }
         )" << R"(
         void main(void) {
-            int lineStyle = (stateData >> 8) & 0x03;     // 2 bits
-            int texType   = (stateData >> 5) & 0x07;     // 3 bits (0,1,2,3,4)
-            bool reverse  = bool(stateData & 0x01);      // 1 bit
-
             vec4 result;
             float scissor = scissorMask(fpos, scissorRadius);
             if(scissor == 0.0f) {
@@ -696,6 +701,7 @@ static int glnvg__renderCreate(void* uptr)
                 outColor = vec4(finalColor * outerRoundedRectAlpha) * scissor;
                 return;
             }
+            int lineStyle = getLineStyle();
             float strokeAlpha = strokeMask(lineStyle);
         #ifdef EDGE_AA
             if (strokeAlpha < -1.0f) discard;
@@ -708,7 +714,7 @@ static int glnvg__renderCreate(void* uptr)
             if (type == NSVG_DOUBLE_STROKE || type == NSVG_DOUBLE_STROKE_GRAD || type == NSVG_DOUBLE_STROKE_ACTIVITY || type == NSVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
                 // Deal with path flipping here - instead of in geometry
                 // We only need to flip the Y as the X (width) of the line is symmetrical currently
-                float revUVy = (reverse) ? 0.5f - uv.y : uv.y;
+                float revUVy = (getReverse()) ? 0.5f - uv.y : uv.y;
                 vec2 uvLine = vec2(uv.x, revUVy * lineLength);
                 float seg = sdSegment(uvLine, vec2(0.0f), vec2(0.0f, lineLength * 0.5f));
                 float outerSeg = seg - 0.45f;
@@ -775,7 +781,8 @@ static int glnvg__renderCreate(void* uptr)
             } else if (type == NSVG_SHADER_FILLIMG) {
                 // Calculate color from texture
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
-                vec4 color = texture(tex, vec2(pt.x, reverse ? 1.0f - pt.y : pt.y));
+                vec4 color = texture(tex, vec2(pt.x, getReverse() ? 1.0f - pt.y : pt.y));
+                int texType = getTexType();
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
                 if (texType == 2) color = vec4(color.x);
                 if (texType == 3) color = color.bgra; // swizzle for JUCE colour image
@@ -785,6 +792,7 @@ static int glnvg__renderCreate(void* uptr)
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
                 vec4 color = texture(tex, pt);
                 float alpha = color.a;
+                int texType = getTexType();
                 if (texType == 1) alpha = color.w;
                 if (texType == 2) alpha = color.x;
                 if (texType == 4) alpha = color.r; // single channel GL_RED
@@ -795,6 +803,7 @@ static int glnvg__renderCreate(void* uptr)
                 result = convertColour(innerCol) * strokeAlpha * scissor;
             } else if (type == NSVG_SHADER_IMG) { // Textured tris
                 vec4 color = texture(tex, ftcoord);
+                int texType = getTexType();
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
                 if (texType == 2) color = vec4(color.x);
                 if (texType == 3) color = color.bgra; // swizzle for JUCE colour image
@@ -1021,6 +1030,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
             frag->offset = paint->offset;
             break;
         }
+        case PAINT_TYPE_DOUBLE_STROKE_GRAD:
         case PAINT_TYPE_DOUBLE_STROKE: {
             frag->stateData |= glnvg__packStateDataUniform(PACK_REVERSE, lineReversed);
             break;
