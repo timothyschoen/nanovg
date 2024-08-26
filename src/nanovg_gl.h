@@ -66,7 +66,7 @@ int glnvg__packStateDataUniform(PackType packType, int value) {
 NVGcontext* nvgCreateGL3(int flags);
 void nvgDeleteGL3(NVGcontext* ctx);
 
-void nvglClearColor(NVGcontext*, NVGcolor);
+void nvglClearWithColor(NVGcolor color);
 
 int nvglCreateImageFromHandleGL3(NVGcontext* ctx, GLuint textureId, int w, int h, int flags);
 GLuint nvglImageHandleGL3(NVGcontext* ctx, int image);
@@ -1682,7 +1682,7 @@ void nvgDeleteGL3(NVGcontext* ctx)
     nvgDeleteInternal(ctx);
 }
 
-void nvglClearColor(NVGcontext* ctx, NVGcolor col)
+void nvglClearWithColor(NVGcolor col)
 {
     glDisable(GL_SCISSOR_TEST);
 
