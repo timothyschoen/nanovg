@@ -58,6 +58,7 @@ void* nvg__getUptr(void* ctx);
   #define nvgDeleteFramebuffer(fb) mnvgDeleteFramebuffer(fb)
   #define nvgViewport(x, y, w, h) NVG_NOTUSED(x); NVG_NOTUSED(y); NVG_NOTUSED(w); NVG_NOTUSED(h)
   #define nvgClear(nvg) mnvgClearWithColor(nvg, nvgRGBA(0, 0, 0, 0))
+  #define nvgClearWithColor(nvg, col) mnvgClearWithColor(nvg, col)
   #define nvgReadPixels(nvg, image, x, y, w, h, data) mnvgReadPixels(nvg, image, x, y, w, h, data)
   #define nvgBlitFramebuffer(nvg, fb, x, y, w, h) mnvgBlitFramebuffer(nvg, fb, x, y, w, h)
   #define NVGframebuffer MNVGframebuffer
@@ -71,6 +72,7 @@ void* nvg__getUptr(void* ctx);
 #define nvgBlitFramebuffer(nvg, fb, x, y, w, h) nvgluBlitFramebuffer(nvg, fb, x, y, w, h)
 #define nvgClear(nvg) glClearColor (0, 0, 0, 0); \
                       glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
+#define nvgClearWithColor(nvg, col) nvglClearWithColor(col)
 #define NVGframebuffer NVGLUframebuffer
 #endif
 
