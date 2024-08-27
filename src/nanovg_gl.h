@@ -533,25 +533,15 @@ static int glnvg__renderCreate(void* uptr)
         float inverseLerp(float a, float b, float value) {
             return (value - a) / (b - a);
         }
-
         mat3 transformInverse(const affine_transform t) {
-            /*
-            float det = t[0][0] * t[1][1] + t[0][1] * -t[1][0];
-            if(det == 0.0f) return mat3(vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1));
+            float det = t.t0 * t.t3 + t.t1 * -t.t2;
+            if(det == 0.0f) return mat3(0.0f);
 
             float invdet = 1.0f / det;
-            return mat3(vec3(t[1][1], -t[0][1], 0.0f),
-                                        vec3(-t[1][0], t[0][0], 0.0f),
-                                        vec3(t[2][1] * t[1][0] - t[1][1] * t[2][0], -t[2][1] * t[0][0] + t[0][1] * t[2][0], t[1][1] * t[0][0] - t[0][1] * t[1][0])) * invdet; */
-        float det = t.t0 * t.t3 + t.t1 * -t.t2;
-        if(det == 0.0f) mat3(vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1));
-
-        float invdet = 1.0f / det;
-        return mat3(vec3(t.t3, -t.t1, 0.0f),
-                    vec3(-t.t2, t.t0, 0.0f),
-                    vec3(t.t5 * t.t2 - t.t3 * t.t4, -t.t5 * t.t0 + t.t1 * t.t4, t.t3 * t.t0 - t.t1 * t.t2)) * invdet;
+            return mat3(vec3(t.t3, -t.t1, 0.0f),
+                        vec3(-t.t2, t.t0, 0.0f),
+                        vec3(t.t5 * t.t2 - t.t3 * t.t4, -t.t5 * t.t0 + t.t1 * t.t4, t.t3 * t.t0 - t.t1 * t.t2)) * invdet;
         }
-
         vec4 normalBlend(vec4 src, vec4 dst) {
             float finalAlpha = src.a + dst.a * (1.0 - src.a);
             return vec4((src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / finalAlpha, finalAlpha);
@@ -636,9 +626,7 @@ static int glnvg__renderCreate(void* uptr)
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy;
                 int flagType = (stateData >> 10) & 0x03;     // 2 bits
 
-                vec2 flagPoints[3];
                 float flagSize = 5.0f;
-                flagPoints[2] = vec2(0.0f, -1.0f) * flagSize;
 
                 bool objectOutline = bool((stateData >> 12) & 0x01); // 1 bit (off or on)
 
@@ -646,23 +634,20 @@ static int glnvg__renderCreate(void* uptr)
 
                 float flag;
                 switch (flagType){
-                    case 1: // triangle flag top bottom
-                        flagPoints[1] = vec2(-1.0f, -1.0f) * flagSize;
-
+                    case 1: { // triangle flag top bottom
                         vec2 flagPosTopBottom = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y);
                         vec2 rPoint = rotatePoint(flagPosTopBottom, 0.7854f); // 45 in radians
                         flag = sdroundrect(rPoint, vec2(flagSize), 0.0f);
                         break;
-                    case 2: // triangle flag top only
-                        flagPoints[1] = vec2(-1.0f, -1.0f) * flagSize;
+                    }
+                    case 2: { // triangle flag top only
                         vec2 flagPosTop = pt - vec2(extent.x + offset, -extent.y);
                         vec2 rPoint2 = rotatePoint(flagPosTop, 0.7854f); // 45 in radians
                         flag = sdroundrect(rPoint2, vec2(flagSize), 0.0f);
                         break;
-                    case 3: // composite square & triangle top / bottom
+                    }
+                    case 3: { // composite square & triangle top / bottom
                         flagSize = 3.5f;
-                        flagPoints[1] = vec2(-1.0f, 0.0f) * flagSize;
-
                         float hypot = length(vec2(flagSize));
                         vec2 messageFlag = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y + hypot);
                         vec2 rPoint3 = rotatePoint(messageFlag, 0.7854f); // 45 in radians
@@ -671,6 +656,7 @@ static int glnvg__renderCreate(void* uptr)
                         float square = sdroundrect(vec2(messageFlag.x, messageFlag.y - squareMid), vec2(hypot, squareMid), 0.0f);
                         flag = min(triangle, square); // union
                         break;
+                    }
                     default:
                         break;
                     }
