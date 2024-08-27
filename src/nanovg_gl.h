@@ -1040,15 +1040,12 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
             break;
         }
         case PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY:
-        case PAINT_TYPE_DOUBLE_STROKE_ACTIVITY: {
+        case PAINT_TYPE_DOUBLE_STROKE_ACTIVITY:
             frag->offset = paint->offset;
-            break;
-        }
         case PAINT_TYPE_DOUBLE_STROKE_GRAD:
-        case PAINT_TYPE_DOUBLE_STROKE: {
+        case PAINT_TYPE_DOUBLE_STROKE:
             frag->stateData |= glnvg__packStateDataUniform(PACK_REVERSE, lineReversed);
             break;
-        }
         default: break;
     }
     return 1;
