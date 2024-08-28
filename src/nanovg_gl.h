@@ -534,13 +534,15 @@ static int glnvg__renderCreate(void* uptr)
             return (value - a) / (b - a);
         }
         mat3 transformInverse(const affine_transform t) {
-            float det = t.t0 * t.t3 + t.t1 * -t.t2;
+            float det = t.t0 * t.t3 - t.t1 * t.t2;
             if(det == 0.0f) return mat3(0.0f);
 
             float invdet = 1.0f / det;
-            return mat3(vec3(t.t3, -t.t1, 0.0f),
-                        vec3(-t.t2, t.t0, 0.0f),
-                        vec3(t.t5 * t.t2 - t.t3 * t.t4, -t.t5 * t.t0 + t.t1 * t.t4, t.t3 * t.t0 - t.t1 * t.t2)) * invdet;
+
+            return mat3(
+                vec3(t.t3 * invdet, -t.t1 * invdet, 0.0f),
+                vec3(-t.t2 * invdet, t.t0 * invdet, 0.0f),
+                vec3((t.t2 * t.t5 - t.t3 * t.t4) * invdet, (t.t1 * t.t4 - t.t0 * t.t5) * invdet, 1.0f));
         }
         vec4 normalBlend(vec4 src, vec4 dst) {
             float finalAlpha = src.a + dst.a * (1.0 - src.a);
@@ -612,6 +614,7 @@ static int glnvg__renderCreate(void* uptr)
             switch(type) {
             case NSVG_SHADER_FAST_ROUNDEDRECT: {
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy;
+
                 float oD = sdroundrect(pt, extent, radius) - 0.04f;
                 float outerD = fwidth(oD) * 0.5f;
                 float iD = oD + 1.0f;
@@ -624,15 +627,13 @@ static int glnvg__renderCreate(void* uptr)
             }
             case NSVG_SHADER_OBJECT_RECT: {
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy;
+
                 int flagType = (stateData >> 10) & 0x03;     // 2 bits
-
                 float flagSize = 5.0f;
-
                 bool objectOutline = bool((stateData >> 12) & 0x01); // 1 bit (off or on)
-
                 float offset = objectOutline ? 0.2f : -0.5f;
-
                 float flag;
+
                 switch (flagType){
                     case 1: { // triangle flag top bottom
                         vec2 flagPosTopBottom = vec2(pt.x, -abs(pt.y)) - vec2(extent.x + offset, -extent.y);
@@ -750,6 +751,7 @@ static int glnvg__renderCreate(void* uptr)
             }
             case NSVG_SMOOTH_GLOW: {
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos, 1.0)).xy;
+
                 float blurRadius = clamp(radius, 2.0f, 20.0f) + feather;
                 float distShadow = clamp(sigmoid(sdroundrect(pt, extent - vec2(blurRadius), blurRadius) / feather), 0.0f, 1.0f);
                 float distRect = clamp(sdroundrect(pt, extent - vec2(5.5f), radius), 0.0f, 1.0f);
@@ -759,10 +761,11 @@ static int glnvg__renderCreate(void* uptr)
                 return;
             }
             case NSVG_SHADER_FILLGRAD: {
-                int lineStyle = getLineStyle();
-                float strokeAlpha = strokeMask(lineStyle);
                 // Calculate gradient color using box gradient
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy;
+
+                int lineStyle = getLineStyle();
+                float strokeAlpha = strokeMask(lineStyle);
                 float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5f) / feather, 0.0f, 1.0f);
                 vec4 color = mix(convertColour(innerCol), convertColour(outerCol), d);
                 // Combine alpha
@@ -771,10 +774,10 @@ static int glnvg__renderCreate(void* uptr)
                 return;
             }
             case NSVG_SHADER_FILLIMG: {
-
-                float strokeAlpha = strokeMask(getLineStyle());
                 // Calculate color from texture
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
+
+                float strokeAlpha = strokeMask(getLineStyle());
                 vec4 color = texture(tex, vec2(pt.x, getReverse() ? 1.0f - pt.y : pt.y));
                 int texType = getTexType();
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
@@ -784,9 +787,10 @@ static int glnvg__renderCreate(void* uptr)
                 return;
             }
             case NSVG_SHADER_FILLIMG_ALPHA: {
-                float strokeAlpha = strokeMask(getLineStyle());
                 // Calculate alpha from texture
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
+
+                float strokeAlpha = strokeMask(getLineStyle());
                 vec4 color = texture(tex, pt);
                 float alpha = color.a;
                 int texType = getTexType();
