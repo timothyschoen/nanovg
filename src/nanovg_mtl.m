@@ -473,12 +473,13 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     id<MTLDevice> metalDevice = MTLCreateSystemDefaultDevice();
     if (!metalDevice) return NULL;
 
+    
     // Set pixel format to RGBA8Unorm if available, otherwise use BGRA8Unorm
     MTLPixelFormat pixelFormat = MTLPixelFormatRGBA8Unorm;
     if (![metalDevice supportsTextureSampleCount:MTLPixelFormatRGBA8Unorm]) {
-        pixelFormat = MTLPixelFormatBGRA8Unorm;
+        
     }
-
+    pixelFormat = MTLPixelFormatBGRA8Unorm;
 
     [metalLayer setPixelFormat:pixelFormat];
     [metalLayer setDevice: metalDevice];

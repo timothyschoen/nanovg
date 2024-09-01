@@ -40,7 +40,7 @@ execute_cmd() {
   TARGET=$2
 
   SUFFIX=""
-  CMD="xcrun -sdk $SDK metal -c -frecord-sources=flat nanovg_mtl_shaders.metal"
+  CMD="xcrun -sdk $SDK metal -c nanovg_mtl_shaders.metal"
 
   AIR_FILE_NAME="$PREFIX/$TARGET$SUFFIX.air"
   HEADER_NAME="$PREFIX/$TARGET$SUFFIX.h"
@@ -49,7 +49,7 @@ execute_cmd() {
   if [ $SDK = "iphoneos" ]; then
     CMD="$CMD -mios-version-min=8.0"
   elif [ $SDK = "iphonesimulator" ]; then
-    CMD="$CMD -std=metal3.0"
+    CMD="$CMD -mios-version-min=8.0"
   elif [ $SDK = "macosx" ]; then
     CMD="$CMD -mmacosx-version-min=10.11"
   fi
@@ -60,9 +60,8 @@ execute_cmd() {
   if [ $? -ne 0 ]; then
     return 1
   fi
-  xcrun -sdk $SDK metal -frecord-sources -o $VARIABLE_NAME $AIR_FILE_NAME\
+  xcrun -sdk $SDK metallib $AIR_FILE_NAME -o $VARIABLE_NAME \
       > /dev/null 2>&1
-  xcrun -sdk macosx metal-dsymutil -flat -remove-source $VARIABLE_NAME
   xxd -i $VARIABLE_NAME > $HEADER_NAME
   rm $AIR_FILE_NAME $VARIABLE_NAME
   return 0
