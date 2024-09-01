@@ -475,12 +475,12 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
 
     
     // Set pixel format to RGBA8Unorm if available, otherwise use BGRA8Unorm
+#if __aarch64__ && !TARGET_OS_SIMULATOR
     MTLPixelFormat pixelFormat = MTLPixelFormatRGBA8Unorm;
-    if (![metalDevice supportsTextureSampleCount:MTLPixelFormatRGBA8Unorm]) {
-        
-    }
-    pixelFormat = MTLPixelFormatBGRA8Unorm;
-
+#else
+    pixelFormat = MTLPixelFormatBGRA8Unorm; // RGBA pixel format doesn't always work on old macs
+#endif
+    
     [metalLayer setPixelFormat:pixelFormat];
     [metalLayer setDevice: metalDevice];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
