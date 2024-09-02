@@ -70,8 +70,10 @@ void* nvg__getUptr(void* ctx);
 #define nvgViewport(x, y, w, h) glViewport(x, y, w, h)
 #define nvgReadPixels(nvg, image, x, y, w, h, data) nvgluReadPixels(nvg, image, x, y, w, h, data)
 #define nvgBlitFramebuffer(nvg, fb, x, y, w, h) nvgluBlitFramebuffer(nvg, fb, x, y, w, h)
-#define nvgClear(nvg) glClearColor (0, 0, 0, 0); \
-                      glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
+#define nvgClear(nvg) glDisable(GL_SCISSOR_TEST); \
+                      glClearColor(0, 0, 0, 0); \
+                      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT); \
+                      glEnable(GL_SCISSOR_TEST);
 #define nvgClearWithColor(nvg, col) nvglClearWithColor(col)
 #define NVGframebuffer NVGLUframebuffer
 #endif
