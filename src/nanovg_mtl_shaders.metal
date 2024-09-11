@@ -154,9 +154,9 @@ float circleDist(float2 p, float2 center, float d) {
 
 float4 getRawColour(int rgba){
     float4 col;
-    col.r = float((rgba >> 24) & 0xFF) / 255.0f;
+    col.b = float((rgba >> 24) & 0xFF) / 255.0f;
     col.g = float((rgba >> 16) & 0xFF) / 255.0f;
-    col.b = float((rgba >> 8) & 0xFF) / 255.0f;
+    col.r = float((rgba >> 8) & 0xFF) / 255.0f;
     col.a = float(rgba & 0xFF) / 255.0f;
     return col;
 }
@@ -167,7 +167,7 @@ float4 convertColour(int rgba){
     col.g = float((rgba >> 16) & 0xFF) / 255.0f;
     col.b = float((rgba >> 8) & 0xFF) / 255.0f;
     float a = float(rgba & 0xFF) / 255.0f;
-    return float4((col * a).rgb, a);
+    return float4((col * a).bgr, a);
 }
 
 float sigmoid(float t) {
@@ -215,9 +215,9 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         else if (getTexType(uniforms) == 2)
             color = float4(color.x);
         else if (getTexType(uniforms) == 3)
-            color = color.bgra;
+            color = color;
         color *= scissor;
-        return color * convertColour(uniforms.innerCol);
+        return (color * convertColour(uniforms.innerCol));
     }
     case MNVG_SHADER_FAST_ROUNDEDRECT:
     {
@@ -402,8 +402,8 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         float4 color = texture.sample(sampler, float2(pt.x, getReverse(uniforms) ? 1.0f - pt.y : pt.y));
         if (getTexType(uniforms) == 1) color = float4(color.xyz * color.w, color.w);
         else if (getTexType(uniforms) == 2) color = float4(color.x);
-        else if (getTexType(uniforms) == 3) color = color.bgra;
-        return color * scissor * strokeAlpha;
+        else if (getTexType(uniforms) == 3) color = color;
+        return (color * scissor * strokeAlpha).rgba;
     }
   }
 
