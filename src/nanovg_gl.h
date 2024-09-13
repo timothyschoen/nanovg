@@ -759,7 +759,7 @@ static int glnvg__renderCreate(void* uptr)
                 float distRect = clamp(sdroundrect(pt, extent - vec2(5.5f), radius), 0.0f, 1.0f);
                 vec4 col = vec4(convertColour(innerCol) * (1.0f - distShadow));
                 col = mix(vec4(0.0f), col, distRect);
-                outColor = normalBlend(vec4(0.0f), col);
+                outColor = normalBlend(vec4(0.0f), col) * scissor;
                 return;
             }
             case NSVG_SHADER_FILLGRAD: {
