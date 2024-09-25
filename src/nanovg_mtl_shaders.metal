@@ -167,7 +167,7 @@ float4 convertColour(int rgba){
     col.g = float((rgba >> 16) & 0xFF) / 255.0f;
     col.b = float((rgba >> 8) & 0xFF) / 255.0f;
     float a = float(rgba & 0xFF) / 255.0f;
-    return float4((col * a).bgr, a);
+    return float4((col * a).rgb, a);
 }
 
 float sigmoid(float t) {
@@ -392,7 +392,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         if (getTexType(uniforms) == 2) alpha = color.x;
         if (getTexType(uniforms) == 4) alpha = color.r; // single channel GL_RED
         // Apply color tint and alpha.
-        float3 maskColor = getRawColour(uniforms.innerCol).rgb;
+        float3 maskColor = getRawColour(uniforms.innerCol).bgr;
         return float4(maskColor * alpha, alpha) * strokeAlpha * scissor;
     }
     case MNVG_SHADER_FILLIMG:

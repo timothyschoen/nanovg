@@ -1203,7 +1203,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 
     if (tex == nil) return 0;
 
-    MTLPixelFormat pixelFormat = MTLPixelFormatRGBA8Unorm;
+    MTLPixelFormat pixelFormat = MTLPixelFormatBGRA8Unorm;
     if (type == NVG_TEXTURE_ALPHA) {
         pixelFormat = MTLPixelFormatR8Unorm;
     }
