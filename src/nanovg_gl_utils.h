@@ -35,17 +35,6 @@ void nvgluDeleteFramebuffer(NVGLUframebuffer* fb);
 
 #ifdef NANOVG_GL_IMPLEMENTATION
 
-#if defined(NANOVG_GL3) || defined(NANOVG_GLES2) || defined(NANOVG_GLES3)
-// FBO is core in OpenGL 3>.
-#	define NANOVG_FBO_VALID 1
-#elif defined(NANOVG_GL2)
-// On OS X including glext defines FBO on GL2 too.
-#	ifdef __APPLE__
-#		include <OpenGL/glext.h>
-#		define NANOVG_FBO_VALID 1
-#	endif
-#endif
-
 static GLint defaultFBO = -1;
 
 void nvgluBlitFramebuffer(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, int w, int h)
@@ -53,7 +42,7 @@ void nvgluBlitFramebuffer(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, i
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
-    
+
     int x2 = x + w;
     int y2 = y + h;
     glBindFramebuffer(GL_READ_FRAMEBUFFER, fb->fbo);
@@ -61,14 +50,14 @@ void nvgluBlitFramebuffer(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, i
     glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     glBlitFramebuffer(x, y, x2, y2, x, y, x2, y2, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     glFinish();
-    
+
     GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
         printf("OpenGL Error after glBlitFramebuffer: %d\n", error);
     }
-    
+
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
-    
+
     glEnable(GL_SCISSOR_TEST);
     glEnable(GL_BLEND);
     glEnable(GL_CULL_FACE);
@@ -76,7 +65,6 @@ void nvgluBlitFramebuffer(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, i
 
 NVGLUframebuffer* nvgluCreateFramebuffer(NVGcontext* ctx, int w, int h, int imageFlags)
 {
-#ifdef NANOVG_FBO_VALID
 	GLint defaultFBO;
 	GLint defaultRBO;
 	NVGLUframebuffer* fb = NULL;
@@ -89,16 +77,8 @@ NVGLUframebuffer* nvgluCreateFramebuffer(NVGcontext* ctx, int w, int h, int imag
 	memset(fb, 0, sizeof(NVGLUframebuffer));
 
 	fb->image = nvgCreateImageRGBA(ctx, w, h, imageFlags | NVG_IMAGE_FLIPY, NULL);
+	fb->texture = nvglImageHandle(ctx, fb->image);
 
-#if defined NANOVG_GL2
-	fb->texture = nvglImageHandleGL2(ctx, fb->image);
-#elif defined NANOVG_GL3
-	fb->texture = nvglImageHandleGL3(ctx, fb->image);
-#elif defined NANOVG_GLES2
-	fb->texture = nvglImageHandleGLES2(ctx, fb->image);
-#elif defined NANOVG_GLES3
-	fb->texture = nvglImageHandleGLES3(ctx, fb->image);
-#endif
 
 	fb->ctx = ctx;
 
@@ -136,23 +116,12 @@ error:
 	glBindRenderbuffer(GL_RENDERBUFFER, defaultRBO);
 	nvgluDeleteFramebuffer(fb);
 	return NULL;
-#else
-	NVG_NOTUSED(ctx);
-	NVG_NOTUSED(w);
-	NVG_NOTUSED(h);
-	NVG_NOTUSED(imageFlags);
-	return NULL;
-#endif
 }
 
 void nvgluBindFramebuffer(NVGLUframebuffer* fb)
 {
-#ifdef NANOVG_FBO_VALID
 	if (defaultFBO == -1) glGetIntegerv(GL_FRAMEBUFFER_BINDING, &defaultFBO);
 	glBindFramebuffer(GL_FRAMEBUFFER, fb != NULL ? fb->fbo : defaultFBO);
-#else
-	NVG_NOTUSED(fb);
-#endif
 }
 
 static void nvgluReadPixels(NVGcontext* ctx, int image, int x, int y, int width, int height, void* data) {
@@ -180,7 +149,6 @@ void nvgluGenerateMipmaps(NVGLUframebuffer* fb)
 
 void nvgluDeleteFramebuffer(NVGLUframebuffer* fb)
 {
-#ifdef NANOVG_FBO_VALID
 	if (fb == NULL) return;
 	if (fb->fbo != 0)
 		glDeleteFramebuffers(1, &fb->fbo);
@@ -194,9 +162,6 @@ void nvgluDeleteFramebuffer(NVGLUframebuffer* fb)
 	fb->texture = 0;
 	fb->image = -1;
 	free(fb);
-#else
-	NVG_NOTUSED(fb);
-#endif
 }
 
 #endif // NANOVG_GL_IMPLEMENTATION

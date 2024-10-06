@@ -60,16 +60,23 @@ int glnvg__packStateDataUniform(PackType packType, int value) {
     }
 }
 
+#if defined NANOVG_GL3_IMPLEMENTATION
 #define NANOVG_GL3 1
 #define NANOVG_GL_IMPLEMENTATION 1
-
 NVGcontext* nvgCreateGL3(int flags);
 void nvgDeleteGL3(NVGcontext* ctx);
+#else
+#define NANOVG_GLES3 1
+#define NANOVG_GL_IMPLEMENTATION 1
+NVGcontext* nvgCreateGLES3(int flags);
+void nvgDeleteGLES3(NVGcontext* ctx);
+#endif
+
+int nvglCreateImageFromHandle(NVGcontext* ctx, GLuint textureId, int w, int h, int flags);
+GLuint nvglImageHandle(NVGcontext* ctx, int image);
 
 void nvglClearWithColor(NVGcolor color);
 
-int nvglCreateImageFromHandleGL3(NVGcontext* ctx, GLuint textureId, int w, int h, int flags);
-GLuint nvglImageHandleGL3(NVGcontext* ctx, int image);
 
 // These are additional flags on top of NVGimageFlags.
 enum NVGimageFlagsGL {
@@ -434,10 +441,13 @@ static int glnvg__renderCreate(void* uptr)
     // Construct the shader header with correct defines
     std::ostringstream shaderHeader;
 
-    shaderHeader << "#version 150 core\n"
-                 << "#define NANOVG_GL3 1\n"
-                 << "#define USE_UNIFORMBUFFER 1\n"
-                 << "\n"
+#if defined NANOVG_GL3
+    shaderHeader << "#version 150 core\n";
+#elif defined NANOVG_GLES3
+    shaderHeader << "#version 300 es\n";
+#endif
+
+    shaderHeader << "#define NANOVG_GL3 1\n"
                  << "#define NSVG_SHADER_FILLGRAD               " << PAINT_TYPE_FILLGRAD << "\n"
                  << "#define NSVG_SHADER_FILLIMG                " << PAINT_TYPE_FILLIMG << "\n"
                  << "#define NSVG_SHADER_FILLCOLOR              " << PAINT_TYPE_FILLCOLOR << "\n"
@@ -1623,7 +1633,11 @@ static void glnvg__renderDelete(void* uptr)
     free(gl);
 }
 
+#if defined NANOVG_GL3
 NVGcontext* nvgCreateGL3(int flags)
+#elif defined NANOVG_GLES3
+NVGcontext* nvgCreateGLES3(int flags)
+#endif
 {
     NVGparams params;
     NVGcontext* ctx = NULL;
@@ -1665,7 +1679,11 @@ error:
     return NULL;
 }
 
+#if defined NANOVG_GL3
 void nvgDeleteGL3(NVGcontext* ctx)
+#elif defined NANOVG_GLES3
+void nvgDeleteGLES3(NVGcontext* ctx)
+#endif
 {
     nvgDeleteInternal(ctx);
 }
@@ -1680,7 +1698,7 @@ void nvglClearWithColor(NVGcolor col)
     glEnable(GL_SCISSOR_TEST);
 }
 
-int nvglCreateImageFromHandleGL3(NVGcontext* ctx, GLuint textureId, int w, int h, int imageFlags)
+int nvglCreateImageFromHandle(NVGcontext* ctx, GLuint textureId, int w, int h, int imageFlags)
 {
     GLNVGcontext* gl = (GLNVGcontext*)nvgInternalParams(ctx)->userPtr;
     GLNVGtexture* tex = glnvg__allocTexture(gl);
@@ -1696,7 +1714,7 @@ int nvglCreateImageFromHandleGL3(NVGcontext* ctx, GLuint textureId, int w, int h
     return tex->id;
 }
 
-GLuint nvglImageHandleGL3(NVGcontext* ctx, int image)
+GLuint nvglImageHandle(NVGcontext* ctx, int image)
 {
     GLNVGcontext* gl = (GLNVGcontext*)nvgInternalParams(ctx)->userPtr;
     GLNVGtexture* tex = glnvg__findTexture(gl, image);
