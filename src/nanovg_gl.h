@@ -481,6 +481,10 @@ static int glnvg__renderCreate(void* uptr)
     std::stringstream fillFragShader;
 
     fillFragShader << R"(
+        #ifdef GL_ES
+		 precision highp float;
+		#endif
+
         // Has easier alignment than mat3x2 or float[6]
         struct affine_transform
         {

@@ -15,7 +15,7 @@ endif()
 
 file(GLOB HDRS ${SRC_DIR}/*.h)
 
-add_library(${PROJECT_NAME} ${SRCS})
+add_library(${PROJECT_NAME} STATIC ${SRCS})
 
 if(NANOVG_METAL_IMPLEMENTATION)
 target_compile_options(nanovg PRIVATE "-fobjc-arc")
