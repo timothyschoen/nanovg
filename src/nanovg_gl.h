@@ -66,10 +66,10 @@ int glnvg__packStateDataUniform(PackType packType, int value) {
 NVGcontext* nvgCreateGL3(int flags);
 void nvgDeleteGL3(NVGcontext* ctx);
 #else
-#define NANOVG_GLES3 1
+#define NANOVG_GLES2 1
 #define NANOVG_GL_IMPLEMENTATION 1
-NVGcontext* nvgCreateGLES3(int flags);
-void nvgDeleteGLES3(NVGcontext* ctx);
+NVGcontext* nvgCreateGLES2(int flags);
+void nvgDeleteGLES2(NVGcontext* ctx);
 #endif
 
 int nvglCreateImageFromHandle(NVGcontext* ctx, GLuint textureId, int w, int h, int flags);
@@ -435,16 +435,13 @@ static int glnvg__renderCreate(void* uptr)
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
     int align = 4;
 
-    // TODO: mediump float may not be enough for GLES2 in iOS.
-    // see the following discussion: https://github.com/memononen/nanovg/issues/46
-
     // Construct the shader header with correct defines
     std::ostringstream shaderHeader;
 
 #if defined NANOVG_GL3
     shaderHeader << "#version 150 core\n";
-#elif defined NANOVG_GLES3
-    shaderHeader << "#version 300 es\n";
+#elif defined NANOVG_GLES2
+    shaderHeader << "#version 100 es\n";
 #endif
 
     shaderHeader << "#define NANOVG_GL3 1\n"
@@ -1639,8 +1636,8 @@ static void glnvg__renderDelete(void* uptr)
 
 #if defined NANOVG_GL3
 NVGcontext* nvgCreateGL3(int flags)
-#elif defined NANOVG_GLES3
-NVGcontext* nvgCreateGLES3(int flags)
+#elif defined NANOVG_GLES2
+NVGcontext* nvgCreateGLES2(int flags)
 #endif
 {
     NVGparams params;
@@ -1685,8 +1682,8 @@ error:
 
 #if defined NANOVG_GL3
 void nvgDeleteGL3(NVGcontext* ctx)
-#elif defined NANOVG_GLES3
-void nvgDeleteGLES3(NVGcontext* ctx)
+#elif defined NANOVG_GLES2
+void nvgDeleteGLES2(NVGcontext* ctx)
 #endif
 {
     nvgDeleteInternal(ctx);
