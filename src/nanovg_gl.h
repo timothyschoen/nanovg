@@ -623,6 +623,40 @@ int nvg__renderCreate(void* uptr)
             // premultiply colour here
             return vec4((col.rgb * col.a).rgb, col.a);
         }
+
+        float texFetchLerp(sampler2D texture, vec2 ij, vec2 ijmin, vec2 ijmax)
+        {
+          vec2 ij00 = clamp(ij, ijmin, ijmax);
+          vec2 ij11 = clamp(ij + vec2(1.0f), ijmin, ijmax);
+          float t00 = texelFetch(texture, ivec2(ij00.x, ij00.y), 0).r;  // implicit floor()
+          float t10 = texelFetch(texture, ivec2(ij11.x, ij00.y), 0).r;
+          float t01 = texelFetch(texture, ivec2(ij00.x, ij11.y), 0).r;
+          float t11 = texelFetch(texture, ivec2(ij11.x, ij11.y), 0).r;
+          vec2 f = ij - floor(ij);
+          //return mix(mix(t00, t10, f.x), mix(t01, t11, f.x), f.y);
+          float t0 = t00 + f.x*(t10 - t00);
+          float t1 = t01 + f.x*(t11 - t01);
+          return t0 + f.y*(t1 - t0);
+        }
+
+        float summedTextCov(sampler2D texture, vec2 st)
+        {
+          ivec2 tex_wh = textureSize(texture, 0);
+          vec2 ij = st*vec2(tex_wh);  // - vec2(1.0f)  -- now done after finding ijmin,max
+          vec2 ijmin = floor(ij/extent)*extent;
+          vec2 ijmax = ijmin + extent - vec2(1.0f);
+          // for some reason, we need to shift by an extra (-0.5, -0.5) for summed case (here or in fons__getQuad)
+          ij -= vec2(0.999999f);
+          float dx = paintMat.t0/2.0f;
+          float dy = paintMat.t4/2.0f;
+          float s11 = texFetchLerp(texture, ij + vec2(dx, dy), ijmin, ijmax);
+          float s01 = texFetchLerp(texture, ij + vec2(-dx, dy), ijmin, ijmax);
+          float s10 = texFetchLerp(texture, ij + vec2(dx,-dy), ijmin, ijmax);
+          float s00 = texFetchLerp(texture, ij + vec2(-dx,-dy), ijmin, ijmax);
+          float cov = (s11 - s01 - s10 + s00)/(255.0f*4.0f*dx*dy);
+          return clamp(cov, 0.0f, 1.0f);
+        }
+
         float sdroundrect(vec2 pt, vec2 ext, float rad) {
             vec2 ext2 = ext - vec2(rad,rad);
             vec2 d = abs(pt) - ext2;
@@ -909,7 +943,7 @@ int nvg__renderCreate(void* uptr)
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
                 if (texType == 2) color = vec4(color.x);
                 if (texType == 3) color = color.bgra; // swizzle for JUCE colour image
-                outColor = color * scissor * convertColour(innerCol);
+                outColor = color * scissor * convertColour(innerCol) * summedTextCov(tex, ftcoord);
                 return;
             }
             default:
