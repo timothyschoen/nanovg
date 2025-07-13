@@ -314,6 +314,8 @@ void nvgReset(NVGcontext* ctx);
 // Gets the current scissor bounds
 void nvgCurrentScissor(NVGcontext* ctx, float* x, float* y, float* w, float* h);
 
+float nvgCurrentPixelScale(NVGcontext* ctx);
+
 //
 // Render styles
 //

@@ -375,6 +375,11 @@ error:
 	return 0;
 }
 
+float nvgCurrentPixelScale(NVGcontext* ctx)
+{
+    return ctx->devicePxRatio;
+}
+
 void nvgCurrentScissor(NVGcontext* ctx, float* x, float* y, float* w, float* h) {
     *x = ctx->scissor.x;
     *y = ctx->scissor.y;
