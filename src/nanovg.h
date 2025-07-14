@@ -83,6 +83,8 @@ void* nvg__getUptr(void* ctx);
 
 typedef struct NVGcontext NVGcontext;
 
+typedef struct FONStextRow FONStextRow;  // include fontstash.h to use
+
 struct NVGcolor {
 	union {
 		uint32_t rgba32;
@@ -707,6 +709,8 @@ int nvgCreateFont(NVGcontext* ctx, const char* name, const char* filename);
 // fontIndex specifies which font face to load from a .ttf/.ttc file.
 int nvgCreateFontAtIndex(NVGcontext* ctx, const char* name, const char* filename, const int fontIndex);
 
+void nvgAtlasTextThreshold(NVGcontext* ctx, float threshold);
+
 // Creates font by loading it from the specified memory chunk.
 // Returns handle to the font.
 int nvgCreateFontMem(NVGcontext* ctx, const char* name, unsigned char* data, int ndata, int freeData);
@@ -748,10 +752,10 @@ void nvgTextLineHeight(NVGcontext* ctx, float lineHeight);
 void nvgTextAlign(NVGcontext* ctx, int align);
 
 // Sets the font face based on specified id of current text style.
-void nvgFontFaceId(NVGcontext* ctx, int font);
+int nvgFontFaceId(NVGcontext* ctx, int font);
 
 // Sets the font face based on specified name of current text style.
-void nvgFontFace(NVGcontext* ctx, const char* font);
+int nvgFontFace(NVGcontext* ctx, const char* font);
 
 // Gets the font size of current text style.
 int nvgGetFontFaceId(NVGcontext* ctx);
@@ -795,7 +799,7 @@ void nvgTextMetrics(NVGcontext* ctx, float* ascender, float* descender, float* l
 // Breaks the specified text into lines. If end is specified only the sub-string will be used.
 // White space is stripped at the beginning of the rows, the text is split at word boundaries or when new-line characters are encountered.
 // Words longer than the max width are slit at nearest character (i.e. no hyphenation).
-int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, float breakRowWidth, NVGtextRow* rows, int maxRows, int skipSpaces);
+int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, float breakRowWidth, FONStextRow* rows, int maxRows);
 
 // Get image texture Id
 int nvgGetImageTextureId(NVGcontext* ctx, int handle);
@@ -807,6 +811,7 @@ enum NVGtexture {
 	NVG_TEXTURE_ALPHA = 0x01,
 	NVG_TEXTURE_RGBA = 0x02,
 	NVG_TEXTURE_ARGB = 0x03,
+    NVG_TEXTURE_FLOAT = 0x04,
 };
 
 struct NVGscissor {
