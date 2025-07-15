@@ -3336,46 +3336,30 @@ void nvgTextBox(NVGcontext* ctx, float x, float y, float breakRowWidth, const ch
 
 int nvgTextGlyphPositions(NVGcontext* ctx, float x, float y, const char* string, const char* end, NVGglyphPosition* positions, int maxPositions)
 {
-    /*
-	NVGstate* state = nvg__getState(ctx);
-	float scale = nvg__getFontScale(state) * ctx->devicePxRatio;
-	float invscale = 1.0f / scale;
-	FONStextIter iter, prevIter;
-	FONSquad q;
-	int npos = 0;
+    NVGstate* state = nvg__getState(ctx);
+    FONSstate fons;
+    FONStextIter iter;
+    FONSquad q;
+    int npos = 0;
 
-	if (state->fontId == FONS_INVALID) return 0;
+    if (state->fontId == FONS_INVALID) return 0;
+    if (end == NULL)
+    end = string + strlen(string);
+    if (string == end)  return 0;
 
-	if (end == NULL)
-		end = string + strlen(string);
+    nvg__fonsSetup(ctx, &fons);
+    fonsTextIterInit(&fons, &iter, x, y, string, end, FONS_GLYPH_BITMAP_OPTIONAL);
+    while (fonsTextIterNext(&fons, &iter, &q)) {
+    positions[npos].str = iter.str;
+    positions[npos].x = iter.x;
+    positions[npos].minx = nvg__minf(iter.x, q.x0);
+    positions[npos].maxx = nvg__maxf(iter.nextx, q.x1);
+    npos++;
+    if (npos >= maxPositions)
+      break;
+    }
 
-	if (string == end)
-		return 0;
-
-	fonsSetSize(ctx->fs, state->fontSize*scale);
-	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
-	fonsSetAlign(ctx->fs, state->textAlign);
-	fonsSetFont(ctx->fs, state->fontId);
-
-	fonsTextIterInit(ctx->fs, &iter, 0, 0, string, end, FONS_GLYPH_BITMAP_OPTIONAL);
-	prevIter = iter;
-	while (fonsTextIterNext(ctx->fs, &iter, &q)) {
-		if (iter.prevGlyphIndex < 0 && nvg__allocTextAtlas(ctx)) { // can not retrieve glyph?
-			iter = prevIter;
-			fonsTextIterNext(ctx->fs, &iter, &q); // try again
-		}
-		prevIter = iter;
-		positions[npos].str = iter.str;
-		positions[npos].x = iter.x * invscale + x;
-		positions[npos].minx = nvg__minf(iter.x, q.x0) * invscale + x;
-		positions[npos].maxx = nvg__maxf(iter.nextx, q.x1) * invscale + x;
-		npos++;
-		if (npos >= maxPositions)
-			break;
-	}
-
-	return npos;
-      */
+    return npos;
 }
 
 enum NVGcodepointType {
