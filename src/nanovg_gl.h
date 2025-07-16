@@ -219,6 +219,7 @@ struct GLNVGcontext {
 
     // cached state
     GLuint boundTexture;
+    GLuint boundTextureMSAA;
     GLuint stencilMask;
     GLenum stencilFunc;
     GLint stencilFuncRef;
@@ -234,11 +235,12 @@ typedef struct GLNVGcontext GLNVGcontext;
 
 static int glnvg__maxi(int a, int b) { return a > b ? a : b; }
 
-static void glnvg__bindTexture(GLNVGcontext* gl, GLuint tex)
+static void glnvg__bindTexture(GLNVGcontext* gl, GLuint tex, int flags)
 {
-    if (gl->boundTexture != tex) {
-        gl->boundTexture = tex;
-        glBindTexture(GL_TEXTURE_2D, tex);
+    GLuint* boundTexture = (flags & NVG_IMAGE_MULTISAMPLE) ? &gl->boundTextureMSAA : &gl->boundTexture;
+    if (*boundTexture != tex) {
+        *boundTexture = tex;
+        glBindTexture((flags & NVG_IMAGE_MULTISAMPLE) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D, tex);
     }
 }
 
@@ -439,52 +441,63 @@ int nvg__renderCreateTexture(void* uptr, int type, int w, int h, int imageFlags,
     tex->height = h;
     tex->type = type;
     tex->flags = imageFlags;
-    glnvg__bindTexture(gl, tex->tex);
+
+    glnvg__bindTexture(gl, tex->tex, tex->flags);
 
     glnvg__updateTexPixelStoreiVals(4, 0, 0, 0);
 
-    if (type == NVG_TEXTURE_RGBA || type == NVG_TEXTURE_ARGB)
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-    else
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
+    if(imageFlags & NVG_IMAGE_MULTISAMPLE) {
+        if (type == NVG_TEXTURE_RGBA || type == NVG_TEXTURE_ARGB)
+            glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, 4, GL_RGBA, w, h, GL_TRUE);
+        else
+            glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, 4, GL_RED, w, h, GL_TRUE);
+    }
+    else {
+        if (type == NVG_TEXTURE_RGBA || type == NVG_TEXTURE_ARGB)
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        else
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, data);
+    }
 
+    GLenum texture_type = (imageFlags & NVG_IMAGE_MULTISAMPLE) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
     if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS) {
         if (imageFlags & NVG_IMAGE_NEAREST) {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+            glTexParameteri(texture_type, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
         } else {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            glTexParameteri(texture_type, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         }
     } else {
         if (imageFlags & NVG_IMAGE_NEAREST) {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(texture_type, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         } else {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(texture_type, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         }
     }
 
     if (imageFlags & NVG_IMAGE_NEAREST) {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    } else {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(texture_type, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    }
+    else {
+        glTexParameteri(texture_type, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     }
 
     if (imageFlags & NVG_IMAGE_REPEATX)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(texture_type, GL_TEXTURE_WRAP_S, GL_REPEAT);
     else
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(texture_type, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 
     if (imageFlags & NVG_IMAGE_REPEATY)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(texture_type, GL_TEXTURE_WRAP_T, GL_REPEAT);
     else
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(texture_type, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     // The new way to build mipmaps on GLES and GL3
     if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS) {
-        glGenerateMipmap(GL_TEXTURE_2D);
+        glGenerateMipmap(texture_type);
     }
 
     glnvg__checkError(gl, "create tex");
-    glnvg__bindTexture(gl, 0);
+    glnvg__bindTexture(gl, 0, tex->flags);
 
     return tex->id;
 }
@@ -502,16 +515,17 @@ int nvg__renderUpdateTexture(void* uptr, int image, int x, int y, int w, int h, 
     GLNVGtexture* tex = glnvg__findTexture(gl, image);
 
     if (tex == NULL) return 0;
-    glnvg__bindTexture(gl, tex->tex);
+    glnvg__bindTexture(gl, tex->tex, tex->flags);
 
     glnvg__updateTexPixelStoreiVals(4, x, y, tex->width);
 
+    GLenum texture_type = (tex->flags & NVG_IMAGE_MULTISAMPLE) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
     if (tex->type == NVG_TEXTURE_RGBA || tex->type == NVG_TEXTURE_ARGB)
-        glTexSubImage2D(GL_TEXTURE_2D, 0, x,y, w,h, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        glTexSubImage2D(texture_type, 0, x,y, w,h, GL_RGBA, GL_UNSIGNED_BYTE, data);
     else
-        glTexSubImage2D(GL_TEXTURE_2D, 0, x,y, w,h, GL_RED, GL_UNSIGNED_BYTE, data);
+        glTexSubImage2D(texture_type, 0, x,y, w,h, GL_RED, GL_UNSIGNED_BYTE, data);
 
-    glnvg__bindTexture(gl, 0);
+    glnvg__bindTexture(gl, 0, tex->flags);
 
     return 1;
 }
@@ -1034,12 +1048,7 @@ static void glnvg__setUniforms(GLNVGcontext* gl, int uniformOffset, int image)
     GLNVGtexture* tex = (image != 0) ? glnvg__findTexture(gl, image) : glnvg__findTexture(gl, gl->dummyTex);
 
     // Bind the texture only if it's not already bound
-    static GLuint lastTexture = 0;
-    GLuint newTexture = (tex != NULL) ? tex->tex : 0;
-    if (newTexture != lastTexture) {
-        glBindTexture(GL_TEXTURE_2D, newTexture);
-        lastTexture = newTexture;
-    }
+    glnvg__bindTexture(gl, (tex != NULL) ? tex->tex : 0, tex->flags);
 
     glnvg__checkError(gl, "tex paint tex");
 }
@@ -1176,6 +1185,7 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
         glEnable(GL_BLEND);
         glDisable(GL_DEPTH_TEST);
         glEnable(GL_SCISSOR_TEST);
+        glEnable(GL_MULTISAMPLE);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glStencilMask(0xffffffff);
         glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
@@ -1259,7 +1269,8 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
         glDisable(GL_CULL_FACE);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glUseProgram(0);
-        glnvg__bindTexture(gl, 0);
+        glnvg__bindTexture(gl, 0, 0);
+        glnvg__bindTexture(gl, 0, NVG_IMAGE_MULTISAMPLE);
     }
 
     // Reset calls

@@ -19,11 +19,12 @@
 #define NANOVG_GL_UTILS_H
 
 struct NVGLUframebuffer {
-	NVGcontext* ctx;
-	GLuint fbo;
-	GLuint rbo;
-	GLuint texture;
-	int image;
+    NVGcontext* ctx;
+    GLuint fbo;
+    GLuint rbo;
+    GLuint texture;
+    int image;
+    int multisample;
 };
 typedef struct NVGLUframebuffer NVGLUframebuffer;
 
@@ -39,7 +40,7 @@ static GLint defaultFBO = -1;
 
 std::unordered_map<NVGcontext*, std::tuple<GLuint, GLuint, GLuint>> blitShaders;
 
-std::tuple<GLuint, GLuint, GLuint> getBlitShaderProgram(NVGcontext* ctx) {
+std::tuple<GLuint, GLuint, GLuint> getBlitShaderProgram(NVGcontext* ctx, int multisample) {
     if(blitShaders.contains(ctx) && glIsProgram(std::get<0>(blitShaders[ctx]))) return blitShaders[ctx];
 
     const char* vertexShaderSrc =
@@ -70,6 +71,26 @@ std::tuple<GLuint, GLuint, GLuint> getBlitShaderProgram(NVGcontext* ctx) {
         "    FragColor = texture(screenTexture, TexCoord);\n"
         "}";
 
+    const char* fragmentShaderSrcMSAA =
+    #if defined NANOVG_GL3
+        "#version 150 core\n"
+    #elif defined NANOVG_GLES3
+        "#version 300 es\n"
+        "precision highp float;\n"
+    #endif
+        "out vec4 FragColor;\n"
+        "in vec2 TexCoord;\n"
+        "uniform sampler2DMS screenTexture;\n"
+        "void main() {\n"
+        "   ivec2 texelCoords = ivec2(TexCoord * textureSize(screenTexture));\n"
+        "   int samples = 4; // adjust based on your sample count\n"
+        "   vec4 color = vec4(0.0);\n"
+        "   for (int i = 0; i < samples; ++i) {\n"
+        "       color += texelFetch(screenTexture, texelCoords, i);\n"
+        "}\n"
+        "FragColor = color / float(samples);\n"
+        "}";
+
     GLint success;
     GLchar infoLog[512];
 
@@ -85,7 +106,7 @@ std::tuple<GLuint, GLuint, GLuint> getBlitShaderProgram(NVGcontext* ctx) {
 
     // Compile Fragment Shader
     GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSrc, NULL);
+    glShaderSource(fragmentShader, 1, multisample ? &fragmentShaderSrcMSAA : &fragmentShaderSrc, NULL);
     glCompileShader(fragmentShader);
     glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
     if (!success) {
@@ -146,7 +167,7 @@ std::tuple<GLuint, GLuint, GLuint> getBlitShaderProgram(NVGcontext* ctx) {
 
 // Function to blit framebuffer using a shader
 void nvgluBlitFramebuffer(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, int w, int h) {
-    auto [shaderProgram, quadVAO, quadVBO] = getBlitShaderProgram(ctx);
+    auto [shaderProgram, quadVAO, quadVBO] = getBlitShaderProgram(ctx, fb->multisample);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
@@ -160,7 +181,12 @@ void nvgluBlitFramebuffer(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, i
 
     // Bind the framebuffer texture
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, fb->texture);
+    if(fb->multisample) {
+        glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, fb->texture);
+    }
+    else {
+        glBindTexture(GL_TEXTURE_2D, fb->texture);
+    }
     glUniform1i(glGetUniformLocation(shaderProgram, "screenTexture"), 0);
 
     // Draw the fullscreen quad
@@ -173,52 +199,91 @@ void nvgluBlitFramebuffer(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, i
     glEnable(GL_BLEND);
     glEnable(GL_CULL_FACE);
 
+    
     // Error check
     GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
         printf("OpenGL Error after shader quad blit: %d\n", error);
     }
+    /*
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+
+
+    int x2 = x + w;
+    int y2 = y + h;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fb->fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, defaultFBO);
+    glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    glBlitFramebuffer(x, y, x2, y2, x, y, x2, y2, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+    glFinish();
+
+    GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        printf("OpenGL Error after glBlitFramebuffer: %d\n", error);
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
+
+    glEnable(GL_SCISSOR_TEST);
+    glEnable(GL_BLEND);
+    glEnable(GL_CULL_FACE); */
 }
 
 NVGLUframebuffer* nvgluCreateFramebuffer(NVGcontext* ctx, int w, int h, int imageFlags)
 {
-	GLint defaultFBO;
-	GLint defaultRBO;
-	NVGLUframebuffer* fb = NULL;
+    GLint defaultFBO;
+    GLint defaultRBO;
+    NVGLUframebuffer* fb = NULL;
 
-	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &defaultFBO);
-	glGetIntegerv(GL_RENDERBUFFER_BINDING, &defaultRBO);
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &defaultFBO);
+    glGetIntegerv(GL_RENDERBUFFER_BINDING, &defaultRBO);
 
-	fb = (NVGLUframebuffer*)malloc(sizeof(NVGLUframebuffer));
-	if (fb == NULL) goto error;
-	memset(fb, 0, sizeof(NVGLUframebuffer));
+    fb = (NVGLUframebuffer*)malloc(sizeof(NVGLUframebuffer));
+    if (fb == NULL) goto error;
+    memset(fb, 0, sizeof(NVGLUframebuffer));
 
-	fb->image = nvgCreateImageRGBA(ctx, w, h, imageFlags | NVG_IMAGE_FLIPY, NULL);
-	fb->texture = nvglImageHandle(ctx, fb->image);
+    fb->image = nvgCreateImageRGBA(ctx, w, h, imageFlags | NVG_IMAGE_FLIPY, NULL);
+    fb->texture = nvglImageHandle(ctx, fb->image);
+    fb->multisample = imageFlags & NVG_IMAGE_MULTISAMPLE;
 
+    fb->ctx = ctx;
 
-	fb->ctx = ctx;
+    // frame buffer object
+    glGenFramebuffers(1, &fb->fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fb->fbo);
 
-	// frame buffer object
-	glGenFramebuffers(1, &fb->fbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, fb->fbo);
+    // render buffer object
+    glGenRenderbuffers(1, &fb->rbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, fb->rbo);
+    if(imageFlags & NVG_IMAGE_MULTISAMPLE) {
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_STENCIL_INDEX8, w, h);
+        // combine all
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, fb->texture, 0);
+    }
+    else {
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, w, h);
+        // combine all
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fb->texture, 0);
+    }
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, fb->rbo);
 
-	// render buffer object
-	glGenRenderbuffers(1, &fb->rbo);
-	glBindRenderbuffer(GL_RENDERBUFFER, fb->rbo);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, w, h);
-
-	// combine all
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fb->texture, 0);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, fb->rbo);
-
-	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
 #ifdef GL_DEPTH24_STENCIL8
-		// If GL_STENCIL_INDEX8 is not supported, try GL_DEPTH24_STENCIL8 as a fallback.
-		// Some graphics cards require a depth buffer along with a stencil.
-		glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fb->texture, 0);
-		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, fb->rbo);
+        // If GL_STENCIL_INDEX8 is not supported, try GL_DEPTH24_STENCIL8 as a fallback.
+        // Some graphics cards require a depth buffer along with a stencil.
+        if(imageFlags & NVG_IMAGE_MULTISAMPLE) {
+            glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_DEPTH24_STENCIL8, w, h);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, fb->texture, 0);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, fb->rbo);
+        }
+        else {
+            glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fb->texture, 0);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, fb->rbo);
+        }
 
 		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 #endif // GL_DEPTH24_STENCIL8
@@ -237,8 +302,8 @@ error:
 
 void nvgluBindFramebuffer(NVGLUframebuffer* fb)
 {
-	if (defaultFBO == -1) glGetIntegerv(GL_FRAMEBUFFER_BINDING, &defaultFBO);
-	glBindFramebuffer(GL_FRAMEBUFFER, fb != NULL ? fb->fbo : defaultFBO);
+    if (defaultFBO == -1) glGetIntegerv(GL_FRAMEBUFFER_BINDING, &defaultFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, fb != NULL ? fb->fbo : defaultFBO);
 }
 
 static void nvgluReadPixels(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, int width, int height, int total_height, void* data) {
@@ -264,19 +329,19 @@ void nvgluGenerateMipmaps(NVGLUframebuffer* fb)
 
 void nvgluDeleteFramebuffer(NVGLUframebuffer* fb)
 {
-	if (fb == NULL) return;
-	if (fb->fbo != 0)
-		glDeleteFramebuffers(1, &fb->fbo);
-	if (fb->rbo != 0)
-		glDeleteRenderbuffers(1, &fb->rbo);
-	if (fb->image >= 0)
-		nvgDeleteImage(fb->ctx, fb->image);
-	fb->ctx = NULL;
-	fb->fbo = 0;
-	fb->rbo = 0;
-	fb->texture = 0;
-	fb->image = -1;
-	free(fb);
+    if (fb == NULL) return;
+    if (fb->fbo != 0)
+        glDeleteFramebuffers(1, &fb->fbo);
+    if (fb->rbo != 0)
+        glDeleteRenderbuffers(1, &fb->rbo);
+    if (fb->image >= 0)
+        nvgDeleteImage(fb->ctx, fb->image);
+    fb->ctx = NULL;
+    fb->fbo = 0;
+    fb->rbo = 0;
+    fb->texture = 0;
+    fb->image = -1;
+    free(fb);
 }
 
 #endif // NANOVG_GL_IMPLEMENTATION
