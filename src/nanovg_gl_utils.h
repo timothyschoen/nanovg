@@ -82,13 +82,20 @@ std::tuple<GLuint, GLuint, GLuint> getBlitShaderProgram(NVGcontext* ctx, int mul
         "in vec2 TexCoord;\n"
         "uniform sampler2DMS screenTexture;\n"
         "void main() {\n"
-        "   ivec2 texelCoords = ivec2(TexCoord * textureSize(screenTexture));\n"
-        "   int samples = 4; // adjust based on your sample count\n"
-        "   vec4 color = vec4(0.0);\n"
-        "   for (int i = 0; i < samples; ++i) {\n"
-        "       color += texelFetch(screenTexture, texelCoords, i);\n"
-        "}\n"
-        "FragColor = color / float(samples);\n"
+        "ivec2 texelCoords = ivec2(TexCoord * textureSize(screenTexture));\n"
+        "    int samples = 4; // or query dynamically via glGetIntegerv\n"
+        "    vec4 first = texelFetch(screenTexture, texelCoords, 0);\n"
+        "    bool differs = false;\n"
+        "    vec4 color = first;\n"
+        "    for (int i = 1; i < samples; ++i) {\n"
+        "        color += texelFetch(screenTexture, texelCoords, i);\n"
+        "        vec4 s = texelFetch(screenTexture, texelCoords, i);\n"
+        "        if (any(notEqual(s, first))) {\n"
+        "            differs = true;\n"
+        "        }\n"
+        "    }\n"
+        "    FragColor = color / float(samples);\n"
+        //"    FragColor = differs ? vec4(1.0, 0.0, 0.0, 1.0) : (color / float(samples));\n"
         "}";
 
     GLint success;
@@ -199,7 +206,7 @@ void nvgluBlitFramebuffer(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, i
     glEnable(GL_BLEND);
     glEnable(GL_CULL_FACE);
 
-    
+
     // Error check
     GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
