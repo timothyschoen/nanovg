@@ -411,6 +411,12 @@ void nvgSkewY(NVGcontext* ctx, float angle);
 // Scales the current coordinate system.
 void nvgScale(NVGcontext* ctx, float x, float y);
 
+// Return current subpixel offset caused by translate and scale
+void nvgTransformGetSubpixelOffset(NVGcontext* ctx, float* tx, float* ty);
+
+// Quantize current translation and scale to physical pixel grid
+void nvgTransformQuantize(NVGcontext* ctx);
+
 // Stores the top part (a-f) of the current transformation matrix in to the specified buffer.
 //   [a c e]
 //   [b d f]
