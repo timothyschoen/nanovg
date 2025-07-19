@@ -806,7 +806,7 @@ int nvg__renderCreate(void* uptr)
                 vec2 uvLine = vec2(uv.x, revUVy * lineLength);
 
                 float zoom = 1.0f / length(transformInverse(paintMat)[0].xy);
-                float lineScale = mix(1.0, 4.0, smoothstep(1.0, 0.5, zoom));
+                float lineScale = mix(1.0, 2.0, smoothstep(1.0, 0.5, zoom));
                 float innerSize = 0.22 * lineScale;
                 float outerSize = 0.49 * lineScale;
 
@@ -826,14 +826,14 @@ int nvg__renderCreate(void* uptr)
                 }
                 float activity = 0.0f;
                 if (type == NSVG_DOUBLE_STROKE_ACTIVITY || type == NSVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
-                    activity = dashed(vec2(uvLine.x, uvLine.y - (offset * 3.0f)), 3.0f, 0.4f, feather);
+                    activity = dashed(vec2(uvLine.x, uvLine.y - (offset * 3.0f)), 3.0f, 0.4f * lineScale, feather);
                 }
                 if (type == NSVG_DOUBLE_STROKE) {
                     result = mix(mix(convertColour(outerCol), convertColour(innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(dashCol), pattern * innerShape) * outerShape * scissor * innerMask;
                 } else if (type == NSVG_DOUBLE_STROKE_ACTIVITY) {
                     vec4 overlay = mix(convertColour(outerCol), vec4(convertColour(innerCol).rgb * 0.8f, 1.0f), activity);
                     vec4 mixedResult = mix(overlay, convertColour(innerCol), innerShape);
-                    result = mixedResult * outerShape * scissor;
+                    result = mixedResult * outerShape * scissor * innerMask;
                 } else if (type == NSVG_DOUBLE_STROKE_GRAD || type == NSVG_DOUBLE_STROKE_GRAD_ACTIVITY) {
                     vec4 cable;
                     if (type == NSVG_DOUBLE_STROKE_GRAD) {
@@ -855,7 +855,7 @@ int nvg__renderCreate(void* uptr)
                     // limit fade transparency so it doesn't become fully transparent
                     fade = min(fade, 0.7f);
 
-                    result = (mix(cable, vec4(0.0), fade)) * outerShape * scissor;
+                    result = (mix(cable, vec4(0.0), fade)) * outerShape * scissor * innerMask;
                 }
                 outColor = result;
                 return;
@@ -1018,11 +1018,27 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         }
         case PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY:
         case PAINT_TYPE_DOUBLE_STROKE_ACTIVITY:
-            frag->offset = paint->offset;
         case PAINT_TYPE_DOUBLE_STROKE_GRAD:
         case PAINT_TYPE_DOUBLE_STROKE:
-            frag->strokeMult = (width * 0.11f + fringe * 0.5f) / fringe;
-            frag->stateData |= glnvg__packStateDataUniform(PACK_REVERSE, lineReversed);
+            if(paint->type == PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY ||
+               paint->type == PAINT_TYPE_DOUBLE_STROKE_ACTIVITY)
+            {
+                frag->offset = paint->offset;
+                frag->strokeMult = (width * 0.18f + fringe * 0.5f) / fringe;
+            }
+            else {
+                frag->strokeMult = (width * 0.11f + fringe * 0.5f) / fringe;
+                frag->stateData |= glnvg__packStateDataUniform(PACK_REVERSE, lineReversed);
+            }
+            if(width * 0.4f < fringe)
+            {
+                float alphaMult = std::clamp((width * 0.4f) / fringe, 0.0f, 1.0f);
+                alphaMult *= alphaMult;
+                frag->innerCol = (frag->innerCol & 0xFFFFFF00) | (uint32_t)((frag->innerCol & 0xFF) * alphaMult);
+            }
+
+
+
             break;
         default: break;
     }
