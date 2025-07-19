@@ -45,6 +45,7 @@ std::tuple<GLuint, GLuint, GLuint> getBlitShaderProgram(NVGcontext* ctx) {
     const char* vertexShaderSrc =
     #if defined NANOVG_GL3
         "#version 150 core\n"
+		"#extension GL_ARB_explicit_attrib_location : enable\n"
     #elif defined NANOVG_GLES3
         "#version 300 es\n"
     #endif
