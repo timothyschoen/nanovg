@@ -862,11 +862,11 @@ void nvgTransformGetSubpixelOffset(NVGcontext* ctx, float* tx, float* ty)
 {
     NVGstate* state = nvg__getState(ctx);
 
-    float scaleX = std::sqrt(state->xform[0] * state->xform[0] + state->xform[1] * state->xform[1]) * ctx->devicePxRatio;
-    float scaleY = std::sqrt(state->xform[2] * state->xform[2] + state->xform[3] * state->xform[3]) * ctx->devicePxRatio;
+    float scaleX = ctx->devicePxRatio / std::sqrt(state->xform[0] * state->xform[0] + state->xform[1] * state->xform[1]);
+    float scaleY = ctx->devicePxRatio / std::sqrt(state->xform[2] * state->xform[2] + state->xform[3] * state->xform[3]);
 
     *tx = state->xform[4] - std::round(state->xform[4] * scaleX) / scaleX;
-    *ty = state->xform[5] - std::round(state->xform[5] * scaleY) / scaleY ;
+    *ty = state->xform[5] - std::round(state->xform[5] * scaleY) / scaleY;
 }
 
 void nvgTransformQuantize(NVGcontext* ctx)
