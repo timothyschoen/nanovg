@@ -1756,8 +1756,8 @@ static void nvg__flattenPaths(NVGcontext* ctx)
             
             int crossings = 0;
             
-            Point point0 = Point{cache->points[0].x, cache->points[0].y};
-            Point point1 = Point{cache->bounds[0] - 1.0f, cache->bounds[1] - 1.0f};
+            Point point0 = {cache->points[0].x, cache->points[0].y};
+            Point point1 = {cache->bounds[0] - 1.0f, cache->bounds[1] - 1.0f};
             // Iterate all other paths
             for (int i = 0; i < cache->npaths; i++) {
                 if (i == j) continue;
