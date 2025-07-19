@@ -822,7 +822,7 @@ int nvg__renderCreate(void* uptr)
 
                 float pattern = 0.0f;
                 if (radius > 0.0f) {
-                    pattern = dashed(uvLine, radius, 0.22f, feather);
+                    pattern = dashed(uvLine, radius, innerSize, feather);
                 }
                 float activity = 0.0f;
                 if (type == NSVG_DOUBLE_STROKE_ACTIVITY || type == NSVG_DOUBLE_STROKE_GRAD_ACTIVITY) {

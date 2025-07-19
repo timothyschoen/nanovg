@@ -559,7 +559,7 @@ MNVGframebuffer* mnvgCreateFramebuffer(NVGcontext* ctx, int width,
     framebuffer->image = nvgCreateImageRGBA(ctx, width, height,
                                             imageFlags | NVG_IMAGE_PREMULTIPLIED,
                                             NULL);
-    
+
     framebuffer->ctx = ctx;
     return framebuffer;
 }
@@ -581,7 +581,7 @@ int mnvgBlitFramebuffer(NVGcontext* ctx, MNVGframebuffer* fb, int x, int y, int 
 }
 
 void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
-    
+
     MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
     float alpha = (float)color.a;
     mtl.clearColor = MTLClearColorMake((float)color.r * alpha,
@@ -814,7 +814,7 @@ void* mnvgDevice(NVGcontext* ctx) {
         frag->scissorExt.y = scissor->extent[1];
         frag->scissorRadius = scissor->radius;
     }
-    
+
     switch (paint->type) {
         case PAINT_TYPE_FILLIMG_ALPHA:
         case PAINT_TYPE_FILLIMG: {
@@ -831,7 +831,7 @@ void* mnvgDevice(NVGcontext* ctx) {
                 frag->stateData |= nvg__packStateDataUniform(PACK_TEX_TYPE, 3);
             else
                 frag->stateData |= nvg__packStateDataUniform(PACK_TEX_TYPE, 2);
-            
+
             break;
         }
         case PAINT_TYPE_OBJECT_RECT: {
@@ -840,9 +840,29 @@ void* mnvgDevice(NVGcontext* ctx) {
             frag->dashCol = paint->dashColor.rgba32;
             break;
         }
+        case PAINT_TYPE_DOUBLE_STROKE_GRAD:
+        case PAINT_TYPE_DOUBLE_STROKE:
         case PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY:
         case PAINT_TYPE_DOUBLE_STROKE_ACTIVITY: {
-            frag->offset = paint->offset;
+        if(paint->type == PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY ||
+           paint->type == PAINT_TYPE_DOUBLE_STROKE_ACTIVITY)
+            {
+                frag->offset = paint->offset;
+                frag->strokeMult = (width * 0.18f + fringe * 0.5f) / fringe;
+            }
+            else {
+                frag->strokeMult = (width * 0.11f + fringe * 0.5f) / fringe;
+                // Disabled because it doesn't work well yet:
+                //frag->stateData |= nvg__packStateDataUniform(PACK_REVERSE, lineReversed);
+            }
+            if(width * 0.4f < fringe)
+            {
+                float alphaMult = (width * 0.4f) / fringe
+                if(alphaMult < 0.0f) alphaMult = 0.0f;
+                if(alphaMult > 1.0f) alphaMult = 1.0f;
+                alphaMult *= alphaMult;
+                frag->innerCol = (frag->innerCol & 0xFFFFFF00) | (uint32_t)((frag->innerCol & 0xFF) * alphaMult);
+            }
             break;
         }
         default: break;
@@ -915,7 +935,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 
 - (void)renderCancel {
     MNVGrenderData* renderData = _buffers.renderData;
-    
+
     _buffers.isBusy = NO;
     if(renderData) {
         renderData->image = 0;
@@ -924,7 +944,7 @@ void* mnvgDevice(NVGcontext* ctx) {
         renderData->ncalls = 0;
         renderData->nuniforms = 0;
     }
-    
+
     // terrible, but it fixes a crash when closing the MNVGContext
     // we need to be very sure that _semaphore has a value of at least 3
     dispatch_semaphore_signal(_semaphore);
@@ -1090,7 +1110,7 @@ void* mnvgDevice(NVGcontext* ctx) {
     _defaultStencilState = [device
                             newDepthStencilStateWithDescriptor:stencilDescriptor];
 
-    
+
     // Fill shape stencil.
     MTLStencilDescriptor* frontFaceStencilDescriptor = [MTLStencilDescriptor new];
     frontFaceStencilDescriptor.stencilCompareFunction = MTLCompareFunctionAlways;
@@ -1468,7 +1488,7 @@ error:
         drawable = _metalLayer.nextDrawable;
         colorTexture = drawable.texture;
     }
-    
+
     scissorRect.x = MAX(0, scissorRect.x);
     scissorRect.y = MAX(0, scissorRect.y);
     scissorRect.width = MIN(textureSize.x, scissorRect.width);
@@ -1476,7 +1496,7 @@ error:
 
     _renderEncoder = [self renderCommandEncoderWithColorTexture:colorTexture];
     [_renderEncoder setScissorRect: scissorRect];
-    
+
     [self updateRenderPipelineStatesForBlend:_blendFunc
                                  pixelFormat:colorTexture.pixelFormat];
     if(_pipelineState != nil) [_renderEncoder setRenderPipelineState:_pipelineState];
@@ -1512,7 +1532,7 @@ error:
         [_buffers.commandBuffer waitUntilScheduled];
         [drawable present];
     }
-    
+
     _lastBoundTexture = -1;
 }
 
@@ -1534,7 +1554,7 @@ error:
 
     id<CAMetalDrawable> drawable = nil;
     drawable = _metalLayer.nextDrawable;
-    
+
     // Get the texture from the drawable (the screen or render target)
     id<MTLTexture> drawableTexture = drawable.texture;
 
@@ -1551,7 +1571,7 @@ error:
 
     // End encoding
     [blitEncoder endEncoding];
-    
+
     if (drawable && _metalLayer.presentsWithTransaction) {
         [commandBuffer commit];
         [commandBuffer waitUntilScheduled];
