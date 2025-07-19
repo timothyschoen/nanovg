@@ -857,7 +857,7 @@ void* mnvgDevice(NVGcontext* ctx) {
             }
             if(width * 0.4f < fringe)
             {
-                float alphaMult = (width * 0.4f) / fringe
+                float alphaMult = (width * 0.4f) / fringe;
                 if(alphaMult < 0.0f) alphaMult = 0.0f;
                 if(alphaMult > 1.0f) alphaMult = 1.0f;
                 alphaMult *= alphaMult;
