@@ -841,13 +841,22 @@ int nvg__renderCreate(void* uptr)
                 // We only need to flip the Y as the X (width) of the line is symmetrical currently
                 float revUVy = (getReverse()) ? 0.5f - uv.y : uv.y;
                 vec2 uvLine = vec2(uv.x, revUVy * lineLength);
+
+                float zoom = 1.0f / length(transformInverse(paintMat)[0].xy);
+                float lineScale = mix(1.0, 4.0, smoothstep(1.0, 0.5, zoom));
+                float innerSize = 0.22 * lineScale;
+                float outerSize = 0.49 * lineScale;
+
+                float innerMask = min(1.0f, (1.0f-abs(ftcoord.x*2.0f-1.0f))*strokeMult);
+
                 float seg = sdSegment(uvLine, vec2(0.0f), vec2(0.0f, lineLength * 0.5f));
-                float outerSeg = seg - 0.45f;
+                float outerSeg = seg - outerSize;
                 float outerDelta = fwidth(outerSeg);
                 float outerShape = clamp(inverseLerp(outerDelta, -outerDelta, outerSeg), 0.0f, 1.0f);
-                float innerSeg = seg - 0.22f;
+                float innerSeg = seg - innerSize;
                 float innerDelta = fwidth(innerSeg);
                 float innerShape = clamp(inverseLerp(innerDelta, -innerDelta, innerSeg), 0.0f, 1.0f);
+
                 float pattern = 0.0f;
                 if (radius > 0.0f) {
                     pattern = dashed(uvLine, radius, 0.22f, feather);
@@ -857,7 +866,7 @@ int nvg__renderCreate(void* uptr)
                     activity = dashed(vec2(uvLine.x, uvLine.y - (offset * 3.0f)), 3.0f, 0.4f, feather);
                 }
                 if (type == NSVG_DOUBLE_STROKE) {
-                    result = mix(mix(convertColour(outerCol), convertColour(innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(dashCol), pattern * innerShape) * outerShape * scissor;
+                    result = mix(mix(convertColour(outerCol), convertColour(innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(dashCol), pattern * innerShape) * outerShape * scissor * innerMask;
                 } else if (type == NSVG_DOUBLE_STROKE_ACTIVITY) {
                     vec4 overlay = mix(convertColour(outerCol), vec4(convertColour(innerCol).rgb * 0.8f, 1.0f), activity);
                     vec4 mixedResult = mix(overlay, convertColour(innerCol), innerShape);
@@ -1045,6 +1054,7 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
             frag->offset = paint->offset;
         case PAINT_TYPE_DOUBLE_STROKE_GRAD:
         case PAINT_TYPE_DOUBLE_STROKE:
+            frag->strokeMult = (width * 0.11f + fringe * 0.5f) / fringe;
             frag->stateData |= glnvg__packStateDataUniform(PACK_REVERSE, lineReversed);
             break;
         default: break;
