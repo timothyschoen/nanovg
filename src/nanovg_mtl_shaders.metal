@@ -241,26 +241,33 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         float revUVy = (getReverse(uniforms) > 0.5f) ? 0.5f - in.uv.y : in.uv.y;
         float2 uvLine = float2(in.uv.x, revUVy * uniforms.lineLength);
         float seg = sdSegment(uvLine, float2(0.0f), float2(0.0f, uniforms.lineLength * 0.5f));
-        float outerSeg = seg - 0.45f;
+
+        float zoom = 1.0f / length(transformInverse(uniforms.paintMat)[0].xy);
+        float lineScale = mix(1.0, 2.0, smoothstep(1.0, 0.5, zoom));
+        float innerSize = 0.22 * lineScale;
+        float outerSize = 0.49 * lineScale;
+        float innerMask = min(1.0f, (1.0f-abs(in.ftcoord.x*2.0f-1.0f))*uniforms.strokeMult);
+
+        float outerSeg = seg - outerSize;
         float outerDelta = fwidth(outerSeg);
         float outerShape = clamp(inverseLerp(outerDelta, -outerDelta, outerSeg), 0.0f, 1.0f);
-        float innerSeg = seg - 0.22f;
+        float innerSeg = seg - innerSize;
         float innerDelta = fwidth(innerSeg);
         float innerShape = clamp(inverseLerp(innerDelta, -innerDelta, innerSeg), 0.0f, 1.0f);
         float pattern = 0.0f;
         if (uniforms.radius > 0.0f) {
-            pattern = dashed(uvLine, uniforms.radius, 0.22f, uniforms.feather);
+            pattern = dashed(uvLine, uniforms.radius, innerSize, uniforms.feather);
         }
         float activity = 0.0f;
         if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
-            activity = dashed(float2(uvLine.x, uvLine.y - (uniforms.offset * 3.0f)), 3.0f, 0.4f, uniforms.feather);
+            activity = dashed(float2(uvLine.x, uvLine.y - (uniforms.offset * 3.0f)), 3.0f, 0.4f * lineScale, uniforms.feather);
         }
         if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE) {
-            return mix(mix(convertColour(uniforms.outerCol), convertColour(uniforms.innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(uniforms.dashCol), pattern * innerShape) * outerShape;
+            return mix(mix(convertColour(uniforms.outerCol), convertColour(uniforms.innerCol), smoothstep(0.0, 1.0, innerShape)), convertColour(uniforms.dashCol), pattern * innerShape) * outerShape * innerMask;
         } else if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_ACTIVITY) {
             float4 overlay = mix(convertColour(uniforms.outerCol), float4(convertColour(uniforms.innerCol).rgb * 0.8f, 1.0f), activity);
             float4 mixedResult = mix(overlay, convertColour(uniforms.innerCol), innerShape);
-            return mixedResult * outerShape;
+            return mixedResult * outerShape * innerMask;
         } else if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD || uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY) {
             float4 cable;
             if (uniforms.type == MNVG_SHADER_DOUBLE_STROKE_GRAD) {
@@ -282,7 +289,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
             // limit fade transparency so it doesn't become fully transparent
             fade = min(fade, 0.7f);
 
-            return (mix(cable, float4(0.0), fade)) * outerShape * scissor;
+            return (mix(cable, float4(0.0), fade)) * outerShape * scissor * innerMask;
         }
     }
     case MNVG_SHADER_SMOOTH_GLOW: {

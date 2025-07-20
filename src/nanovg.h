@@ -132,8 +132,9 @@ struct NVGpaint {
 typedef struct NVGpaint NVGpaint;
 
 enum NVGwinding {
-    NVG_SOLID = 0,            // CCW
+    NVG_SOLID = 0,           // CCW
     NVG_HOLE = 1,            // CW
+    NVG_NONZERO = 2,         // nonzero
 };
 
 enum NVGlineStyle {
@@ -853,6 +854,7 @@ struct NVGpath {
     bool closed : 1;
 	bool convex : 1;
     bool winding : 1;
+    bool nonzero : 1;
 };
 typedef struct NVGpath NVGpath;
 

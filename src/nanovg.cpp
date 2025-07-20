@@ -72,6 +72,7 @@ enum NVGcommands {
 	NVG_CLOSE = 3,
     NVG_WINDING_CW = 4,
 	NVG_WINDING_CCW = 5,
+    NVG_WINDING_NONZERO = 6,
 };
 
 enum NVGpointFlags
@@ -868,11 +869,11 @@ void nvgTransformGetSubpixelOffset(NVGcontext* ctx, float* tx, float* ty)
 {
     NVGstate* state = nvg__getState(ctx);
 
-    float scaleX = std::sqrt(state->xform[0] * state->xform[0] + state->xform[1] * state->xform[1]) * ctx->devicePxRatio;
-    float scaleY = std::sqrt(state->xform[2] * state->xform[2] + state->xform[3] * state->xform[3]) * ctx->devicePxRatio;
+    float scaleX = ctx->devicePxRatio / std::sqrt(state->xform[0] * state->xform[0] + state->xform[1] * state->xform[1]);
+    float scaleY = ctx->devicePxRatio / std::sqrt(state->xform[2] * state->xform[2] + state->xform[3] * state->xform[3]);
 
     *tx = state->xform[4] - std::round(state->xform[4] * scaleX) / scaleX;
-    *ty = state->xform[5] - std::round(state->xform[5] * scaleY) / scaleY ;
+    *ty = state->xform[5] - std::round(state->xform[5] * scaleY) / scaleY;
 }
 
 void nvgTransformQuantize(NVGcontext* ctx)
@@ -1649,90 +1650,146 @@ void nvg__tesselateBezierAFD(NVGcontext* ctx, float x1, float y1, float x2, floa
 
 static void nvg__flattenPaths(NVGcontext* ctx)
 {
-	NVGpathCache* cache = ctx->cache;
+    NVGpathCache* cache = ctx->cache;
     NVGpoint* last;
+    int nonzero = 0;
     
-	if (cache->npaths > 0)
-		return;
-
-	// Flatten
+    if (cache->npaths > 0)
+        return;
+    
+    // Flatten
     float* values = ctx->commandValues;
     for (int i = 0; i < ctx->ncommands; i++) {
-		uint8_t cmd = ctx->commands[i];
-		switch (cmd) {
-		case NVG_MOVETO:
-			nvg__addPath(ctx);
-			nvg__addPoint(ctx, values[0], values[1], NVG_PT_CORNER);
-            values += 2;
-			break;
-		case NVG_LINETO:
-			nvg__addPoint(ctx, values[0], values[1], NVG_PT_CORNER);
-            values += 2;
-			break;
-		case NVG_BEZIERTO:
-			last = nvg__lastPoint(ctx);
-			if (last != NULL) {
-                nvg__tesselateBezierAFD(ctx, last->x,last->y, values[0], values[1], values[2], values[3], values[4], values[5]);
-			}
-            values += 6;
-			break;
-		case NVG_CLOSE:
-			nvg__closePath(ctx);
-			break;
-		case NVG_WINDING_CW:
-			nvg__pathWinding(ctx, NVG_HOLE);
-			break;
-        case NVG_WINDING_CCW:
-            nvg__pathWinding(ctx, NVG_SOLID);
-            break;
+        uint8_t cmd = ctx->commands[i];
+        switch (cmd) {
+            case NVG_MOVETO:
+                nvg__addPath(ctx);
+                nvg__addPoint(ctx, values[0], values[1], NVG_PT_CORNER);
+                values += 2;
+                break;
+            case NVG_LINETO:
+                nvg__addPoint(ctx, values[0], values[1], NVG_PT_CORNER);
+                values += 2;
+                break;
+            case NVG_BEZIERTO:
+                last = nvg__lastPoint(ctx);
+                if (last != NULL) {
+                    nvg__tesselateBezierAFD(ctx, last->x,last->y, values[0], values[1], values[2], values[3], values[4], values[5]);
+                }
+                values += 6;
+                break;
+            case NVG_CLOSE:
+                nvg__closePath(ctx);
+                break;
+            case NVG_WINDING_CW:
+                nvg__pathWinding(ctx, NVG_HOLE);
+                nonzero = false;
+                break;
+            case NVG_WINDING_CCW:
+                nvg__pathWinding(ctx, NVG_SOLID);
+                nonzero = false;
+                break;
+            case NVG_WINDING_NONZERO:
+                nonzero = true;
+                break;
+                
         }
-	}
-
-	cache->bounds[0] = cache->bounds[1] = 1e6f;
-	cache->bounds[2] = cache->bounds[3] = -1e6f;
-
-	// Calculate the direction and length of line segments.
-	for (int j = 0; j < cache->npaths; j++) {
+    }
+    
+    cache->bounds[0] = cache->bounds[1] = 1e6f;
+    cache->bounds[2] = cache->bounds[3] = -1e6f;
+    
+    int winding = 0;
+    // Calculate the direction and length of line segments.
+    for (int j = 0; j < cache->npaths; j++) {
         NVGpath* path = &cache->paths[j];
         NVGpoint* pts = &cache->points[path->first];
-
-		// If the first and last points are the same, remove the last, mark as closed path.
+        
+        // If the first and last points are the same, remove the last, mark as closed path.
         NVGpoint* p0 = &pts[path->count-1];
         NVGpoint* p1 = &pts[0];
-		if (nvg__ptEquals(p0->x,p0->y, p1->x,p1->y, ctx->distTol)) {
-			path->count--;
-			p0 = &pts[path->count-1];
-			path->closed = 1;
-		}
-
-		// Enforce winding.
+        if (nvg__ptEquals(p0->x,p0->y, p1->x,p1->y, ctx->distTol)) {
+            path->count--;
+            p0 = &pts[path->count-1];
+            path->closed = 1;
+        }
+        
+        // Enforce winding.
         path->reversed = 0;
-		if (path->count > 2) {
-			float area = nvg__polyArea(pts, path->count);
-			if (path->winding == NVG_SOLID && area < 0.0f) {
-				nvg__polyReverse(pts, path->count);
-				path->reversed = 1;
-			}
-			if (path->winding == NVG_HOLE && area > 0.0f) {
-				nvg__polyReverse(pts, path->count);
-				path->reversed = 1;
-			}
-		}
-
-		for(int i = 0; i < path->count; i++) {
-			// Calculate segment direction and length
-			p0->dx = p1->x - p0->x;
-			p0->dy = p1->y - p0->y;
-			p0->len = nvg__normalize(&p0->dx, &p0->dy);
-			// Update bounds
-			cache->bounds[0] = nvg__minf(cache->bounds[0], p0->x);
-			cache->bounds[1] = nvg__minf(cache->bounds[1], p0->y);
-			cache->bounds[2] = nvg__maxf(cache->bounds[2], p0->x);
-			cache->bounds[3] = nvg__maxf(cache->bounds[3], p0->y);
-			// Advance
-			p0 = p1++;
-		}
-	}
+        if (path->count > 2) {
+            float area = nvg__polyArea(pts, path->count);
+            if (path->winding == NVG_SOLID && area < 0.0f) {
+                nvg__polyReverse(pts, path->count);
+                path->reversed = 1;
+            }
+            if (path->winding == NVG_HOLE && area > 0.0f) {
+                nvg__polyReverse(pts, path->count);
+                path->reversed = 1;
+            }
+        }
+        
+        for(int i = 0; i < path->count; i++) {
+            // Calculate segment direction and length
+            p0->dx = p1->x - p0->x;
+            p0->dy = p1->y - p0->y;
+            p0->len = nvg__normalize(&p0->dx, &p0->dy);
+            // Update bounds
+            cache->bounds[0] = nvg__minf(cache->bounds[0], p0->x);
+            cache->bounds[1] = nvg__minf(cache->bounds[1], p0->y);
+            cache->bounds[2] = nvg__maxf(cache->bounds[2], p0->x);
+            cache->bounds[3] = nvg__maxf(cache->bounds[3], p0->y);
+            // Advance
+            p0 = p1++;
+        }
+        
+        // Calculate nonzero winding rule
+        if(nonzero) {
+            struct Point
+            {
+                float x, y;
+            };
+            
+            auto getLineCrossing = [](Point p0, Point p1, Point p2, Point p3) -> float {
+                auto b = Point{p2.x - p0.x, p2.y - p0.y};
+                auto d = Point{p1.x - p0.x, p1.y - p0.y};
+                auto e = Point{p3.x - p2.x, p3.y - p2.y};
+                float m = d.x * e.y - d.y * e.x;
+                // Check if lines are parallel, or if either pair of points are equal
+                if (fabsf(m) < 1e-6)
+                    return NAN;
+                return -(d.x * b.y - d.y * b.x) / m;
+            };
+            
+            int crossings = 0;
+            
+            Point point0 = {cache->points[0].x, cache->points[0].y};
+            Point point1 = {cache->bounds[0] - 1.0f, cache->bounds[1] - 1.0f};
+            // Iterate all other paths
+            for (int i = 0; i < cache->npaths; i++) {
+                if (i == j) continue;
+                
+                // Iterate all lines on the path
+                if (cache->paths[i].count < 2)
+                    continue;
+                
+                for (int i = 1; i < cache->paths[i].count + 3; i += 3) {
+                    // The previous point
+                    Point point2 = {cache->points[i-1].x, cache->points[i-1].y};
+                    // The current point
+                    Point point3 = (i < cache->paths[i].count) ? Point{cache->points[i-1].x, cache->points[i-1].y} : Point{cache->points[i].x, cache->points[i].y};
+                    float crossing = getLineCrossing(point0, point1, point2, point3);
+                    float crossing2 = getLineCrossing(point2, point3, point0, point1);
+                    if (0.0 <= crossing && crossing < 1.0 && 0.0 <= crossing2) {
+                        crossings++;
+                    }
+                }
+            }
+            if(j <= cache->npaths)
+            {
+                cache->paths[j+1].winding = crossings % 2 ? NVG_SOLID : NVG_HOLE;
+            }
+        }
+    }
 }
 
 static int nvg__curveDivs(float r, float arc, float tol)
@@ -2490,7 +2547,14 @@ void nvgClosePath(NVGcontext* ctx)
 void nvgPathWinding(NVGcontext* ctx, NVGwinding dir)
 {
 	float vals[] = { (float)dir };
-    nvg__appendCommand(ctx, dir ? NVG_WINDING_CW : NVG_WINDING_CCW, NULL, 0);
+    if(dir == NVG_NONZERO)
+    {
+        nvg__appendCommand(ctx, NVG_WINDING_NONZERO, NULL, 0);
+    }
+    else {
+        nvg__appendCommand(ctx, dir ? NVG_WINDING_CW : NVG_WINDING_CCW, NULL, 0);
+    }
+    
 }
 
 void nvgArc(NVGcontext* ctx, float cx, float cy, float r, float a0, float a1, int dir)
