@@ -155,7 +155,7 @@ struct NVGcontext {
 	float devicePxRatio;
 	struct FONScontext* fs;
 	int fontImages[NVG_MAX_FONTIMAGES];
-    uint8_t fontImageIdx;
+    int16_t fontImageIdx;
 #if DEBUG
 	int drawCallCount;
 	int fillTriCount;
@@ -352,18 +352,16 @@ NVGcontext* nvgCreateInternal(NVGbackend backend)
 	//fontParams.width = NVG_INIT_FONTIMAGE_SIZE;
 	//fontParams.height = NVG_INIT_FONTIMAGE_SIZE;
     fontParams.flags = FONS_ZERO_TOPLEFT;
-    fontParams.flags |= FONS_SUMMED;
+    fontParams.flags |= FONS_SUMMED | FONS_DELAY_LOAD;
     // these must match values in shader
     fontParams.sdfPadding = 4;
     fontParams.sdfPixelDist = 32.0f;
 	ctx->fs = fonsCreateInternal(&fontParams);
 	if (ctx->fs == NULL) goto error;
 
-    ctx->fontImageIdx = 0;
+    ctx->fontImageIdx = -1;
   
     ctx->strokeCache = new StrokeCache();
-    
-    nvgAtlasTextThreshold(ctx, 48.0f);
     
 	return ctx;
 
@@ -2825,14 +2823,6 @@ void nvgStroke(NVGcontext* ctx)
 	nvg__renderStroke(ctx->backend, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
 							 strokeWidth, state->lineStyle, ctx->currentLineLength, ctx->cache->paths, ctx->cache->npaths);
 
-	// Count triangles
-#if DEBUG
-	for (i = 0; i < ctx->cache->npaths; i++) {
-		const NVGPath* path = &ctx->cache->paths[i];
-		ctx->strokeTriCount += path->nstroke-2;
-		ctx->drawCallCount++;
-	}
-#endif
 }
 
 static void nvg__renderTrianglesSimple(NVGcontext* ctx, const NVGvertex* verts, int nverts, NVGpaint fillPaint)
@@ -2845,11 +2835,6 @@ static void nvg__renderTrianglesSimple(NVGcontext* ctx, const NVGvertex* verts, 
     fillPaint.outerColor.a *= state->alpha;
 
     nvg__renderTriangles(ctx->backend, &fillPaint, state->compositeOperation, &scissor, verts, nverts, ctx->fringeWidth, 0);
-
-#if DEBUG
-    ctx->drawCallCount++;
-    ctx->textTriCount += nverts/3;
-#endif
 }
 
 void nvgFillRect(NVGcontext* ctx, float x1, float y1, float w, float h)
