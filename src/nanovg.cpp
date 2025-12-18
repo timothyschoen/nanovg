@@ -2727,6 +2727,11 @@ void nvgDebugDumpPathCache(NVGcontext* ctx)
 	}
 }
 
+int nvgIsTexture(NVGcontext* ctx, int tex)
+{
+    return nvg__isTexture(ctx->backend, tex);
+}
+
 int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
 {
     NVGstate* state = nvg__getState(ctx);

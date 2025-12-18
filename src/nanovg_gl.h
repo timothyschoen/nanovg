@@ -1582,6 +1582,17 @@ void nvg__renderDelete(void* uptr)
     free(gl);
 }
 
+int nvg__isTexture(void* uptr, int image)
+{
+    GLNVGcontext* gl = (GLNVGcontext*)uptr;
+    GLNVGtexture* tex = glnvg__findTexture(gl, image);
+
+    if (!tex)
+        return 0;
+
+    return glIsTexture(tex->tex);
+}
+
 #if defined NANOVG_GL3
 NVGcontext* nvgCreateGL3(int flags)
 #elif defined NANOVG_GLES3

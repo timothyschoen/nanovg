@@ -255,6 +255,8 @@ stencilOnlyPipelineState;
                               width:(int*)width
                              height:(int*)height;
 
+- (int)renderGetTextureValid:(int)image;
+
 - (void)blitTextureToScreen:(MNVGtexture*)mnvgTexture;
 
 - (void)renderStrokeWithPaint:(NVGpaint*)paint
@@ -461,6 +463,12 @@ void nvg__renderViewport(void* uptr, float width, float height,
     [mtl renderViewportWithWidth:width
                           height:height
                 devicePixelRatio:devicePixelRatio];
+}
+
+int nvg__isTexture(void* uptr, int image)
+{
+    MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
+    return [mtl renderGetTextureValid: image];
 }
 
 #if TARGET_OS_IPHONE
@@ -1544,6 +1552,11 @@ error:
     *width = (int)tex->tex.width;
     *height = (int)tex->tex.height;
     return 1;
+}
+
+- (int)renderGetTextureValid:(int)image {
+    MNVGtexture* tex = [self findTexture:image];
+    return tex != nil && tex->id > 0 && tex->valid && tex->tex != nil;
 }
 
 - (void)blitTextureToScreen:(MNVGtexture *)mnvgTexture

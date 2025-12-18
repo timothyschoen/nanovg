@@ -807,6 +807,8 @@ int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, floa
 // Get image texture Id
 int nvgGetImageTextureId(NVGcontext* ctx, int handle);
 
+int nvgIsTexture(NVGcontext* ctx, int textureId);
+
 //
 // Internal Render API
 //
@@ -869,6 +871,7 @@ void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState com
 void nvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths, int npaths);
 void nvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe, int text);
 void nvg__renderDelete(void* uptr);
+int nvg__isTexture(void* uptr, int image);
 
 // Constructor and destructor, called by the render back-end.
 NVGcontext* nvgCreateInternal(void* params);
