@@ -526,13 +526,34 @@ int nvg__renderGetTextureSize(void* uptr, int image, int* w, int* h)
     return 1;
 }
 
+int nvg_checkGLVersion()
+{
+    GLint majorVersion = 0;
+    glGetIntegerv(GL_MAJOR_VERSION, &majorVersion);
+    GLenum error = glGetError();
+
+    if (error != GL_NO_ERROR || majorVersion < 3) {
+        // Fall back to parsing GL_VERSION string for older OpenGL
+        char const* version = (char const*)glGetString(GL_VERSION);
+        if (version == NULL)
+            return 0; // Failed
+
+        // Parse version string (format: "X.Y" or "X.Y.Z")
+        majorVersion = version[0] - '0';
+
+        if (majorVersion < 3)
+            return 0; // OpenGL 3.0+ required
+    }
+
+    return 1;
+}
+
 int nvg__renderCreate(void* uptr)
 {
+    if (!nvg_checkGLVersion()) return 0;
+
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
     int align = 4;
-
-    // TODO: mediump float may not be enough for GLES2 in iOS.
-    // see the following discussion: https://github.com/memononen/nanovg/issues/46
 
     // Construct the shader header with correct defines
     std::ostringstream shaderHeader;
