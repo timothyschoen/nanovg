@@ -809,6 +809,9 @@ int nvg__renderCreate(void* uptr)
 
         // Smart texture sampling that only interpolates when scaling
         vec4 sampleTextureAdaptive(sampler2D tex, vec2 uv) {
+        #ifdef GL_ES // Don't do extra interpolation on embedded platforms, it's too slow
+            return texture(tex, uv);
+        #endif
             vec2 texSize = vec2(textureSize(tex, 0));
 
             vec2 dudx = dFdx(uv) * texSize;
