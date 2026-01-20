@@ -81,6 +81,60 @@ bool getReverse(constant Uniforms& uniforms){
     return bool(uniforms.stateData & 0x01);      // 1 bit
 }
 
+float4 textureCatmullRom(texture2d<float> tex,
+                         sampler samp,
+                         float2 uv)
+{
+    float2 texSize = float2(tex.get_width(), tex.get_height());
+    float2 texelSize = 1.0 / texSize;
+
+    float2 samplePos = uv * texSize;
+    float2 tc = floor(samplePos - 0.5) + 0.5;
+    float2 f = samplePos - tc;
+
+    float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    float2 w3 = f * f * (-0.5 + 0.5 * f);
+
+    float2 w12 = w1 + w2;
+
+    float2 tc0  = (tc - 1.0) * texelSize;
+    float2 tc12 = (tc + w2 / w12) * texelSize;
+    float2 tc3  = (tc + 2.0) * texelSize;
+
+    float4 result =
+        tex.sample(samp, float2(tc0.x,  tc0.y), level(0))  * w0.x * w0.y +
+        tex.sample(samp, float2(tc12.x, tc0.y), level(0))  * w12.x * w0.y +
+        tex.sample(samp, float2(tc3.x,  tc0.y), level(0))  * w3.x * w0.y +
+        tex.sample(samp, float2(tc0.x,  tc12.y), level(0)) * w0.x * w12.y +
+        tex.sample(samp, float2(tc12.x, tc12.y), level(0)) * w12.x * w12.y +
+        tex.sample(samp, float2(tc3.x,  tc12.y), level(0)) * w3.x * w12.y +
+        tex.sample(samp, float2(tc0.x,  tc3.y), level(0))  * w0.x * w3.y +
+        tex.sample(samp, float2(tc12.x, tc3.y), level(0)) * w12.x * w3.y +
+        tex.sample(samp, float2(tc3.x,  tc3.y), level(0))  * w3.x * w3.y;
+
+    return result;
+}
+
+float4 sampleTextureAdaptive(texture2d<float> tex,
+                             sampler samp,
+                             float2 uv)
+{
+    float2 texSize = float2(tex.get_width(), tex.get_height());
+
+    float2 dudx = dfdx(uv) * texSize;
+    float2 dudy = dfdy(uv) * texSize;
+
+    float footprint = max(length(dudx), length(dudy));
+
+    // Upscale using Catmull-Rom
+    if (footprint < 1.0)
+        return textureCatmullRom(tex, samp, uv);
+
+    return tex.sample(samp, uv);
+}
+
 float inverseLerp(float a, float b, float value) {
     return (value - a) / (b - a);
 }
@@ -406,7 +460,8 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     {
         float strokeAlpha = strokeMask(uniforms, in);
         float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
-        float4 color = texture.sample(sampler, float2(pt.x, getReverse(uniforms) ? 1.0f - pt.y : pt.y));
+        float4 color = sampleTextureAdaptive(texture, sampler, float2(pt.x, getReverse(uniforms) ? 1.0f - pt.y : pt.y));
+
         if (getTexType(uniforms) == 1) color = float4(color.xyz * color.w, color.w);
         else if (getTexType(uniforms) == 2) color = float4(color.x);
         else if (getTexType(uniforms) == 3) color = color;

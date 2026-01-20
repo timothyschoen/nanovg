@@ -727,6 +727,102 @@ int nvg__renderCreate(void* uptr)
         bool getReverse(){
             return bool(stateData & 0x01);      // 1 bit
         }
+
+        vec4 textureBicubic(sampler2D tex, vec2 uv) {
+            vec2 texSize = vec2(textureSize(tex, 0));
+            vec2 texelSize = 1.0 / texSize;
+
+            uv = uv * texSize - 0.5;
+            vec2 fxy = fract(uv);
+            uv -= fxy;
+
+            // Cubic B-spline weights
+            vec4 xcubic = vec4(
+                (((-1.0/6.0) * fxy.x + 0.5) * fxy.x - 0.5) * fxy.x + 1.0/6.0,
+                (((0.5) * fxy.x - 1.0) * fxy.x) * fxy.x + 2.0/3.0,
+                (((-0.5) * fxy.x + 0.5) * fxy.x + 0.5) * fxy.x + 1.0/6.0,
+                ((1.0/6.0) * fxy.x) * fxy.x * fxy.x
+            );
+
+            vec4 ycubic = vec4(
+                (((-1.0/6.0) * fxy.y + 0.5) * fxy.y - 0.5) * fxy.y + 1.0/6.0,
+                (((0.5) * fxy.y - 1.0) * fxy.y) * fxy.y + 2.0/3.0,
+                (((-0.5) * fxy.y + 0.5) * fxy.y + 0.5) * fxy.y + 1.0/6.0,
+                ((1.0/6.0) * fxy.y) * fxy.y * fxy.y
+            );
+
+            vec4 c = uv.xyyy + vec4(-0.5, -0.5, 0.5, 1.5);
+            vec4 s = vec4(
+                xcubic.x + xcubic.y,
+                xcubic.z + xcubic.w,
+                0.0, 0.0
+            );
+            vec4 offset = c + vec4(xcubic.y, xcubic.w, 0.0, 0.0) / s;
+
+            offset *= texelSize.xxyy;
+
+            vec4 sample0 = texture(tex, offset.xz) * ycubic.x;
+            vec4 sample1 = texture(tex, offset.yz) * ycubic.x;
+            vec4 sample2 = texture(tex, offset.xw) * ycubic.y;
+            vec4 sample3 = texture(tex, offset.yw) * ycubic.y;
+
+            float sx = s.x / (s.x + s.y);
+
+            return mix(
+                mix(sample2, sample3, sx),
+                mix(sample0, sample1, sx),
+                ycubic.z / (ycubic.y + ycubic.z)
+            );
+        }
+        vec4 textureCatmullRom(sampler2D tex, vec2 uv) {
+            vec2 texSize = vec2(textureSize(tex, 0));
+            vec2 texelSize = 1.0 / texSize;
+
+            vec2 samplePos = uv * texSize;
+            vec2 tc = floor(samplePos - 0.5) + 0.5;
+            vec2 f = samplePos - tc;
+
+            // Catmull-Rom weights
+            vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+            vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+            vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+            vec2 w3 = f * f * (-0.5 + 0.5 * f);
+
+            vec2 w12 = w1 + w2;
+            vec2 tc0 = (tc - 1.0) * texelSize;
+            vec2 tc12 = (tc + w2 / w12) * texelSize;
+            vec2 tc3 = (tc + 2.0) * texelSize;
+
+            vec4 result =
+                texture(tex, vec2(tc0.x,  tc0.y))  * w0.x * w0.y +
+                texture(tex, vec2(tc12.x, tc0.y))  * w12.x * w0.y +
+                texture(tex, vec2(tc3.x,  tc0.y))  * w3.x * w0.y +
+                texture(tex, vec2(tc0.x,  tc12.y)) * w0.x * w12.y +
+                texture(tex, vec2(tc12.x, tc12.y)) * w12.x * w12.y +
+                texture(tex, vec2(tc3.x,  tc12.y)) * w3.x * w12.y +
+                texture(tex, vec2(tc0.x,  tc3.y))  * w0.x * w3.y +
+                texture(tex, vec2(tc12.x, tc3.y))  * w12.x * w3.y +
+                texture(tex, vec2(tc3.x,  tc3.y))  * w3.x * w3.y;
+
+            return result;
+        }
+
+        // Smart texture sampling that only interpolates when scaling
+        vec4 sampleTextureAdaptive(sampler2D tex, vec2 uv) {
+            vec2 texSize = vec2(textureSize(tex, 0));
+
+            vec2 dudx = dFdx(uv) * texSize;
+            vec2 dudy = dFdy(uv) * texSize;
+
+            float footprint = max(length(dudx), length(dudy));
+
+            // Skip resampling at native resolution
+            if (abs(footprint - 1.0) < 0.05)
+                return texture(tex, uv);
+
+            return textureCatmullRom(tex, uv);
+        }
+
         )" << R"(
         void main(void) {
             vec4 result;
@@ -910,7 +1006,8 @@ int nvg__renderCreate(void* uptr)
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
 
                 float strokeAlpha = strokeMask(getLineStyle());
-                vec4 color = texture(tex, vec2(pt.x, getReverse() ? 1.0f - pt.y : pt.y));
+                vec4 color = sampleTextureAdaptive(tex, vec2(pt.x, getReverse() ? 1.0f - pt.y : pt.y));
+
                 int texType = getTexType();
                 if (texType == 1) color = vec4(color.xyz*color.w,color.w);
                 if (texType == 2) color = vec4(color.x);
