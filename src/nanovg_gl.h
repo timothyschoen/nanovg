@@ -728,53 +728,6 @@ int nvg__renderCreate(void* uptr)
             return bool(stateData & 0x01);      // 1 bit
         }
 
-        vec4 textureBicubic(sampler2D tex, vec2 uv) {
-            vec2 texSize = vec2(textureSize(tex, 0));
-            vec2 texelSize = 1.0 / texSize;
-
-            uv = uv * texSize - 0.5;
-            vec2 fxy = fract(uv);
-            uv -= fxy;
-
-            // Cubic B-spline weights
-            vec4 xcubic = vec4(
-                (((-1.0/6.0) * fxy.x + 0.5) * fxy.x - 0.5) * fxy.x + 1.0/6.0,
-                (((0.5) * fxy.x - 1.0) * fxy.x) * fxy.x + 2.0/3.0,
-                (((-0.5) * fxy.x + 0.5) * fxy.x + 0.5) * fxy.x + 1.0/6.0,
-                ((1.0/6.0) * fxy.x) * fxy.x * fxy.x
-            );
-
-            vec4 ycubic = vec4(
-                (((-1.0/6.0) * fxy.y + 0.5) * fxy.y - 0.5) * fxy.y + 1.0/6.0,
-                (((0.5) * fxy.y - 1.0) * fxy.y) * fxy.y + 2.0/3.0,
-                (((-0.5) * fxy.y + 0.5) * fxy.y + 0.5) * fxy.y + 1.0/6.0,
-                ((1.0/6.0) * fxy.y) * fxy.y * fxy.y
-            );
-
-            vec4 c = uv.xyyy + vec4(-0.5, -0.5, 0.5, 1.5);
-            vec4 s = vec4(
-                xcubic.x + xcubic.y,
-                xcubic.z + xcubic.w,
-                0.0, 0.0
-            );
-            vec4 offset = c + vec4(xcubic.y, xcubic.w, 0.0, 0.0) / s;
-
-            offset *= texelSize.xxyy;
-
-            vec4 sample0 = texture(tex, offset.xz) * ycubic.x;
-            vec4 sample1 = texture(tex, offset.yz) * ycubic.x;
-            vec4 sample2 = texture(tex, offset.xw) * ycubic.y;
-            vec4 sample3 = texture(tex, offset.yw) * ycubic.y;
-
-            float sx = s.x / (s.x + s.y);
-
-            return mix(
-                mix(sample2, sample3, sx),
-                mix(sample0, sample1, sx),
-                ycubic.z / (ycubic.y + ycubic.z)
-            );
-        }
-
         vec4 sampleLevel0( sampler2D tex, vec2 uv )
         {
             return textureLod( tex, uv, 0.0 );
@@ -831,6 +784,66 @@ int nvg__renderCreate(void* uptr)
             return result;
         }
 
+        float mitchell(float x, float B, float C) {
+            x = abs(x);
+            if (x < 1.0) {
+                return ((12.0 - 9.0*B - 6.0*C) * x*x*x +
+                        (-18.0 + 12.0*B + 6.0*C) * x*x +
+                        (6.0 - 2.0*B)) / 6.0;
+            } else if (x < 2.0) {
+                return ((-B - 6.0*C) * x*x*x +
+                        (6.0*B + 30.0*C) * x*x +
+                        (-12.0*B - 48.0*C) * x +
+                        (8.0*B + 24.0*C)) / 6.0;
+            }
+            return 0.0;
+        }
+
+        vec4 textureMitchellNetravali(sampler2D tex, vec2 uv) {
+            const float B = 1.0/3.0;
+            const float C = 1.0/3.0;
+
+            vec2 texSize = textureSize(tex, 0);
+            vec2 samplePos = uv * texSize;
+            vec2 texPos1 = floor(samplePos - 0.5) + 0.5;
+            vec2 f = samplePos - texPos1;
+
+            // Calculate weights for 4 taps in each direction
+            float wx[4], wy[4];
+            for (int i = 0; i < 4; i++) {
+                wx[i] = mitchell(f.x - float(i - 1), B, C);
+                wy[i] = mitchell(f.y - float(i - 1), B, C);
+            }
+
+            // Combine middle weights for bilinear optimization
+            float wx12 = wx[1] + wx[2];
+            float wy12 = wy[1] + wy[2];
+            vec2 offset12 = vec2(wx[2] / (wx12 + 0.0001), wy[2] / (wy12 + 0.0001));
+
+            // Calculate sample positions
+            vec2 texPos0 = texPos1 - 1.0;
+            vec2 texPos3 = texPos1 + 2.0;
+            vec2 texPos12 = texPos1 + offset12;
+
+            texPos0 /= texSize;
+            texPos3 /= texSize;
+            texPos12 /= texSize;
+
+            // Sample with bilinear optimization (9 samples instead of 16)
+            vec4 result = vec4(0.0);
+            result += sampleLevel0(tex, vec2(texPos0.x, texPos0.y)) * wx[0] * wy[0];
+            result += sampleLevel0(tex, vec2(texPos12.x, texPos0.y)) * wx12 * wy[0];
+            result += sampleLevel0(tex, vec2(texPos3.x, texPos0.y)) * wx[3] * wy[0];
+            result += sampleLevel0(tex, vec2(texPos0.x, texPos12.y)) * wx[0] * wy12;
+            result += sampleLevel0(tex, vec2(texPos12.x, texPos12.y)) * wx12 * wy12;
+            result += sampleLevel0(tex, vec2(texPos3.x, texPos12.y)) * wx[3] * wy12;
+            result += sampleLevel0(tex, vec2(texPos0.x, texPos3.y)) * wx[0] * wy[3];
+            result += sampleLevel0(tex, vec2(texPos12.x, texPos3.y)) * wx12 * wy[3];
+            result += sampleLevel0(tex, vec2(texPos3.x, texPos3.y)) * wx[3] * wy[3];
+
+            return result;
+        }
+
         // Smart texture sampling that only interpolates when scaling
         vec4 sampleTextureAdaptive(sampler2D tex, vec2 uv) {
         #ifdef GL_ES // Don't do extra interpolation on embedded platforms, it's too slow
@@ -847,10 +860,12 @@ int nvg__renderCreate(void* uptr)
             if (abs(footprint - 1.0) < 0.05)
                 return texture(tex, uv);
 
+            // Upscale using Catmull-Rom
             if (footprint < 1.0)
                 return textureCatmullRom(tex, uv);
 
-            return texture(tex, uv);
+            // Downscale using Michell-Netravali
+            return textureMitchellNetravali(tex, uv);
         }
 
         )" << R"(

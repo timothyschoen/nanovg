@@ -117,6 +117,66 @@ float4 textureCatmullRom(texture2d<float> tex,
     return result;
 }
 
+float mitchell(float x, float B, float C) {
+    x = abs(x);
+    if (x < 1.0) {
+        return ((12.0 - 9.0*B - 6.0*C) * x*x*x +
+                (-18.0 + 12.0*B + 6.0*C) * x*x +
+                (6.0 - 2.0*B)) / 6.0;
+    } else if (x < 2.0) {
+        return ((-B - 6.0*C) * x*x*x +
+                (6.0*B + 30.0*C) * x*x +
+                (-12.0*B - 48.0*C) * x +
+                (8.0*B + 24.0*C)) / 6.0;
+    }
+    return 0.0;
+}
+
+float4 textureMitchellNetravali(texture2d<float> tex, sampler samp, float2 uv) {
+    const float B = 1.0/3.0;
+    const float C = 1.0/3.0;
+
+    float2 texSize = float2(tex.get_width(), tex.get_height());
+    float2 samplePos = uv * texSize;
+    float2 texPos1 = floor(samplePos - 0.5) + 0.5;
+    float2 f = samplePos - texPos1;
+
+    // Calculate weights for 4 taps in each direction
+    float wx[4], wy[4];
+    for (int i = 0; i < 4; i++) {
+        wx[i] = mitchell(f.x - float(i - 1), B, C);
+        wy[i] = mitchell(f.y - float(i - 1), B, C);
+    }
+
+    // Combine middle weights for bilinear optimization
+    float wx12 = wx[1] + wx[2];
+    float wy12 = wy[1] + wy[2];
+    float2 offset12 = float2(wx[2] / (wx12 + 0.0001), wy[2] / (wy12 + 0.0001));
+
+    // Calculate sample positions
+    float2 texPos0 = texPos1 - 1.0;
+    float2 texPos3 = texPos1 + 2.0;
+    float2 texPos12 = texPos1 + offset12;
+
+    texPos0 /= texSize;
+    texPos3 /= texSize;
+    texPos12 /= texSize;
+
+    // Sample with bilinear optimization (9 samples instead of 16)
+    float4 result = float4(0.0);
+    result += tex.sample(samp, float2(texPos0.x, texPos0.y), level(0)) * wx[0] * wy[0];
+    result += tex.sample(samp, float2(texPos12.x, texPos0.y), level(0)) * wx12 * wy[0];
+    result += tex.sample(samp, float2(texPos3.x, texPos0.y), level(0)) * wx[3] * wy[0];
+    result += tex.sample(samp, float2(texPos0.x, texPos12.y), level(0)) * wx[0] * wy12;
+    result += tex.sample(samp, float2(texPos12.x, texPos12.y), level(0)) * wx12 * wy12;
+    result += tex.sample(samp, float2(texPos3.x, texPos12.y), level(0)) * wx[3] * wy12;
+    result += tex.sample(samp, float2(texPos0.x, texPos3.y), level(0)) * wx[0] * wy[3];
+    result += tex.sample(samp, float2(texPos12.x, texPos3.y), level(0)) * wx12 * wy[3];
+    result += tex.sample(samp, float2(texPos3.x, texPos3.y), level(0)) * wx[3] * wy[3];
+
+    return result;
+}
+
 float4 sampleTextureAdaptive(texture2d<float> tex,
                              sampler samp,
                              float2 uv)
@@ -128,11 +188,16 @@ float4 sampleTextureAdaptive(texture2d<float> tex,
 
     float footprint = max(length(dudx), length(dudy));
 
+    // Skip resampling at native resolution
+    if (abs(footprint - 1.0) < 0.05)
+        return tex.sample(samp, uv);
+
     // Upscale using Catmull-Rom
     if (footprint < 1.0)
         return textureCatmullRom(tex, samp, uv);
 
-    return tex.sample(samp, uv);
+    // Downscale using Michell-Netravali
+    return textureMitchellNetravali(tex, samp, uv);
 }
 
 float inverseLerp(float a, float b, float value) {
