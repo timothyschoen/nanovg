@@ -319,13 +319,13 @@ typedef enum {
 static int nvg__packStateDataUniform(PackType packType, int value) {
     switch (packType) {
         case PACK_OBJECT_STYLE:
-            return (value & 0x01) << 12;
+            return (value & 0x01) << 11;
         case PACK_FLAG_TYPE:
-            return (value & 0x03) << 10;
+            return (value & 0x03) << 9;
         case PACK_LINE_STYLE:
-            return (value & 0x03) << 8;
+            return (value & 0x03) << 7;
         case PACK_TEX_TYPE:
-            return (value & 0x07) << 5;
+            return (value & 0x03) << 5;
         case PACK_REVERSE:
             return value & 0x01;
         default:
@@ -564,8 +564,8 @@ MNVGframebuffer* mnvgCreateFramebuffer(NVGcontext* ctx, int width,
         return NULL;
 
     memset(framebuffer, 0, sizeof(MNVGframebuffer));
-    framebuffer->image = nvgCreateImageRGBA(ctx, width, height,
-                                            imageFlags | NVG_IMAGE_PREMULTIPLIED,
+    framebuffer->image = nvgCreateImageARGB(ctx, width, height,
+                                            imageFlags,
                                             NULL);
 
     framebuffer->ctx = ctx;
@@ -607,7 +607,7 @@ void mnvgReadPixels(NVGcontext* ctx, MNVGframebuffer* fb, int x, int y, int widt
   if (tex == nil) return;
 
   NSUInteger bytesPerRow;
-  if (tex->type == NVG_TEXTURE_RGBA || tex->type == NVG_TEXTURE_ARGB) {
+  if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB) {
     bytesPerRow = width * 4;
   } else {
     bytesPerRow = width;
@@ -828,18 +828,9 @@ void* mnvgDevice(NVGcontext* ctx) {
         case PAINT_TYPE_FILLIMG: {
             MNVGtexture* tex = [self findTexture:paint->image];
             if (tex == nil) return 0;
-            if (tex->flags & NVG_IMAGE_FLIPY) {
+            frag->stateData |= nvg__packStateDataUniform(PACK_TEX_TYPE, tex->type);
+            if (tex->flags & NVG_IMAGE_FLIPY)
                 frag->stateData |= nvg__packStateDataUniform(PACK_REVERSE, true);
-            }
-            if (tex->type == NVG_TEXTURE_RGBA)
-                frag->stateData |= nvg__packStateDataUniform(PACK_TEX_TYPE, (tex->flags & NVG_IMAGE_PREMULTIPLIED) ? 0 : 1);
-            else if(tex->type == NVG_TEXTURE_ALPHA)
-                frag->stateData |= nvg__packStateDataUniform(PACK_TEX_TYPE, 4);
-            else if(tex->type == NVG_TEXTURE_ARGB)
-                frag->stateData |= nvg__packStateDataUniform(PACK_TEX_TYPE, 3);
-            else
-                frag->stateData |= nvg__packStateDataUniform(PACK_TEX_TYPE, 2);
-
             break;
         }
         case PAINT_TYPE_OBJECT_RECT: {
@@ -1202,6 +1193,10 @@ void* mnvgDevice(NVGcontext* ctx) {
     if (type == NVG_TEXTURE_ALPHA) {
         pixelFormat = MTLPixelFormatR8Unorm;
     }
+    else if(type == NVG_TEXTURE_ARGB_SRGB)
+    {
+        pixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
+    }
 
     tex->type = type;
     tex->flags = imageFlags;
@@ -1220,7 +1215,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 
     if (data != NULL) {
         NSUInteger bytesPerRow;
-        if (tex->type == NVG_TEXTURE_RGBA || tex->type == NVG_TEXTURE_ARGB) {
+        if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB) {
             bytesPerRow = width * 4;
         } else {
             bytesPerRow = (width + 3) & ~3;
@@ -1699,8 +1694,7 @@ error:
                  lineReversed:0];
 
     if(text) {
-        frag->type = PAINT_TYPE_IMG;
-        frag->stateData = nvg__packStateDataUniform(PACK_TEX_TYPE, 2);
+        frag->type = PAINT_TYPE_TEXT;
     }
 
     return;
@@ -1723,7 +1717,7 @@ error:
 
     unsigned char* bytes;
     NSUInteger bytesPerRow;
-    if (tex->type == NVG_TEXTURE_RGBA || tex->type == NVG_TEXTURE_ARGB) {
+    if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB) {
         bytesPerRow = tex->tex.width * 4;
         bytes = (unsigned char*)data + y * bytesPerRow + x * 4;
     } else {

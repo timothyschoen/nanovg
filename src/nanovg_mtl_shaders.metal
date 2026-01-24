@@ -30,7 +30,7 @@ typedef enum {
   MNVG_SHADER_FILLGRAD,
   MNVG_SHADER_FILLIMG,
   MNVG_SHADER_FILLIMG_ALPHA,
-  MNVG_SHADER_IMG,
+  MNVG_SHADER_TEXT,
   MNVG_SHADER_FAST_ROUNDEDRECT,
   MNVG_SHADER_FILLCOLOR,
   MNVG_SHADER_DOUBLE_STROKE,
@@ -40,6 +40,12 @@ typedef enum {
   MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY,
   MNVG_SHADER_OBJECT_RECT,
 } FragmentShaderCall;
+
+typedef enum {
+    MNVG_TEXTURE_ALPHA,
+	MNVG_TEXTURE_ARGB,
+    MNVG_TEXTURE_ARGB_SRGB,
+} TexType;
 
 typedef struct {
   float2 pos [[attribute(0)]];
@@ -72,10 +78,11 @@ typedef struct  {
 } Uniforms;
 
 int getLineStyle(constant Uniforms& uniforms){
-    return (uniforms.stateData >> 8) & 0x03;     // 2 bits
+    return (uniforms.stateData >> 7) & 0x03;     // 2 bits
 }
-int getTexType(constant Uniforms& uniforms){
-    return (uniforms.stateData >> 5) & 0x07;     // 3 bits (0,1,2,3,4)
+
+TexType getTexType(constant Uniforms& uniforms){
+    return TexType((uniforms.stateData >> 5) & 0x03);     // 2 bits (0,1,2,3)
 }
 bool getReverse(constant Uniforms& uniforms){
     return bool(uniforms.stateData & 0x01);      // 1 bit
@@ -243,6 +250,14 @@ float dashed(float2 uv, float rad, float thickness, float featherVal) {
     return w;
 }
 
+inline float4 linearToSrgb(float4 col)
+{
+    float3 c = col.rgb;
+    float3 lo = c * 12.92;
+    float3 hi = 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+    return float4(select(hi, lo, c <= 0.0031308), col.a);
+}
+
 float dotted(float2 uv) {
   float fy = 4.0 * fract(uv.y / 4.0) - 0.5;
   return smoothstep(0.0, 1.0, 6.0 * (0.25 - dot(uv, uv + float2(0.0, fy))));
@@ -327,16 +342,9 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
 
   switch(uniforms.type)
   {
-    case MNVG_SHADER_IMG: {
+    case MNVG_SHADER_TEXT: {
         float4 color = texture.sample(sampler, float2(in.ftcoord.x, getReverse(uniforms) ? 1.0f - in.ftcoord.y : in.ftcoord.y));
-        if (getTexType(uniforms) == 1)
-            color = float4(color.xyz * color.w, color.w);
-        else if (getTexType(uniforms) == 2)
-            color = float4(color.x);
-        else if (getTexType(uniforms) == 3)
-            color = color;
-        color *= scissor;
-        return (color * convertColour(uniforms.innerCol));
+        return float4(color.x) * scissor * convertColour(uniforms.innerCol);
     }
     case MNVG_SHADER_FAST_ROUNDEDRECT:
     {
@@ -428,13 +436,13 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     case MNVG_SHADER_OBJECT_RECT:
     {
         float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos,1.0f)).xy;
-        int flagType = (uniforms.stateData >> 10) & 0x03;     // 2 bits
+        int flagType = (uniforms.stateData >> 9) & 0x03;     // 2 bits
 
         float2 flagPoints[3];
         float flagSize = 5.0f;
         flagPoints[2] = float2(0.0f, -1.0f) * flagSize;
 
-        bool objectOutline = bool((uniforms.stateData >> 12) & 0x01); // 1 bit (off or on)
+        bool objectOutline = bool((uniforms.stateData >> 11) & 0x01); // 1 bit (off or on)
 
         float offset = objectOutline ? 0.2f : -0.5f;
 
@@ -513,11 +521,9 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         float strokeAlpha = strokeMask(uniforms, in);
         float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
         float4 color = texture.sample(sampler, float2(pt.x, getReverse(uniforms) ? 1.0f - pt.y : pt.y));
-        float alpha = color.a;
-        if (getTexType(uniforms) == 1) alpha = color.w;
-        if (getTexType(uniforms) == 2) alpha = color.x;
-        if (getTexType(uniforms) == 4) alpha = color.r; // single channel GL_RED
-        // Apply color tint and alpha.
+        float alpha = color.x;
+        if (getTexType(uniforms) == MNVG_TEXTURE_ALPHA) alpha = color.r;
+        // Apply color tint and alpha
         float3 maskColor = getRawColour(uniforms.innerCol).bgr;
         return float4(maskColor * alpha, alpha) * strokeAlpha * scissor;
     }
@@ -527,9 +533,10 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
         float4 color = sampleTextureAdaptive(texture, sampler, float2(pt.x, getReverse(uniforms) ? 1.0f - pt.y : pt.y));
 
-        if (getTexType(uniforms) == 1) color = float4(color.xyz * color.w, color.w);
-        else if (getTexType(uniforms) == 2) color = float4(color.x);
-        else if (getTexType(uniforms) == 3) color = color;
+        int texType = getTexType(uniforms);
+        if (texType == MNVG_TEXTURE_ALPHA) color = float4(color.x);
+        else if (texType == MNVG_TEXTURE_ARGB) color = color;
+        else if (texType == MNVG_TEXTURE_ARGB_SRGB) color = linearToSrgb(color);
         return (color * scissor * strokeAlpha).rgba;
     }
   }

@@ -194,9 +194,8 @@ NVGLUframebuffer* nvgluCreateFramebuffer(NVGcontext* ctx, int w, int h, int imag
 	if (fb == NULL) goto error;
 	memset(fb, 0, sizeof(NVGLUframebuffer));
 
-	fb->image = nvgCreateImageRGBA(ctx, w, h, imageFlags | NVG_IMAGE_FLIPY, NULL);
+	fb->image = nvgCreateImageARGB(ctx, w, h, imageFlags | NVG_IMAGE_FLIPY, NULL);
 	fb->texture = nvglImageHandle(ctx, fb->image);
-
 
 	fb->ctx = ctx;
 

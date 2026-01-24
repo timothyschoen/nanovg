@@ -31,11 +31,6 @@
 #define FONTSTASH_IMPLEMENTATION
 #include "fontstash.h"
 
-#ifndef NVG_NO_STB
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-#endif
-
 #ifdef _MSC_VER
 #pragma warning(disable: 4100)  // unreferenced formal parameter
 #pragma warning(disable: 4127)  // conditional expression is constant
@@ -913,45 +908,14 @@ void nvgFillPaint(NVGcontext* ctx, NVGpaint paint)
 	nvgTransformMultiply(state->fill.xform, state->xform);
 }
 
-#ifndef NVG_NO_STB
-int nvgCreateImage(NVGcontext* ctx, const char* filename, int imageFlags)
-{
-	int w, h, n, image;
-	unsigned char* img;
-	stbi_set_unpremultiply_on_load(1);
-	stbi_convert_iphone_png_to_rgb(1);
-	img = stbi_load(filename, &w, &h, &n, 4);
-	if (img == NULL) {
-//		printf("Failed to load %s - %s\n", filename, stbi_failure_reason());
-		return 0;
-	}
-	image = nvgCreateImageRGBA(ctx, w, h, imageFlags, img);
-	stbi_image_free(img);
-	return image;
-}
-
-int nvgCreateImageMem(NVGcontext* ctx, int imageFlags, unsigned char* data, int ndata)
-{
-	int w, h, n, image;
-	unsigned char* img = stbi_load_from_memory(data, ndata, &w, &h, &n, 4);
-	if (img == NULL) {
-//		printf("Failed to load %s - %s\n", filename, stbi_failure_reason());
-		return 0;
-	}
-	image = nvgCreateImageRGBA(ctx, w, h, imageFlags, img);
-	stbi_image_free(img);
-	return image;
-}
-#endif
-
-int nvgCreateImageRGBA(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data)
-{
-	return nvg__renderCreateTexture(ctx->backend, NVG_TEXTURE_RGBA, w, h, imageFlags, data);
-}
-
 int nvgCreateImageARGB(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data)
 {
     return nvg__renderCreateTexture(ctx->backend, NVG_TEXTURE_ARGB, w, h, imageFlags, data);
+}
+
+int nvgCreateImageARGB_sRGB(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data)
+{
+    return nvg__renderCreateTexture(ctx->backend, NVG_TEXTURE_ARGB_SRGB, w, h, imageFlags, data);
 }
 
 int nvgCreateImageAlpha(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data)
@@ -3213,7 +3177,7 @@ static void nvg__renderText(NVGcontext* ctx, NVGvertex* verts, int nverts)
 	NVGpaint paint = state->fill;
 
 	// Render triangles.
-    paint.type = PAINT_TYPE_IMG;
+    paint.type = PAINT_TYPE_TEXT;
 	paint.image = ctx->fontImages[ctx->fontImageIdx];
 
 	// Apply global alpha
