@@ -88,42 +88,6 @@ bool getReverse(constant Uniforms& uniforms){
     return bool(uniforms.stateData & 0x01);      // 1 bit
 }
 
-float4 textureCatmullRom(texture2d<float> tex,
-                         sampler samp,
-                         float2 uv)
-{
-    float2 texSize = float2(tex.get_width(), tex.get_height());
-    float2 texelSize = 1.0 / texSize;
-
-    float2 samplePos = uv * texSize;
-    float2 tc = floor(samplePos - 0.5) + 0.5;
-    float2 f = samplePos - tc;
-
-    float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
-    float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
-    float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
-    float2 w3 = f * f * (-0.5 + 0.5 * f);
-
-    float2 w12 = w1 + w2;
-
-    float2 tc0  = (tc - 1.0) * texelSize;
-    float2 tc12 = (tc + w2 / w12) * texelSize;
-    float2 tc3  = (tc + 2.0) * texelSize;
-
-    float4 result =
-        tex.sample(samp, float2(tc0.x,  tc0.y), level(0))  * w0.x * w0.y +
-        tex.sample(samp, float2(tc12.x, tc0.y), level(0))  * w12.x * w0.y +
-        tex.sample(samp, float2(tc3.x,  tc0.y), level(0))  * w3.x * w0.y +
-        tex.sample(samp, float2(tc0.x,  tc12.y), level(0)) * w0.x * w12.y +
-        tex.sample(samp, float2(tc12.x, tc12.y), level(0)) * w12.x * w12.y +
-        tex.sample(samp, float2(tc3.x,  tc12.y), level(0)) * w3.x * w12.y +
-        tex.sample(samp, float2(tc0.x,  tc3.y), level(0))  * w0.x * w3.y +
-        tex.sample(samp, float2(tc12.x, tc3.y), level(0)) * w12.x * w3.y +
-        tex.sample(samp, float2(tc3.x,  tc3.y), level(0))  * w3.x * w3.y;
-
-    return result;
-}
-
 float mitchell(float x, float B, float C) {
     x = abs(x);
     if (x < 1.0) {
@@ -195,16 +159,11 @@ float4 sampleTextureAdaptive(texture2d<float> tex,
 
     float footprint = max(length(dudx), length(dudy));
 
-    // Skip resampling at native resolution
-    if (abs(footprint - 1.0) < 0.05)
-        return tex.sample(samp, uv);
-
-    // Upscale using Catmull-Rom
+    // Upscale using Michell-Netravali
     if (footprint < 1.0)
-        return textureCatmullRom(tex, samp, uv);
+        return textureMitchellNetravali(tex, samp, uv);
 
-    // Downscale using Michell-Netravali
-    return textureMitchellNetravali(tex, samp, uv);
+    return tex.sample(samp, uv, bias(-0.5));
 }
 
 float inverseLerp(float a, float b, float value) {
