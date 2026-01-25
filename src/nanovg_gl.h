@@ -761,8 +761,8 @@ int nvg__renderCreate(void* uptr)
         }
 
         vec4 textureMitchellNetravali(sampler2D tex, vec2 uv) {
-            const float B = 1.0/3.0;
-            const float C = 1.0/3.0;
+            const float B = 1.0/2.0;
+            const float C = 1.0/6.0;
 
             vec2 texSize = textureSize(tex, 0);
             vec2 samplePos = uv * texSize;

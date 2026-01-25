@@ -104,8 +104,8 @@ float mitchell(float x, float B, float C) {
 }
 
 float4 textureMitchellNetravali(texture2d<float> tex, sampler samp, float2 uv) {
-    const float B = 1.0/3.0;
-    const float C = 1.0/3.0;
+    const float B = 1.0/2.0;
+    const float C = 1.0/6.0;
 
     float2 texSize = float2(tex.get_width(), tex.get_height());
     float2 samplePos = uv * texSize;
