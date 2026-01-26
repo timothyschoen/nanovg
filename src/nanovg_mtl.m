@@ -492,7 +492,12 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
 }
 #else
 void mnvgSetViewBounds(void* view, int width, int height) {
-    [(CAMetalLayer*)[(__bridge NSView*)view layer] setDrawableSize:CGSizeMake(width, height)];
+    CGSize newSize = CGSizeMake(width, height);
+    CAMetalLayer* layer = (CAMetalLayer*)[(__bridge NSView*)view layer];
+                                          
+    if (!CGSizeEqualToSize(layer.drawableSize, newSize)) {
+        [layer setDrawableSize:CGSizeMake(width, height)];
+    }
 }
 
 NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
