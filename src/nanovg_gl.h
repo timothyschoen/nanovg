@@ -824,6 +824,30 @@ int nvg__renderCreate(void* uptr)
             return texture(tex, uv, -0.5);
         }
 
+        float sdfCov(float D, float sdfscale)
+        {
+          return clamp((D - 0.5f)/sdfscale + radius, 0.0f, 1.0f);
+        }
+
+        float superSDF(sampler2D tex, vec2 st)
+        {
+          vec2 tex_wh = vec2(textureSize(tex, 0));
+          vec2 dst_dx = dFdx(st) * tex_wh;
+          float s = (32.0f/255.0f) * length(dst_dx);
+          s = 0.5f*s;  // subpixel adjustment
+
+          // Subpixel offsets
+          float dx = dFdx(st).x / 4.0f;
+          float dy = dFdy(st).y / 4.0f;
+
+          float d11 = texture(tex, st + vec2(dx, dy)).r;
+          float d10 = texture(tex, st + vec2(dx,-dy)).r;
+          float d01 = texture(tex, st + vec2(-dx, dy)).r;
+          float d00 = texture(tex, st + vec2(-dx,-dy)).r;
+
+          return 0.25f*(sdfCov(d11, s) + sdfCov(d10, s) + sdfCov(d01, s) + sdfCov(d00, s));
+        }
+        
         )" << R"(
         void main(void) {
             vec4 result;
@@ -1027,8 +1051,8 @@ int nvg__renderCreate(void* uptr)
                 return;
             }
             case NSVG_SHADER_TEXT: {
-                vec4 color = texture(tex, ftcoord);
-                outColor = vec4(color.x) * scissor * convertColour(innerCol);
+                float cov = scissor * superSDF(tex, ftcoord);
+                outColor = vec4(cov) * convertColour(innerCol);
                 return;
             }
             default:

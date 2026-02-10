@@ -277,6 +277,31 @@ float2 rotatePoint(float2 p, float angle) {
     return rotationMatrix * p;
 }
 
+float sdfCov(float D, float sdfscale, float radius)
+{
+  return clamp((D - 0.5f)/sdfscale + radius, 0.0f, 1.0f);
+}
+
+float superSDF(texture2d<float> tex, sampler samp, float2 st, float radius)
+{
+  float2 tex_wh = float2(tex.get_width(), tex.get_height());
+  float2 dst_dx = dfdx(st) * tex_wh;
+  float s = (32.0f/255.0f) * length(dst_dx);
+  s = 0.5f * s;  // subpixel adjustment
+
+  // Subpixel offsets
+  float dx = dfdx(st).x / 4.0f;
+  float dy = dfdy(st).y / 4.0f;
+
+  float d11 = tex.sample(samp, st + float2(dx, dy)).r;
+  float d10 = tex.sample(samp, st + float2(dx, -dy)).r;
+  float d01 = tex.sample(samp, st + float2(-dx, dy)).r;
+  float d00 = tex.sample(samp, st + float2(-dx, -dy)).r;
+
+  return 0.25f * (sdfCov(d11, s, radius) + sdfCov(d10, s, radius) +
+                  sdfCov(d01, s, radius) + sdfCov(d00, s, radius));
+}
+
 // Vertex Function
 vertex RasterizerData vertexShader(Vertex vert [[stage_in]],
                                    constant float2& viewSize [[buffer(1)]]) {
@@ -302,7 +327,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
   switch(uniforms.type)
   {
     case MNVG_SHADER_TEXT: {
-        float4 color = texture.sample(sampler, float2(in.ftcoord.x, getReverse(uniforms) ? 1.0f - in.ftcoord.y : in.ftcoord.y));
+        float4 color = scissor * superSDF(texture, sampler, in.ftcoord, uniforms.radius);
         return float4(color.x) * scissor * convertColour(uniforms.innerCol);
     }
     case MNVG_SHADER_FAST_ROUNDEDRECT:
