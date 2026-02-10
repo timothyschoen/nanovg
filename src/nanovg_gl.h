@@ -818,7 +818,7 @@ int nvg__renderCreate(void* uptr)
             float footprint = max(length(dudx), length(dudy));
 
             // Upscale using Mitchell-Netravali
-            if (footprint < 1.0)
+            if (footprint < 0.995)
                 return textureMitchellNetravali(tex, uv);
 
             return texture(tex, uv, -0.5);

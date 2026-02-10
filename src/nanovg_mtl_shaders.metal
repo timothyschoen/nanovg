@@ -160,7 +160,7 @@ float4 sampleTextureAdaptive(texture2d<float> tex,
     float footprint = max(length(dudx), length(dudy));
 
     // Upscale using Michell-Netravali
-    if (footprint < 1.0)
+    if (footprint < 0.995)
         return textureMitchellNetravali(tex, samp, uv);
 
     return tex.sample(samp, uv, bias(-0.5));
