@@ -764,7 +764,7 @@ int nvg__renderCreate(void* uptr)
             const float B = 1.0/2.0;
             const float C = 1.0/6.0;
 
-            vec2 texSize = textureSize(tex, 0);
+            vec2 texSize = vec2(textureSize(tex, 0));
             vec2 samplePos = uv * texSize;
             vec2 texPos1 = floor(samplePos - 0.5) + 0.5;
             vec2 f = samplePos - texPos1;
@@ -847,7 +847,7 @@ int nvg__renderCreate(void* uptr)
 
           return 0.25f*(sdfCov(d11, s) + sdfCov(d10, s) + sdfCov(d01, s) + sdfCov(d00, s));
         }
-        
+
         )" << R"(
         void main(void) {
             vec4 result;
