@@ -151,7 +151,8 @@ struct NVGcontext {
 	float devicePxRatio;
 	struct FONScontext* fs;
 	int fontImages[NVG_MAX_FONTIMAGES];
-    uint8_t fontImageIdx;
+    int16_t fontImageIdx;
+    float atlasTextThresh;
 #if DEBUG
 	int drawCallCount;
 	int fillTriCount;
@@ -332,7 +333,7 @@ NVGcontext* nvgCreateInternal(NVGbackend backend)
 	if (!ctx->commands) goto error;
 	ctx->ncommands = 0;
 	ctx->ccommands = NVG_INIT_COMMANDS_SIZE;
-    
+
 	ctx->cache = nvg__allocPathCache();
 	if (ctx->cache == NULL) goto error;
 
@@ -345,25 +346,20 @@ NVGcontext* nvgCreateInternal(NVGbackend backend)
 
 	// Init font rendering
 	memset(&fontParams, 0, sizeof(fontParams));
-	fontParams.width = NVG_INIT_FONTIMAGE_SIZE;
-	fontParams.height = NVG_INIT_FONTIMAGE_SIZE;
-	fontParams.flags = FONS_ZERO_TOPLEFT;
-	fontParams.renderCreate = NULL;
-	fontParams.renderUpdate = NULL;
-	fontParams.renderDraw = NULL;
-	fontParams.renderDelete = NULL;
-	fontParams.userPtr = NULL;
+	//fontParams.width = NVG_INIT_FONTIMAGE_SIZE;
+	//fontParams.height = NVG_INIT_FONTIMAGE_SIZE;
+    fontParams.flags = FONS_ZERO_TOPLEFT;
+    fontParams.flags |= FONS_SUMMED;
+    // these must match values in shader
+    fontParams.sdfPadding = 4;
+    fontParams.sdfPixelDist = 32.0f;
 	ctx->fs = fonsCreateInternal(&fontParams);
 	if (ctx->fs == NULL) goto error;
 
-	// Create font texture
-	ctx->fontImages[0] = nvg__renderCreateTexture(ctx->backend, NVG_TEXTURE_ALPHA, fontParams.width, fontParams.height, 0, NULL);
-	if (ctx->fontImages[0] == 0) goto error;
-	ctx->fontImageIdx = 0;
-    ctx->scissor = {0.0f, 0.0f, -1.0f, -1.0f};
-  
+    ctx->fontImageIdx = -1;
+
     ctx->strokeCache = new StrokeCache();
-    
+
 	return ctx;
 
 error:
@@ -400,7 +396,7 @@ void nvgDeleteInternal(NVGcontext* ctx)
 	}
 
     nvg__renderDelete(ctx->backend);
-  
+
     free(ctx);
 }
 
@@ -678,6 +674,17 @@ static void nvg__setPaintColor(NVGpaint* p, NVGcolor color)
     p->type = PAINT_TYPE_FILLCOLOR;
 }
 
+static void nvg__fonsSetup(NVGcontext* ctx, FONSstate* fons)  //, float scale)
+{
+  NVGstate* state = nvg__getState(ctx);
+  fonsInitState(ctx->fs, fons);
+  fonsSetFont(fons, state->fontId);
+  fonsSetSize(fons, fonsEmSizeToSize(fons, state->fontSize));  //*scale));
+  fonsSetSpacing(fons, state->letterSpacing);  //*scale);
+  //fonsSetBlur(fons, state->fontBlur);  //*scale);
+  fonsSetAlign(fons, state->textAlign);
+}
+
 
 // State handling
 void nvgSave(NVGcontext* ctx)
@@ -869,7 +876,7 @@ void nvgTransformQuantize(NVGcontext* ctx)
 {
     float tx, ty;
     nvgTransformGetSubpixelOffset(ctx, &tx, &ty);
-    
+
     NVGstate* state = nvg__getState(ctx);
     state->xform[4] -= tx;
     state->xform[5] -= ty;
@@ -958,7 +965,7 @@ NVGpaint nvgDoubleStroke(NVGcontext* ctx, NVGcolor icol, NVGcolor ocol, NVGcolor
     if(showActivity) p.type = isGradientStroke ? PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY : PAINT_TYPE_DOUBLE_STROKE_ACTIVITY;
     else p.type = isGradientStroke ? PAINT_TYPE_DOUBLE_STROKE_GRAD : PAINT_TYPE_DOUBLE_STROKE;
     p.connection_activity = showActivity;
-    
+
     NVGstate* state = nvg__getState(ctx);
     state->lineStyle = NVG_DOUBLE_STROKE;
     return p;
@@ -969,7 +976,7 @@ void nvgSmoothGlow(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor
     NVGpaint p;
     memset(&p, 0, sizeof(p));
     nvgTransformIdentity(p.xform);
-    
+
     p.type = PAINT_TYPE_SMOOTH_GLOW;
     p.radius = radius;
     p.feather = feather;
@@ -1095,7 +1102,7 @@ NVGpaint nvgImagePattern(NVGcontext* ctx,
     {
         nvgTransformRotate(p.xform, angle);
     }
-    
+
 	p.xform[4] = cx;
 	p.xform[5] = cy;
 
@@ -1300,24 +1307,24 @@ static void nvg__appendCommand(NVGcontext* ctx, int command, float* vals, int nv
         int ccommands = ctx->ncommands+1 + ctx->ccommands/2;
         commands = (uint8_t*)realloc(ctx->commands, sizeof(uint8_t)*ccommands);
         commandValues = (float*)realloc(ctx->commandValues, sizeof(float)*(ccommands * 6));
-        
+
         if (commands == NULL) return;
         ctx->commands = commands;
         ctx->commandValues = commandValues;
         ctx->ccommands = ccommands;
     }
-    
+
     if (command < NVG_CLOSE) {
         ctx->commandx = vals[nvals-2];
         ctx->commandy = vals[nvals-1];
-        
+
         NVGstate* state = nvg__getState(ctx);
         for(int i = 0; i < nvals; i+=2)
         {
             nvgTransformPoint(&vals[i],&vals[i+1], state->xform, vals[i], vals[i+1]);
         }
     }
-    
+
     ctx->commands[ctx->ncommands++] = command;
     memcpy(&ctx->commandValues[ctx->nvalues], vals, nvals*sizeof(float));
     ctx->nvalues += nvals;
@@ -1333,7 +1340,7 @@ static void nvg__appendCommands(NVGcontext* ctx, uint8_t* commands, int ncommand
 		int ccommands = ctx->ncommands+ncommands + ctx->ccommands/2;
 		commands = (uint8_t*)realloc(ctx->commands, sizeof(uint8_t)*ccommands);
         commandValues = (float*)realloc(ctx->commandValues, sizeof(float)*(ccommands * 6));
-        
+
 		if (commands == NULL) return;
 		ctx->commands = commands;
         ctx->commandValues = commandValues;
@@ -1344,12 +1351,12 @@ static void nvg__appendCommands(NVGcontext* ctx, uint8_t* commands, int ncommand
 		ctx->commandx = vals[nvals-2];
 		ctx->commandy = vals[nvals-1];
 	}
-    
+
     for(int i = 0; i < nvals; i+=2)
     {
         nvgTransformPoint(&vals[i],&vals[i+1], state->xform, vals[i],vals[i+1]);
     }
-    
+
     memcpy(&ctx->commands[ctx->ncommands], commands, ncommands*sizeof(uint8_t));
 	memcpy(&ctx->commandValues[ctx->nvalues], vals, nvals*sizeof(float));
 
@@ -1505,7 +1512,7 @@ static void nvg__vset(NVGvertex* vtx, float x, float y, float u, float v, float 
     int16_t scaling_factor = 1 << 14;
 	vtx->x = x;
 	vtx->y = y;
-        
+
 	vtx->u = u * scaling_factor;
 	vtx->v = v * scaling_factor;
 	vtx->s = s * scaling_factor; // Normalized line width [-1, 1]
@@ -1611,10 +1618,10 @@ static void nvg__flattenPaths(NVGcontext* ctx)
     NVGpathCache* cache = ctx->cache;
     NVGpoint* last;
     int nonzero = 0;
-    
+
     if (cache->npaths > 0)
         return;
-    
+
     // Flatten
     float* values = ctx->commandValues;
     for (int i = 0; i < ctx->ncommands; i++) {
@@ -1650,19 +1657,17 @@ static void nvg__flattenPaths(NVGcontext* ctx)
             case NVG_WINDING_NONZERO:
                 nonzero = true;
                 break;
-                
         }
     }
-    
+
     cache->bounds[0] = cache->bounds[1] = 1e6f;
     cache->bounds[2] = cache->bounds[3] = -1e6f;
-    
-    int winding = 0;
+
     // Calculate the direction and length of line segments.
     for (int j = 0; j < cache->npaths; j++) {
         NVGpath* path = &cache->paths[j];
         NVGpoint* pts = &cache->points[path->first];
-        
+
         // If the first and last points are the same, remove the last, mark as closed path.
         NVGpoint* p0 = &pts[path->count-1];
         NVGpoint* p1 = &pts[0];
@@ -1671,7 +1676,7 @@ static void nvg__flattenPaths(NVGcontext* ctx)
             p0 = &pts[path->count-1];
             path->closed = 1;
         }
-        
+
         // Enforce winding.
         path->reversed = 0;
         if (path->count > 2) {
@@ -1685,7 +1690,7 @@ static void nvg__flattenPaths(NVGcontext* ctx)
                 path->reversed = 1;
             }
         }
-        
+
         for(int i = 0; i < path->count; i++) {
             // Calculate segment direction and length
             p0->dx = p1->x - p0->x;
@@ -1699,14 +1704,14 @@ static void nvg__flattenPaths(NVGcontext* ctx)
             // Advance
             p0 = p1++;
         }
-        
+
         // Calculate nonzero winding rule
         if(nonzero) {
             struct Point
             {
                 float x, y;
             };
-            
+
             auto getLineCrossing = [](Point p0, Point p1, Point p2, Point p3) -> float {
                 auto b = Point{p2.x - p0.x, p2.y - p0.y};
                 auto d = Point{p1.x - p0.x, p1.y - p0.y};
@@ -1717,19 +1722,19 @@ static void nvg__flattenPaths(NVGcontext* ctx)
                     return NAN;
                 return -(d.x * b.y - d.y * b.x) / m;
             };
-            
+
             int crossings = 0;
-            
+
             Point point0 = {cache->points[0].x, cache->points[0].y};
             Point point1 = {cache->bounds[0] - 1.0f, cache->bounds[1] - 1.0f};
             // Iterate all other paths
             for (int i = 0; i < cache->npaths; i++) {
                 if (i == j) continue;
-                
+
                 // Iterate all lines on the path
                 if (cache->paths[i].count < 2)
                     continue;
-                
+
                 for (int i = 1; i < cache->paths[i].count + 3; i += 3) {
                     // The previous point
                     Point point2 = {cache->points[i-1].x, cache->points[i-1].y};
@@ -2185,7 +2190,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
         length = std::max(length, 1.0f);
         invLength = 1.0 / length;
         ctx->currentLineLength = length;
-        
+
 		t = 0;
 		int dir = 1;
 		if(lineStyle > 1 && lineStyle != 5 && path->reversed) {
@@ -2206,7 +2211,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 				p1 = &pts[1];
 			}
 		}
-        
+
 		if (loop == 0) {
 			// Add cap
 			dx = p1->x - p0->x;
@@ -2221,7 +2226,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			else if (lineCap == NVG_ROUND)
 				dst = nvg__roundCapStart(dst, p0, dx, dy, w, ncap, aa, u0, u1, t, invLength);
 		}
-        
+
 		for (j = s; j < e; ++j) {
             dx = p1->x - p0->x;
             dy = p1->y - p0->y;
@@ -2234,7 +2239,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
                 p0 = p1++;
                 continue;
             }
-        
+
             if(lineStyle > 1){
                 dst = nvg_insertSpacer(dst, p0, dx, dy, w, u0, u1, t);
                 t += (dir*dt*invStrokeWidth) / length;
@@ -2252,7 +2257,7 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			}
 			p0 = p1++;
 		}
-        
+
 		if (loop) {
 			// Loop it
 			nvg__vset(dst, verts[0].x, verts[0].y, u0, 1, -1, t); dst++;
@@ -2276,11 +2281,11 @@ static int nvg__expandStroke(NVGcontext* ctx, float w, float fringe, int lineCap
 			else if (lineCap == NVG_ROUND)
 				dst = nvg__roundCapEnd(dst, p1, dx, dy, w, ncap, aa, u0, u1, t, invLength);
 		}
-        
+
 		path->nstroke = (int)(dst - verts);
 		verts = dst;
 	}
-    
+
 	return 1;
 }
 
@@ -2512,7 +2517,7 @@ void nvgPathWinding(NVGcontext* ctx, NVGwinding dir)
     else {
         nvg__appendCommand(ctx, dir ? NVG_WINDING_CW : NVG_WINDING_CCW, NULL, 0);
     }
-    
+
 }
 
 void nvgArc(NVGcontext* ctx, float cx, float cy, float r, float a0, float a1, int dir)
@@ -2703,27 +2708,27 @@ int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
 
     cacheEntry.lineLength = ctx->currentLineLength;
     memcpy(cacheEntry.bounds, ctx->cache->bounds, 4*sizeof(float));
-    
+
     for (int i = 0; i < ctx->cache->npaths; i++) {
       auto& p = ctx->cache->paths[i];
       NVGpath pathCopy = p;
-        
+
       // Duplicate path data
       pathCopy.fill = (NVGvertex*) malloc( p.nfill * sizeof(NVGvertex) );
       memcpy(pathCopy.fill, p.fill, p.nfill * sizeof(NVGvertex));
-    
+
       pathCopy.stroke = (NVGvertex*) malloc( p.nstroke * sizeof(NVGvertex) );
       memcpy(pathCopy.stroke, p.stroke, p.nstroke * sizeof(NVGvertex));
 
       memcpy(cacheEntry.currentTransform, state->xform, sizeof(float) * 6);
       cacheEntry.paths.push_back(pathCopy);
     }
-    
+
     if(pathId == -1)
     {
         pathId = ctx->numCached++;
     }
-    
+
     CACHE[pathId] = cacheEntry;
     return pathId;
 }
@@ -2736,7 +2741,7 @@ void nvgDeletePath(NVGcontext* ctx, uint32_t pathId)
         free(path.stroke);
         free(path.fill);
     }
-    
+
     CACHE.erase(pathId);
 }
 
@@ -2749,13 +2754,13 @@ int nvgStrokeCachedPath(NVGcontext* ctx, uint32_t pathId)
         const float scale = nvg__getAverageScale(state->xform);
         float strokeWidth = nvg__clampf(state->strokeWidth * scale, 0.0f, 1000.0f);
         NVGpaint strokePaint = state->stroke;
-        
+
         auto& cacheEntry = cacheItemIterator->second;
-        
+
         float totalTransform[6];
         nvgTransformInverse(totalTransform, cacheEntry.currentTransform);
         nvgTransformMultiply(totalTransform, state->xform);
-        
+
         // Apply transform
         for (int i = 0; i < cacheEntry.paths.size(); i++) {
           auto& cachedPath = cacheEntry.paths[i];
@@ -2764,13 +2769,13 @@ int nvgStrokeCachedPath(NVGcontext* ctx, uint32_t pathId)
               nvgTransformPoint(&cachedPath.stroke[j].x, &cachedPath.stroke[j].y, totalTransform, cachedPath.stroke[j].x, cachedPath.stroke[j].y);
           }
         }
-        
+
         memcpy(cacheEntry.currentTransform, state->xform, 6*sizeof(float));
 
         nvg__renderStroke(ctx->backend, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth, strokeWidth, state->lineStyle, cacheEntry.lineLength, cacheEntry.paths.data(), (int)cacheEntry.paths.size());
         return 1;
     }
-    
+
     return 0;
 }
 
@@ -2783,11 +2788,11 @@ int nvgFillCachedPath(NVGcontext* ctx, uint32_t pathId)
         NVGpaint fillPaint = state->fill;
 
         auto& cacheEntry = cacheItemIterator->second;
-        
+
         float totalTransform[6];
         nvgTransformInverse(totalTransform, cacheEntry.currentTransform);
         nvgTransformMultiply(totalTransform, state->xform);
-        
+
         // Apply transform
         for (int i = 0; i < cacheEntry.paths.size(); i++) {
           auto& cachedPath = cacheEntry.paths[i];
@@ -2802,13 +2807,13 @@ int nvgFillCachedPath(NVGcontext* ctx, uint32_t pathId)
         }
         nvgTransformPoint(&cacheEntry.bounds[0], &cacheEntry.bounds[1], totalTransform, cacheEntry.bounds[0], cacheEntry.bounds[1]);
         nvgTransformPoint(&cacheEntry.bounds[2], &cacheEntry.bounds[3], totalTransform, cacheEntry.bounds[2], cacheEntry.bounds[3]);
-        
+
         memcpy(cacheEntry.currentTransform, state->xform, 6*sizeof(float));
 
         nvg__renderFill(ctx->backend, &fillPaint, state->compositeOperation, &state->scissor, ctx->fringeWidth, cacheEntry.bounds, cacheEntry.paths.data(), (int)cacheEntry.paths.size());
         return 1;
     }
-    
+
     return 0;
 }
 
@@ -2829,7 +2834,7 @@ void nvgFill(NVGcontext* ctx)
 
 	nvg__renderFill(ctx->backend, &fillPaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
 						   ctx->cache->bounds, ctx->cache->paths, ctx->cache->npaths);
-    
+
 	// Count triangles
 #if DEBUG
 	for (int i = 0; i < ctx->cache->npaths; i++) {
@@ -2840,14 +2845,14 @@ void nvgFill(NVGcontext* ctx)
 	}
 #endif
 }
-  
+
 void nvgStroke(NVGcontext* ctx)
 {
 	NVGstate* state = nvg__getState(ctx);
 	const float scale = nvg__getAverageScale(state->xform);
 	float strokeWidth = nvg__clampf(state->strokeWidth * scale, 0.0f, 1000.0f);
 	NVGpaint strokePaint = state->stroke;
-    
+
     if (strokeWidth < ctx->fringeWidth) {
         // If the stroke width is less than pixel size, use alpha to emulate coverage.
         // Since coverage is area, scale by alpha*alpha.
@@ -2856,11 +2861,11 @@ void nvgStroke(NVGcontext* ctx)
         strokePaint.outerColor.a *= alpha*alpha;
         strokeWidth = ctx->fringeWidth;
     }
-    
+
     // Apply global alpha
     strokePaint.innerColor.a *= state->alpha;
     strokePaint.outerColor.a *= state->alpha;
-    
+
 	nvg__flattenPaths(ctx);
 
 	if (state->shapeAntiAlias && (state->lineStyle <= 1 || state->lineStyle == 5))
@@ -2871,14 +2876,6 @@ void nvgStroke(NVGcontext* ctx)
 	nvg__renderStroke(ctx->backend, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
 							 strokeWidth, state->lineStyle, ctx->currentLineLength, ctx->cache->paths, ctx->cache->npaths);
 
-	// Count triangles
-#if DEBUG
-	for (i = 0; i < ctx->cache->npaths; i++) {
-		const NVGPath* path = &ctx->cache->paths[i];
-		ctx->strokeTriCount += path->nstroke-2;
-		ctx->drawCallCount++;
-	}
-#endif
 }
 
 static void nvg__renderTrianglesSimple(NVGcontext* ctx, const NVGvertex* verts, int nverts, NVGpaint fillPaint)
@@ -2891,24 +2888,19 @@ static void nvg__renderTrianglesSimple(NVGcontext* ctx, const NVGvertex* verts, 
     fillPaint.outerColor.a *= state->alpha;
 
     nvg__renderTriangles(ctx->backend, &fillPaint, state->compositeOperation, &scissor, verts, nverts, ctx->fringeWidth, 0);
-
-#if DEBUG
-    ctx->drawCallCount++;
-    ctx->textTriCount += nverts/3;
-#endif
 }
 
 void nvgFillRect(NVGcontext* ctx, float x1, float y1, float w, float h)
 {
     float x2 = x1 + w, y2 = y1 + h;
-    
+
 #if DEBUG
     assert(w >= 0 && h >= 0);
 #endif
     NVGstate* state = nvg__getState(ctx);
     nvgTransformPoint(&x1, &y1, state->xform, x1, y1);
     nvgTransformPoint(&x2, &y2, state->xform, x2, y2);
-    
+
     constexpr int16_t t[] = { 8192, 16384, 8192, 16384 };
     NVGvertex verts[] =
     {
@@ -2920,7 +2912,7 @@ void nvgFillRect(NVGcontext* ctx, float x1, float y1, float w, float h)
         {x1, y2, t[0], t[3]},
         {x2, y2, t[2], t[3]}
     };
-    
+
     nvg__renderTrianglesSimple(ctx, verts, NVG_COUNTOF(verts), state->fill);
 }
 
@@ -2930,15 +2922,15 @@ void nvgStrokeRect(NVGcontext* ctx, float x1, float y1, float w, float h)
     NVGstate* state = nvg__getState(ctx);
 
     float x2 = x1 + w, y2 = y1 + h;
-    
+
 #if DEBUG
     assert(w >= 0 && h >= 0);
 #endif
-    
+
     nvgBeginPath(ctx);
     nvgTransformPoint(&x1, &y1, state->xform, x1, y1);
     nvgTransformPoint(&x2, &y2, state->xform, x2, y2);
-    
+
     // TODO: this still has some aliasing problems!
     float l = (state->strokeWidth + ctx->fringeWidth) * nvg__getAverageScale(state->xform);
 
@@ -2963,7 +2955,7 @@ void nvgStrokeRect(NVGcontext* ctx, float x1, float y1, float w, float h)
         {x1, y1, t[0], t[1]}, {iV[0], iV[3], iT[0], iT[3]},    {iV[0], iV[1], iT[0], iT[1]},
         {x1, y1, t[0], t[1]}, {x1, y2, t[0], t[3]}, {iV[0], iV[3], iT[0], iT[3]}
     };
-    
+
     nvg__renderTrianglesSimple(ctx, verts, NVG_COUNTOF(verts), state->stroke);
 }
 
@@ -2985,13 +2977,13 @@ void nvgDrawRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, NVG
     p.type = PAINT_TYPE_FAST_ROUNDEDRECT;
     p.extent[0] = (w * 0.5f) - 1.5f;
     p.extent[1] = (h * 0.5f) - 1.5f;
-    
+
     // If the radius is less than half of the shortest side, it will no longer be rounded
     // So force rounding here. Sorry not sorry.
     p.radius = std::min(radius, shortestSide * 0.5f);
     p.innerColor = icol;
     p.outerColor = ocol;
-    
+
     nvgFillPaint(ctx, p);
     nvgFillRect(ctx, x, y, w, h);
 }
@@ -3035,22 +3027,22 @@ void nvgFillRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, flo
 // Add fonts
 int nvgCreateFont(NVGcontext* ctx, const char* name, const char* filename)
 {
-	return fonsAddFont(ctx->fs, name, filename, 0);
+	return fonsAddFont(ctx->fs, name, filename);
 }
 
 int nvgCreateFontAtIndex(NVGcontext* ctx, const char* name, const char* filename, const int fontIndex)
 {
-	return fonsAddFont(ctx->fs, name, filename, fontIndex);
+	return fonsAddFont(ctx->fs, name, filename);
 }
 
 int nvgCreateFontMem(NVGcontext* ctx, const char* name, unsigned char* data, int ndata, int freeData)
 {
-	return fonsAddFontMem(ctx->fs, name, data, ndata, freeData, 0);
+	return fonsAddFontMem(ctx->fs, name, data, ndata, freeData);
 }
 
 int nvgCreateFontMemAtIndex(NVGcontext* ctx, const char* name, unsigned char* data, int ndata, int freeData, const int fontIndex)
 {
-	return fonsAddFontMem(ctx->fs, name, data, ndata, freeData, fontIndex);
+	return fonsAddFontMem(ctx->fs, name, data, ndata, freeData);
 }
 
 int nvgFindFont(NVGcontext* ctx, const char* name)
@@ -3073,7 +3065,7 @@ int nvgAddFallbackFont(NVGcontext* ctx, const char* baseFont, const char* fallba
 
 void nvgResetFallbackFontsId(NVGcontext* ctx, int baseFont)
 {
-	fonsResetFallbackFont(ctx->fs, baseFont);
+	//fonsResetFallbackFont(ctx->fs, baseFont);
 }
 
 void nvgResetFallbackFonts(NVGcontext* ctx, const char* baseFont)
@@ -3106,16 +3098,41 @@ void nvgTextAlign(NVGcontext* ctx, int align)
 	state->textAlign = align;
 }
 
-void nvgFontFaceId(NVGcontext* ctx, int font)
+void nvgAtlasTextThreshold(NVGcontext* ctx, float px)
 {
-	NVGstate* state = nvg__getState(ctx);
-	state->fontId = font;
+  int atlasFontPx = (int)(2*px + 0.5f);  // fonsEmSizeToSize(fons, state->fontSize) -- this would be better
+  int currAtlasFontPx;
+  fonsGetAtlasSize(ctx->fs, NULL, NULL, &currAtlasFontPx);
+  if (atlasFontPx > currAtlasFontPx) {
+    int w = NVG_INIT_FONTIMAGE_SIZE, h = NVG_INIT_FONTIMAGE_SIZE;
+    fonsResetAtlas(ctx->fs, w, h, atlasFontPx);
+
+    if (ctx->fontImageIdx < 0) {
+      int type = NVG_TEXTURE_FLOAT;
+      int flag = NVG_IMAGE_NEAREST;
+      ctx->fontImages[0] = nvg__renderCreateTexture(ctx->backend, type, w, h, flag, NULL);
+      if (ctx->fontImages[0] == 0) return;
+      ctx->fontImageIdx = 0;
+    }
+  }
+  ctx->atlasTextThresh = px;
 }
 
-void nvgFontFace(NVGcontext* ctx, const char* font)
+int nvgFontFaceId(NVGcontext* ctx, int font)
 {
-	NVGstate* state = nvg__getState(ctx);
-	state->fontId = fonsGetFontByName(ctx->fs, font);
+  NVGstate* state = nvg__getState(ctx);
+  FONSstate fons;
+  nvg__fonsSetup(ctx, &fons);
+  // previously fonsSetFont() wasn't called until nvgText(), but we now do it here due to delayed font loading
+  if(fonsSetFont(&fons, font) == FONS_INVALID)
+    return -1;
+  state->fontId = font;
+  return 0;
+}
+
+int nvgFontFace(NVGcontext* ctx, const char* font)
+{
+  return nvgFontFaceId(ctx, fonsGetFontByName(ctx->fs, font));
 }
 
 static float nvg__quantize(float a, float d)
@@ -3137,7 +3154,7 @@ static void nvg__flushTextTexture(NVGcontext* ctx)
 		// Update texture
 		if (fontImage != 0) {
 			int iw, ih;
-			const unsigned char* data = fonsGetTextureData(ctx->fs, &iw, &ih);
+			const unsigned char* data = (unsigned char*)fonsGetTextureData(ctx->fs, &iw, &ih);
 			int x = dirty[0];
 			int y = dirty[1];
 			int w = dirty[2] - dirty[0];
@@ -3147,49 +3164,64 @@ static void nvg__flushTextTexture(NVGcontext* ctx)
 	}
 }
 
-static int nvg__allocTextAtlas(NVGcontext* ctx)
+static void nvg__renderText(NVGcontext* ctx, FONSstate* fons, NVGvertex* verts, int nverts)
 {
-	int iw, ih;
-	nvg__flushTextTexture(ctx);
-	if (ctx->fontImageIdx >= NVG_MAX_FONTIMAGES-1)
-		return 0;
-	// if next fontImage already have a texture
-	if (ctx->fontImages[ctx->fontImageIdx+1] != 0)
-		nvgImageSize(ctx, ctx->fontImages[ctx->fontImageIdx+1], &iw, &ih);
-	else { // calculate the new font image size and create it.
-		nvgImageSize(ctx, ctx->fontImages[ctx->fontImageIdx], &iw, &ih);
-		if (iw > ih)
-			ih *= 2;
-		else
-			iw *= 2;
-		if (iw > NVG_MAX_FONTIMAGE_SIZE || ih > NVG_MAX_FONTIMAGE_SIZE)
-			iw = ih = NVG_MAX_FONTIMAGE_SIZE;
-		ctx->fontImages[ctx->fontImageIdx+1] = nvg__renderCreateTexture(ctx->backend, NVG_TEXTURE_ALPHA, iw, ih, 0, NULL);
-	}
-	++ctx->fontImageIdx;
-	fonsResetAtlas(ctx->fs, iw, ih);
-	return 1;
+  NVGstate* state = nvg__getState(ctx);
+  NVGpaint paint = state->fill;
+  float* t = state->xform;
+  float scale;
+  int atlasFontPx;
+
+  // paint xform is used to pass dx, dy, and atlas cell size to shader
+  fonsGetAtlasSize(ctx->fs, NULL, NULL, &atlasFontPx);
+  scale = atlasFontPx/fonsGetSize(fons);
+  // this doesn't handle skew transform properly, but that's fine for now (just draw skewed texts as paths?)
+  paint.xform[0] = nvg__sqrtf(t[0]*t[0] + t[2]*t[2])/scale;
+  paint.xform[3] = nvg__sqrtf(t[1]*t[1] + t[3]*t[3])/scale;
+  // atlas cell size
+  paint.extent[0] = atlasFontPx;
+  paint.extent[1] = atlasFontPx;
+
+  paint.type = PAINT_TYPE_TEXT;
+  // Render triangles.
+  paint.image = ctx->fontImages[ctx->fontImageIdx];
+  // Apply global alpha
+  paint.innerColor.a *= state->alpha;
+  paint.outerColor.a *= state->alpha;
+  // feather is used a flag to enable gamma adjust for text
+  //paint.feather = ctx->sRGBTextAdj ? 1 : 0;
+  //paint.radius = state->fontBlur;
+  nvg__renderTriangles(ctx->backend, &paint, state->compositeOperation, &state->scissor, verts, nverts, ctx->fringeWidth, 1);
 }
 
-static void nvg__renderText(NVGcontext* ctx, NVGvertex* verts, int nverts)
+static int nvg__allocTextAtlas(NVGcontext* ctx)
 {
-	NVGstate* state = nvg__getState(ctx);
-	NVGpaint paint = state->fill;
+  int iw, ih;
+  int atlasFontPx;
+  nvg__flushTextTexture(ctx);
+  if (ctx->fontImageIdx >= NVG_MAX_FONTIMAGES-1)
+    return 0;
+  // if next fontImage already have a texture
+  if (ctx->fontImages[ctx->fontImageIdx+1] != 0)
+    nvgImageSize(ctx, ctx->fontImages[ctx->fontImageIdx+1], &iw, &ih);
+  else { // calculate the new font image size and create it.
+    nvgImageSize(ctx, ctx->fontImages[ctx->fontImageIdx], &iw, &ih);
+    if (iw > ih)
+      ih *= 2;
+    else
+      iw *= 2;
+    if (iw > NVG_MAX_FONTIMAGE_SIZE || ih > NVG_MAX_FONTIMAGE_SIZE)
+      iw = ih = NVG_MAX_FONTIMAGE_SIZE;
 
-	// Render triangles.
-    paint.type = PAINT_TYPE_TEXT;
-	paint.image = ctx->fontImages[ctx->fontImageIdx];
+    int type = NVG_TEXTURE_FLOAT;
+    int flag = NVG_IMAGE_NEAREST;
 
-	// Apply global alpha
-	paint.innerColor.a *= state->alpha;
-	paint.outerColor.a *= state->alpha;
-
-	nvg__renderTriangles(ctx->backend, &paint, state->compositeOperation, &state->scissor, verts, nverts, ctx->fringeWidth, 1);
-
-#if DEBUG
-	ctx->drawCallCount++;
-	ctx->textTriCount += nverts/3;
-#endif
+    ctx->fontImages[ctx->fontImageIdx+1] = nvg__renderCreateTexture(ctx->backend, type, iw, ih, flag, NULL);
+  }
+  ++ctx->fontImageIdx;
+  fonsGetAtlasSize(ctx->fs, NULL, NULL, &atlasFontPx);
+  fonsResetAtlas(ctx->fs, iw, ih, atlasFontPx);
+  return 1;
 }
 
 static int nvg__isTransformFlipped(const float *xform)
@@ -3198,151 +3230,210 @@ static int nvg__isTransformFlipped(const float *xform)
 	return( det < 0);
 }
 
+
+static float nvg__textFromAtlas(NVGcontext* ctx, FONSstate* fons, float x, float y, const char* string, const char* end)
+{
+  NVGstate* state = nvg__getState(ctx);
+  FONStextIter iter, prevIter;
+  FONSquad q;
+  NVGvertex* verts;
+  float* tf = state->xform;
+  int cverts = 0;
+  int nverts = 0;
+  // flag to reverse order of triangle vertices to ensure CCW winding (front face)
+  // not sure if this is the correct criterion in general to determine if we need to reverse order
+  int rev = (tf[0] * tf[3] < 0) ? 1 : 0;
+  if(state->fontId == FONS_INVALID) return x;
+  if (end == NULL)
+    end = string + strlen(string);
+
+  cverts = nvg__maxi(2, (int)(end - string)) * 6; // conservative estimate.
+  verts = nvg__allocTempVerts(ctx, cverts);
+  if (verts == NULL) return x;
+
+  fonsTextIterInit(fons, &iter, x, y, string, end, FONS_GLYPH_BITMAP_REQUIRED);
+  prevIter = iter;
+  while (fonsTextIterNext(fons, &iter, &q)) {
+    float c[4*2];
+    if (iter.prevGlyphIndex == -1) { // can not retrieve glyph?
+      if (nverts != 0) {
+        nvg__renderText(ctx, fons, verts, nverts);
+        nverts = 0;
+      }
+      if (!nvg__allocTextAtlas(ctx))
+        break; // no memory :(
+      iter = prevIter;
+      fonsTextIterNext(fons, &iter, &q); // try again
+      if (iter.prevGlyphIndex == -1) // still can not find glyph?
+        break;
+    }
+    prevIter = iter;
+    // Transform corners.
+    nvgTransformPoint(&c[0],&c[1], tf, q.x0, q.y0);
+    nvgTransformPoint(&c[2],&c[3], tf, q.x1, q.y0);
+    nvgTransformPoint(&c[4],&c[5], tf, q.x1, q.y1);
+    nvgTransformPoint(&c[6],&c[7], tf, q.x0, q.y1);
+    // Create triangles
+    if (nverts+6 <= cverts) {
+      nvg__vset(&verts[nverts], c[0], c[1], q.s0, q.t0, 0, 0);
+      nvg__vset(&verts[nverts+1+rev], c[4], c[5], q.s1, q.t1, 0, 0);
+      nvg__vset(&verts[nverts+2-rev], c[2], c[3], q.s1, q.t0, 0, 0);
+      nvg__vset(&verts[nverts+3], c[0], c[1], q.s0, q.t0, 0, 0);
+      nvg__vset(&verts[nverts+4+rev], c[6], c[7], q.s0, q.t1, 0, 0);
+      nvg__vset(&verts[nverts+5-rev], c[4], c[5], q.s1, q.t1, 0, 0);
+      nverts += 6;
+    }
+  }
+  // TODO: add back-end bit to do this just once per frame.
+  nvg__flushTextTexture(ctx);
+  nvg__renderText(ctx, fons, verts, nverts);
+  return iter.nextx;
+}
+
+
+static void nvg__drawSTBTTGlyph(NVGcontext* ctx, stbtt_fontinfo* font, int glyph)
+{
+  stbtt_vertex* points;
+  int n_points = stbtt_GetGlyphShape(font, glyph, &points);
+  for (int i = 0; i < n_points; i++) {
+    if (points[i].type == STBTT_vmove) {
+      nvgPathWinding(ctx, NVG_NONZERO);
+      nvgMoveTo(ctx, points[i].x, points[i].y);
+      if(i == 0) {
+        //uint8_t restart[] = { NVG_RESTART };  // flag indicating start of new path (and not just subpath)
+        //nvg__appendCommands(ctx, restart, 1, NULL, 0);
+      }
+    }
+    else if (points[i].type == STBTT_vline)
+      nvgLineTo(ctx, points[i].x, points[i].y);
+    else if (points[i].type == STBTT_vcurve)
+      nvgQuadTo(ctx, points[i].cx, points[i].cy, points[i].x, points[i].y);
+    else if (points[i].type == STBTT_vcubic)
+      nvgBezierTo(ctx, points[i].cx, points[i].cy, points[i].cx1, points[i].cy1, points[i].x, points[i].y);
+  }
+  stbtt_FreeShape(font, points);
+}
+
+
+void nvgDrawSTBTTGlyph(NVGcontext* ctx, stbtt_fontinfo* font, float scale, int pad, int glyph)
+{
+  NVGstate* state = nvg__getState(ctx);
+  int ix0, iy0, ix1, iy1;
+  float xform[6];
+  memcpy(xform, state->xform, sizeof(float)*6);
+  //float scale = stbtt_ScaleForPixelHeight(font, pxsize);
+  stbtt_GetGlyphBitmapBoxSubpixel(font, glyph, scale, scale, 0.0f,0.0f, &ix0,&iy0,&ix1,&iy1);
+  //nvgTransform(ctx, scale, 0, 0, -scale, pad+ix0, pad-iy0);
+  nvgTransform(ctx, scale, 0, 0, -scale, pad-ix0, pad-iy0);
+  nvgBeginPath(ctx);
+  nvg__drawSTBTTGlyph(ctx, font, glyph);
+  nvgFill(ctx);
+  memcpy(state->xform, xform, sizeof(float)*6);  // restore transform
+}
+
+static float nvg__textAsPaths(NVGcontext* ctx, FONSstate* fons, float x, float y, const char* string, const char* end)
+{
+  NVGstate* state = nvg__getState(ctx);
+  FONStextIter iter;
+  FONSquad q;
+  float xform[6];
+  float scale, pxsize = fonsGetSize(fons);
+
+  memcpy(xform, state->xform, sizeof(float)*6);
+  fonsTextIterInit(fons, &iter, x, y, string, end, FONS_GLYPH_BITMAP_OPTIONAL);
+  // put all glyphs into a single path for faster rendering - there should not be any overlap between
+  //  glyph paths, so coverage from any glyphs sharing a pixel (at small font size) should be added instead
+  //  of blended anyway
+  while (fonsTextIterNext(fons, &iter, &q)) {
+    stbtt_fontinfo* font = (stbtt_fontinfo*)fonsGetFontImpl(ctx->fs, iter.prevGlyphFont);
+    if (!font)
+      continue;  // missing glyph
+    scale = stbtt_ScaleForPixelHeight(font, pxsize);  // this is fast
+    nvgBeginPath(ctx);
+    nvgTransform(ctx, scale, 0, 0, -scale, iter.x, iter.y);
+    nvg__drawSTBTTGlyph(ctx, font, iter.prevGlyphIndex);
+    nvgFill(ctx);
+    memcpy(state->xform, xform, sizeof(float)*6);  // restore transform
+  }
+  return iter.nextx;
+}
+
+
 float nvgText(NVGcontext* ctx, float x, float y, const char* string, const char* end)
 {
-	NVGstate* state = nvg__getState(ctx);
-	FONStextIter iter, prevIter;
-	FONSquad q;
-	NVGvertex* verts;
-	float scale = nvg__getFontScale(state) * ctx->devicePxRatio;
-	float invscale = 1.0f / scale;
-	int cverts = 0;
-	int nverts = 0;
-	int isFlipped = nvg__isTransformFlipped(state->xform);
+  NVGstate* state = nvg__getState(ctx);
+  FONSstate fons;
+  float* t = state->xform;
+  float pxsize;
 
-	if (end == NULL)
-		end = string + strlen(string);
-
-	if (state->fontId == FONS_INVALID) return x;
-
-	fonsSetSize(ctx->fs, state->fontSize*scale);
-	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
-	fonsSetAlign(ctx->fs, state->textAlign);
-	fonsSetFont(ctx->fs, state->fontId);
-
-	cverts = nvg__maxi(2, (int)(end - string)) * 6; // conservative estimate.
-	verts = nvg__allocTempVerts(ctx, cverts);
-	if (verts == NULL) return x;
-
-	fonsTextIterInit(ctx->fs, &iter, 0, 0, string, end, FONS_GLYPH_BITMAP_REQUIRED);
-	prevIter = iter;
-	while (fonsTextIterNext(ctx->fs, &iter, &q)) {
-		float c[4*2];
-		if (iter.prevGlyphIndex == -1) { // can not retrieve glyph?
-			if (nverts != 0) {
-				nvg__renderText(ctx, verts, nverts);
-				nverts = 0;
-			}
-			if (!nvg__allocTextAtlas(ctx))
-				break; // no memory :(
-			iter = prevIter;
-			fonsTextIterNext(ctx->fs, &iter, &q); // try again
-			if (iter.prevGlyphIndex == -1) // still can not find glyph?
-				break;
-		}
-		prevIter = iter;
-		if(isFlipped) {
-			float tmp;
-
-			tmp = q.y0; q.y0 = q.y1; q.y1 = tmp;
-			tmp = q.t0; q.t0 = q.t1; q.t1 = tmp;
-		}
-		// Transform corners.
-		nvgTransformPoint(&c[0],&c[1], state->xform, q.x0*invscale + x, q.y0*invscale + y);
-		nvgTransformPoint(&c[2],&c[3], state->xform, q.x1*invscale + x, q.y0*invscale + y);
-		nvgTransformPoint(&c[4],&c[5], state->xform, q.x1*invscale + x, q.y1*invscale + y);
-		nvgTransformPoint(&c[6],&c[7], state->xform, q.x0*invscale + x, q.y1*invscale + y);
-		// Create triangles
-		if (nverts+6 <= cverts) {
-			nvg__vset(&verts[nverts], c[0], c[1], q.s0, q.t0, 0, 0); nverts++;
-			nvg__vset(&verts[nverts], c[4], c[5], q.s1, q.t1, 0, 0); nverts++;
-			nvg__vset(&verts[nverts], c[2], c[3], q.s1, q.t0, 0, 0); nverts++;
-			nvg__vset(&verts[nverts], c[0], c[1], q.s0, q.t0, 0, 0); nverts++;
-			nvg__vset(&verts[nverts], c[6], c[7], q.s0, q.t1, 0, 0); nverts++;
-			nvg__vset(&verts[nverts], c[4], c[5], q.s1, q.t1, 0, 0); nverts++;
-		}
-	}
-
-	// TODO: add back-end bit to do this just once per frame.
-	nvg__flushTextTexture(ctx);
-
-	nvg__renderText(ctx, verts, nverts);
-	return iter.nextx * invscale + x;
+  nvg__fonsSetup(ctx, &fons);
+  pxsize = fonsGetSize(&fons);
+  if(ctx->atlasTextThresh <= 0
+      || nvg__sqrtf(t[0]*t[0] + t[2]*t[2])*pxsize > ctx->atlasTextThresh
+      || nvg__sqrtf(t[1]*t[1] + t[3]*t[3])*pxsize > ctx->atlasTextThresh) {
+      return nvg__textAsPaths(ctx, &fons, x, y, string, end);
+  }
+  return nvg__textFromAtlas(ctx, &fons, x, y, string, end);
 }
+
 
 void nvgTextBox(NVGcontext* ctx, float x, float y, float breakRowWidth, const char* string, const char* end)
 {
-	NVGstate* state = nvg__getState(ctx);
-	NVGtextRow rows[2];
-	int nrows = 0, i;
-	int oldAlign = state->textAlign;
-	int halign = state->textAlign & (NVG_ALIGN_LEFT | NVG_ALIGN_CENTER | NVG_ALIGN_RIGHT);
-	int valign = state->textAlign & (NVG_ALIGN_TOP | NVG_ALIGN_MIDDLE | NVG_ALIGN_MIDDLE_ASCENT | NVG_ALIGN_BOTTOM | NVG_ALIGN_BASELINE);
-	float lineh = 0;
+  NVGstate* state = nvg__getState(ctx);
+  FONStextRow rows[2];
+  int nrows = 0, i;
+  int oldAlign = state->textAlign;
+  int halign = state->textAlign & (NVG_ALIGN_LEFT | NVG_ALIGN_CENTER | NVG_ALIGN_RIGHT);
+  int valign = state->textAlign & (NVG_ALIGN_TOP | NVG_ALIGN_MIDDLE | NVG_ALIGN_BOTTOM | NVG_ALIGN_BASELINE);
+  float lineh = 0;
 
-	if (state->fontId == FONS_INVALID) return;
+  if (state->fontId == FONS_INVALID) return;
+  nvgTextMetrics(ctx, NULL, NULL, &lineh);
+  state->textAlign = NVG_ALIGN_LEFT | valign;
 
-	nvgTextMetrics(ctx, NULL, NULL, &lineh);
+  while ((nrows = nvgTextBreakLines(ctx, string, end, breakRowWidth, rows, 2))) {
+    for (i = 0; i < nrows; i++) {
+      FONStextRow* row = &rows[i];
+      if (halign & NVG_ALIGN_LEFT)
+        nvgText(ctx, x, y, row->start, row->end);
+      else if (halign & NVG_ALIGN_CENTER)
+        nvgText(ctx, x + breakRowWidth*0.5f - row->width*0.5f, y, row->start, row->end);
+      else if (halign & NVG_ALIGN_RIGHT)
+        nvgText(ctx, x + breakRowWidth - row->width, y, row->start, row->end);
+      y += lineh * state->lineHeight;
+    }
+    string = rows[nrows-1].next;
+  }
 
-	state->textAlign = NVG_ALIGN_LEFT | valign;
-
-	while ((nrows = nvgTextBreakLines(ctx, string, end, breakRowWidth, rows, 2, 0))) {
-		for (i = 0; i < nrows; i++) {
-			NVGtextRow* row = &rows[i];
-			if (halign & NVG_ALIGN_LEFT)
-				nvgText(ctx, x, y, row->start, row->end);
-			else if (halign & NVG_ALIGN_CENTER)
-				nvgText(ctx, x + breakRowWidth*0.5f - row->width*0.5f, y, row->start, row->end);
-			else if (halign & NVG_ALIGN_RIGHT)
-				nvgText(ctx, x + breakRowWidth - row->width, y, row->start, row->end);
-			y += lineh * state->lineHeight;
-		}
-		string = rows[nrows-1].next;
-	}
-
-	state->textAlign = oldAlign;
+  state->textAlign = oldAlign;
 }
 
 int nvgTextGlyphPositions(NVGcontext* ctx, float x, float y, const char* string, const char* end, NVGglyphPosition* positions, int maxPositions)
 {
-	NVGstate* state = nvg__getState(ctx);
-	float scale = nvg__getFontScale(state) * ctx->devicePxRatio;
-	float invscale = 1.0f / scale;
-	FONStextIter iter, prevIter;
-	FONSquad q;
-	int npos = 0;
+    NVGstate* state = nvg__getState(ctx);
+    FONSstate fons;
+    FONStextIter iter;
+    FONSquad q;
+    int npos = 0;
 
-	if (state->fontId == FONS_INVALID) return 0;
+    if (state->fontId == FONS_INVALID) return 0;
+    if (end == NULL)
+    end = string + strlen(string);
+    if (string == end)  return 0;
 
-	if (end == NULL)
-		end = string + strlen(string);
+    nvg__fonsSetup(ctx, &fons);
+    fonsTextIterInit(&fons, &iter, x, y, string, end, FONS_GLYPH_BITMAP_OPTIONAL);
+    while (fonsTextIterNext(&fons, &iter, &q)) {
+    positions[npos].str = iter.str;
+    positions[npos].x = iter.x;
+    positions[npos].minx = nvg__minf(iter.x, q.x0);
+    positions[npos].maxx = nvg__maxf(iter.nextx, q.x1);
+    npos++;
+    if (npos >= maxPositions)
+      break;
+    }
 
-	if (string == end)
-		return 0;
-
-	fonsSetSize(ctx->fs, state->fontSize*scale);
-	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
-	fonsSetAlign(ctx->fs, state->textAlign);
-	fonsSetFont(ctx->fs, state->fontId);
-
-	fonsTextIterInit(ctx->fs, &iter, 0, 0, string, end, FONS_GLYPH_BITMAP_OPTIONAL);
-	prevIter = iter;
-	while (fonsTextIterNext(ctx->fs, &iter, &q)) {
-		if (iter.prevGlyphIndex < 0 && nvg__allocTextAtlas(ctx)) { // can not retrieve glyph?
-			iter = prevIter;
-			fonsTextIterNext(ctx->fs, &iter, &q); // try again
-		}
-		prevIter = iter;
-		positions[npos].str = iter.str;
-		positions[npos].x = iter.x * invscale + x;
-		positions[npos].minx = nvg__minf(iter.x, q.x0) * invscale + x;
-		positions[npos].maxx = nvg__maxf(iter.nextx, q.x1) * invscale + x;
-		npos++;
-		if (npos >= maxPositions)
-			break;
-	}
-
-	return npos;
+    return npos;
 }
 
 enum NVGcodepointType {
@@ -3352,221 +3443,18 @@ enum NVGcodepointType {
 	NVG_CJK_CHAR,
 };
 
-int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, float breakRowWidth, NVGtextRow* rows, int maxRows, int skipSpaces)
+
+int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, float breakRowWidth, FONStextRow* rows, int maxRows)
 {
-	NVGstate* state = nvg__getState(ctx);
-	float scale = nvg__getFontScale(state) * ctx->devicePxRatio;
-	float invscale = 1.0f / scale;
-	FONStextIter iter, prevIter;
-	FONSquad q;
-	int nrows = 0;
-	float rowStartX = 0;
-	float rowWidth = 0;
-	float rowMinX = 0;
-	float rowMaxX = 0;
-	const char* rowStart = NULL;
-	const char* rowEnd = NULL;
-	const char* wordStart = NULL;
-	float wordStartX = 0;
-	float wordMinX = 0;
-	const char* breakEnd = NULL;
-	float breakWidth = 0;
-	float breakMaxX = 0;
-	int type = NVG_SPACE, ptype = NVG_SPACE;
-	unsigned int pcodepoint = 0;
-
-	if (maxRows == 0) return 0;
-	if (state->fontId == FONS_INVALID) return 0;
-
-	if (end == NULL)
-		end = string + strlen(string);
-
-	if (string == end) return 0;
-
-	fonsSetSize(ctx->fs, state->fontSize*scale);
-	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
-	fonsSetAlign(ctx->fs, state->textAlign);
-	fonsSetFont(ctx->fs, state->fontId);
-
-	breakRowWidth *= scale;
-
-	fonsTextIterInit(ctx->fs, &iter, 0, 0, string, end, FONS_GLYPH_BITMAP_OPTIONAL);
-	prevIter = iter;
-	while (fonsTextIterNext(ctx->fs, &iter, &q)) {
-		if (iter.prevGlyphIndex < 0 && nvg__allocTextAtlas(ctx)) { // can not retrieve glyph?
-			iter = prevIter;
-			fonsTextIterNext(ctx->fs, &iter, &q); // try again
-		}
-		prevIter = iter;
-		switch (iter.codepoint) {
-			case 9:			// \t
-			case 11:		// \v
-			case 12:		// \f
-			case 32:		// space
-			case 0x00a0:	// NBSP
-				type = NVG_SPACE;
-				break;
-			case 10:		// \n
-				type = pcodepoint == 13 ? NVG_SPACE : NVG_NEWLINE;
-				break;
-			case 13:		// \r
-				type = pcodepoint == 10 ? NVG_SPACE : NVG_NEWLINE;
-				break;
-			case 0x0085:	// NEL
-				type = NVG_NEWLINE;
-				break;
-			default:
-				if ((iter.codepoint >= 0x4E00 && iter.codepoint <= 0x9FFF) ||
-					(iter.codepoint >= 0x3000 && iter.codepoint <= 0x30FF) ||
-					(iter.codepoint >= 0xFF00 && iter.codepoint <= 0xFFEF) ||
-					(iter.codepoint >= 0x1100 && iter.codepoint <= 0x11FF) ||
-					(iter.codepoint >= 0x3130 && iter.codepoint <= 0x318F) ||
-					(iter.codepoint >= 0xAC00 && iter.codepoint <= 0xD7AF))
-					type = NVG_CJK_CHAR;
-				else
-					type = NVG_CHAR;
-				break;
-		}
-
-		if (type == NVG_NEWLINE) {
-			// Always handle new lines.
-			rows[nrows].start = rowStart != NULL ? rowStart : iter.str;
-			rows[nrows].end = rowEnd != NULL ? rowEnd : iter.str;
-			rows[nrows].width = rowWidth * invscale;
-			rows[nrows].minx = rowMinX * invscale;
-			rows[nrows].maxx = rowMaxX * invscale;
-			rows[nrows].next = iter.next;
-			nrows++;
-			if (nrows >= maxRows)
-				return nrows;
-			// Set null break point
-			breakEnd = rowStart;
-			breakWidth = 0.0;
-			breakMaxX = 0.0;
-			// Indicate to skip the white space at the beginning of the row.
-			rowStart = NULL;
-			rowEnd = NULL;
-			rowWidth = 0;
-			rowMinX = rowMaxX = 0;
-		} else {
-			if (rowStart == NULL) {
-				// Skip white space until the beginning of the line
-				if (type == NVG_CHAR || type == NVG_CJK_CHAR) {
-					// The current char is the row so far
-					rowStartX = iter.x;
-					rowStart = iter.str;
-					rowEnd = iter.next;
-					rowWidth = iter.nextx - rowStartX;
-					rowMinX = q.x0 - rowStartX;
-					rowMaxX = q.x1 - rowStartX;
-					wordStart = iter.str;
-					wordStartX = iter.x;
-					wordMinX = q.x0 - rowStartX;
-					// Set null break point
-					breakEnd = rowStart;
-					breakWidth = 0.0;
-					breakMaxX = 0.0;
-				}
-			} else {
-				float nextWidth = iter.nextx - rowStartX;
-
-				// track last non-white space character
-				if (type == NVG_CHAR || type == NVG_CJK_CHAR) {
-					rowEnd = iter.next;
-					rowWidth = iter.nextx - rowStartX;
-					rowMaxX = q.x1 - rowStartX;
-				}
-				// track last end of a word
-				if (((ptype == NVG_CHAR || ptype == NVG_CJK_CHAR) && type == NVG_SPACE) || type == NVG_CJK_CHAR) {
-					breakEnd = iter.str;
-					breakWidth = rowWidth;
-					breakMaxX = rowMaxX;
-				}
-				// track last beginning of a word
-				if ((ptype == NVG_SPACE && (type == NVG_CHAR || type == NVG_CJK_CHAR)) || type == NVG_CJK_CHAR) {
-					wordStart = iter.str;
-					wordStartX = iter.x;
-					wordMinX = q.x0;
-				}
-
-				// Break to new line when a character is beyond break width.
-				if ((type == NVG_CHAR || type == NVG_CJK_CHAR) && nextWidth > breakRowWidth) {
-					// The run length is too long, need to break to new line.
-					if (breakEnd == rowStart) {
-						// The current word is longer than the row length, just break it from here.
-						rows[nrows].start = rowStart;
-						rows[nrows].end = iter.str;
-						rows[nrows].width = rowWidth * invscale;
-						rows[nrows].minx = rowMinX * invscale;
-						rows[nrows].maxx = rowMaxX * invscale;
-						rows[nrows].next = iter.str;
-						nrows++;
-						if (nrows >= maxRows)
-							return nrows;
-						rowStartX = iter.x;
-						rowStart = iter.str;
-						rowEnd = iter.next;
-						rowWidth = iter.nextx - rowStartX;
-						rowMinX = q.x0 - rowStartX;
-						rowMaxX = q.x1 - rowStartX;
-						wordStart = iter.str;
-						wordStartX = iter.x;
-						wordMinX = q.x0 - rowStartX;
-					} else {
-						// Break the line from the end of the last word, and start new line from the beginning of the new.
-						rows[nrows].start = rowStart;
-						rows[nrows].end = breakEnd;
-						rows[nrows].width = breakWidth * invscale;
-						rows[nrows].minx = rowMinX * invscale;
-						rows[nrows].maxx = breakMaxX * invscale;
-						rows[nrows].next = wordStart;
-						nrows++;
-						if (nrows >= maxRows)
-							return nrows;
-						// Update row
-						rowStartX = wordStartX;
-						rowStart = wordStart;
-						rowEnd = iter.next;
-						rowWidth = iter.nextx - rowStartX;
-						rowMinX = wordMinX - rowStartX;
-						rowMaxX = q.x1 - rowStartX;
-					}
-					// Set null break point
-					breakEnd = rowStart;
-					breakWidth = 0.0;
-					breakMaxX = 0.0;
-				}
-			}
-		}
-
-		pcodepoint = iter.codepoint;
-		ptype = type;
-	}
-
-	// Break the line from the end of the last word, and start new line from the beginning of the new.
-	if (rowStart != NULL) {
-		rows[nrows].start = rowStart;
-		rows[nrows].end = rowEnd;
-		rows[nrows].width = rowWidth * invscale;
-		rows[nrows].minx = rowMinX * invscale;
-		rows[nrows].maxx = rowMaxX * invscale;
-		rows[nrows].next = end;
-		nrows++;
-	} else if (!skipSpaces) {
-		rows[nrows].start = end;
-		rows[nrows].end = end;
-		rows[nrows].width = rowWidth * invscale;
-		rows[nrows].minx = rowMinX * invscale;
-		rows[nrows].maxx = rowMaxX * invscale;
-		rows[nrows].next = end;
-		nrows++;
-	}
-
-	return nrows;
+  FONSstate fons;
+  nvg__fonsSetup(ctx, &fons);
+  return fonsBreakLines(&fons, string, end, breakRowWidth, rows, maxRows);
 }
+
 
 float nvgTextBounds(NVGcontext* ctx, float x, float y, const char* string, const char* end, float* bounds)
 {
+    /*
 	NVGstate* state = nvg__getState(ctx);
 	float scale = nvg__getFontScale(state) * ctx->devicePxRatio;
 	float invscale = 1.0f / scale;
@@ -3589,10 +3477,12 @@ float nvgTextBounds(NVGcontext* ctx, float x, float y, const char* string, const
 		bounds[3] = bounds[3] * invscale + y;
 	}
 	return width * invscale;
+     */
 }
 
 void nvgTextBoxBounds(NVGcontext* ctx, float x, float y, float breakRowWidth, const char* string, const char* end, float* bounds)
 {
+    /*
 	NVGstate* state = nvg__getState(ctx);
 	NVGtextRow rows[2];
 	float scale = nvg__getFontScale(state) * ctx->devicePxRatio;
@@ -3657,31 +3547,18 @@ void nvgTextBoxBounds(NVGcontext* ctx, float x, float y, float breakRowWidth, co
 		bounds[1] = miny + y;
 		bounds[2] = maxx + x;
 		bounds[3] = maxy + y;
-	}
+	} */
 }
 
 void nvgTextMetrics(NVGcontext* ctx, float* ascender, float* descender, float* lineh)
 {
-	NVGstate* state = nvg__getState(ctx);
-	float scale = nvg__getFontScale(state) * ctx->devicePxRatio;
-	float invscale = 1.0f / scale;
-
-	if (state->fontId == FONS_INVALID) return;
-
-	fonsSetSize(ctx->fs, state->fontSize*scale);
-	fonsSetSpacing(ctx->fs, state->letterSpacing*scale);
-	fonsSetAlign(ctx->fs, state->textAlign);
-	fonsSetFont(ctx->fs, state->fontId);
-
-	fonsVertMetrics(ctx->fs, ascender, descender, lineh);
-	if (ascender != NULL)
-		*ascender *= invscale;
-	if (descender != NULL)
-		*descender *= invscale;
-	if (lineh != NULL)
-		*lineh *= invscale;
+  NVGstate* state = nvg__getState(ctx);
+  FONSstate fons;
+  if (state->fontId == FONS_INVALID) return;
+  nvg__fonsSetup(ctx, &fons);
+  fonsVertMetrics(&fons, ascender, descender, lineh);
 }
-  
+
 } // extern "C"
 
 // vim: ft=c nu noet ts=4
