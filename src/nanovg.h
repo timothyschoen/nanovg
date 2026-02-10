@@ -102,7 +102,7 @@ typedef enum
     PAINT_TYPE_FILLGRAD,
     PAINT_TYPE_FILLIMG,
     PAINT_TYPE_FILLIMG_ALPHA,
-    PAINT_TYPE_IMG,
+    PAINT_TYPE_TEXT,
     PAINT_TYPE_FAST_ROUNDEDRECT,
     PAINT_TYPE_FILLCOLOR,
     PAINT_TYPE_DOUBLE_STROKE,
@@ -224,8 +224,8 @@ enum NVGimageFlags {
 	NVG_IMAGE_REPEATX			= 1<<1,		// Repeat image in X direction.
 	NVG_IMAGE_REPEATY			= 1<<2,		// Repeat image in Y direction.
 	NVG_IMAGE_FLIPY				= 1<<3,		// Flips (inverses) image in Y direction when rendered.
-	NVG_IMAGE_PREMULTIPLIED		= 1<<4,		// Image data has premultiplied alpha.
-	NVG_IMAGE_NEAREST			= 1<<5,		// Image interpolation is Nearest instead Linear
+	NVG_IMAGE_NEAREST			= 1<<4,		// Image interpolation is Nearest instead Linear
+    NVG_IMAGE_SRGB              = 1<<5,     // Image is SRGB encoded
 };
 
 // Begin drawing a new frame
@@ -488,6 +488,10 @@ int nvgCreateImageRGBA(NVGcontext* ctx, int w, int h, int imageFlags, const unsi
 // Creates image from specified image data in ARGB format
 // Returns handle to the image.
 int nvgCreateImageARGB(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data);
+
+// Creates image from specified image data in ARGB_sRGB format
+// Returns handle to the image.
+int nvgCreateImageARGB_sRGB(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data);
 
 // Creates image from specified image data in single channel format
 // Returns handle to the image.
@@ -811,14 +815,16 @@ int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, floa
 // Get image texture Id
 int nvgGetImageTextureId(NVGcontext* ctx, int handle);
 
+int nvgIsTexture(NVGcontext* ctx, int textureId);
+
 //
 // Internal Render API
 //
 enum NVGtexture {
-	NVG_TEXTURE_ALPHA = 0x01,
-	NVG_TEXTURE_RGBA = 0x02,
-	NVG_TEXTURE_ARGB = 0x03,
-    NVG_TEXTURE_FLOAT = 0x04,
+	NVG_TEXTURE_ALPHA,
+	NVG_TEXTURE_ARGB,
+  NVG_TEXTURE_ARGB_SRGB
+  NVG_TEXTURE_FLOAT
 };
 
 struct NVGscissor {
@@ -874,6 +880,7 @@ void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState com
 void nvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths, int npaths);
 void nvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe, int text);
 void nvg__renderDelete(void* uptr);
+int nvg__isTexture(void* uptr, int image);
 
 // Constructor and destructor, called by the render back-end.
 NVGcontext* nvgCreateInternal(void* params);

@@ -37,13 +37,13 @@ enum PackType {
 int glnvg__packStateDataUniform(PackType packType, int value) {
     switch (packType) {
         case PACK_OBJECT_STYLE:
-            return (value & 0x01) << 12;
+            return (value & 0x01) << 11;
         case PACK_FLAG_TYPE:
-            return (value & 0x03) << 10;
+            return (value & 0x03) << 9;
         case PACK_LINE_STYLE:
-            return (value & 0x03) << 8;
+            return (value & 0x03) << 7;
         case PACK_TEX_TYPE:
-            return (value & 0x07) << 5;
+            return (value & 0x03) << 5;
         case PACK_REVERSE:
             return value & 0x01;
         default:
@@ -62,9 +62,6 @@ void nvgDeleteGL3(NVGcontext* ctx);
 NVGcontext* nvgCreateGLES3(int flags);
 void nvgDeleteGLES3(NVGcontext* ctx);
 #endif
-
-int nvglCreateImageFromHandle(NVGcontext* ctx, GLuint textureId, int w, int h, int flags);
-GLuint nvglImageHandle(NVGcontext* ctx, int image);
 
 void nvglClearWithColor(NVGcolor color);
 
@@ -443,8 +440,10 @@ int nvg__renderCreateTexture(void* uptr, int type, int w, int h, int imageFlags,
 
     glnvg__updateTexPixelStoreiVals(4, 0, 0, 0);
 
-    if (type == NVG_TEXTURE_RGBA || type == NVG_TEXTURE_ARGB)
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    if (type == NVG_TEXTURE_ARGB)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_BGRA, GL_UNSIGNED_BYTE, data);
+    else if(type == NVG_TEXTURE_ARGB_SRGB)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, w, h, 0, GL_BGRA, GL_UNSIGNED_BYTE, data);
     else if(type == NVG_TEXTURE_FLOAT)
         glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, w, h, 0, GL_RED, GL_FLOAT, data);
     else
@@ -508,8 +507,8 @@ int nvg__renderUpdateTexture(void* uptr, int image, int x, int y, int w, int h, 
 
     glnvg__updateTexPixelStoreiVals(4, x, y, tex->width);
 
-    if (tex->type == NVG_TEXTURE_RGBA || tex->type == NVG_TEXTURE_ARGB)
-        glTexSubImage2D(GL_TEXTURE_2D, 0, x,y, w,h, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB)
+        glTexSubImage2D(GL_TEXTURE_2D, 0, x,y, w,h, GL_BGRA, GL_UNSIGNED_BYTE, data);
     else if (tex->type == NVG_TEXTURE_FLOAT)
         glTexSubImage2D(GL_TEXTURE_2D, 0, x,y, w,h, GL_RED, GL_FLOAT, data);
     else
@@ -530,13 +529,34 @@ int nvg__renderGetTextureSize(void* uptr, int image, int* w, int* h)
     return 1;
 }
 
+int nvg_checkGLVersion()
+{
+    GLint majorVersion = 0;
+    glGetIntegerv(GL_MAJOR_VERSION, &majorVersion);
+    GLenum error = glGetError();
+
+    if (error != GL_NO_ERROR || majorVersion < 3) {
+        // Fall back to parsing GL_VERSION string for older OpenGL
+        char const* version = (char const*)glGetString(GL_VERSION);
+        if (version == NULL)
+            return 0; // Failed
+
+        // Parse version string (format: "X.Y" or "X.Y.Z")
+        majorVersion = version[0] - '0';
+
+        if (majorVersion < 3)
+            return 0; // OpenGL 3.0+ required
+    }
+
+    return 1;
+}
+
 int nvg__renderCreate(void* uptr)
 {
+    if (!nvg_checkGLVersion()) return 0;
+
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
     int align = 4;
-
-    // TODO: mediump float may not be enough for GLES2 in iOS.
-    // see the following discussion: https://github.com/memononen/nanovg/issues/46
 
     // Construct the shader header with correct defines
     std::ostringstream shaderHeader;
@@ -551,7 +571,7 @@ int nvg__renderCreate(void* uptr)
                  << "#define NSVG_SHADER_FILLGRAD               " << PAINT_TYPE_FILLGRAD << "\n"
                  << "#define NSVG_SHADER_FILLIMG                " << PAINT_TYPE_FILLIMG << "\n"
                  << "#define NSVG_SHADER_FILLCOLOR              " << PAINT_TYPE_FILLCOLOR << "\n"
-                 << "#define NSVG_SHADER_IMG                    " << PAINT_TYPE_IMG << "\n"
+                 << "#define NSVG_SHADER_TEXT                   " << PAINT_TYPE_TEXT << "\n"
                  << "#define NSVG_SHADER_FAST_ROUNDEDRECT       " << PAINT_TYPE_FAST_ROUNDEDRECT << "\n"
                  << "#define NSVG_SHADER_OBJECT_RECT            " << PAINT_TYPE_OBJECT_RECT << "\n"
                  << "#define NSVG_SMOOTH_GLOW                   " << PAINT_TYPE_SMOOTH_GLOW << "\n"
@@ -560,6 +580,10 @@ int nvg__renderCreate(void* uptr)
                  << "#define NSVG_DOUBLE_STROKE_ACTIVITY        " << PAINT_TYPE_DOUBLE_STROKE_ACTIVITY << "\n"
                  << "#define NSVG_DOUBLE_STROKE_GRAD_ACTIVITY   " << PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY << "\n"
                  << "#define NSVG_SHADER_FILLIMG_ALPHA          " << PAINT_TYPE_FILLIMG_ALPHA << "\n"
+
+                 << "#define NSVG_TEXTURE_ALPHA                 " << NVG_TEXTURE_ALPHA << "\n"
+                 << "#define NSVG_TEXTURE_ARGB                  " << NVG_TEXTURE_ARGB << "\n"
+                 << "#define NSVG_TEXTURE_ARGB_SRGB             " << NVG_TEXTURE_ARGB_SRGB << "\n"
                  << "\n";
 
     static char const* fillVertShader = R"(
@@ -664,6 +688,15 @@ int nvg__renderCreate(void* uptr)
             float finalAlpha = src.a + dst.a * (1.0 - src.a);
             return vec4((src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / finalAlpha, finalAlpha);
         }
+        vec4 linearToSrgb(vec4 col)
+        {
+            vec3 c = col.rgb;
+            vec3 lo = c * 12.92;
+            vec3 hi = 1.055 * pow(c, vec3(1.0/2.4)) - 0.055;
+
+            bvec3 mask = lessThanEqual(c, vec3(0.0031308));
+            return vec4(mix(hi, lo, mask), col.a);  // mix(a,b,mask) selects b where mask is true
+        }
         float sigmoid(float t) {
             return 1.0 / (1.0 + exp(-t));
         }
@@ -702,14 +735,99 @@ int nvg__renderCreate(void* uptr)
             return mask;
         }
         int getLineStyle(){
-            return (stateData >> 8) & 0x03;     // 2 bits
+            return (stateData >> 7) & 0x03;     // 2 bits
         }
         int getTexType(){
-            return (stateData >> 5) & 0x07;     // 3 bits (0,1,2,3,4)
+            return (stateData >> 5) & 0x03;     // 3 bits (0,1,2,3,4)
         }
         bool getReverse(){
             return bool(stateData & 0x01);      // 1 bit
         }
+
+        vec4 sampleLevel0( sampler2D tex, vec2 uv )
+        {
+            return textureLod( tex, uv, 0.0 );
+        }
+
+        float mitchell(float x, float B, float C) {
+            x = abs(x);
+            if (x < 1.0) {
+                return ((12.0 - 9.0*B - 6.0*C) * x*x*x +
+                        (-18.0 + 12.0*B + 6.0*C) * x*x +
+                        (6.0 - 2.0*B)) / 6.0;
+            } else if (x < 2.0) {
+                return ((-B - 6.0*C) * x*x*x +
+                        (6.0*B + 30.0*C) * x*x +
+                        (-12.0*B - 48.0*C) * x +
+                        (8.0*B + 24.0*C)) / 6.0;
+            }
+            return 0.0;
+        }
+
+        vec4 textureMitchellNetravali(sampler2D tex, vec2 uv) {
+            const float B = 1.0/2.0;
+            const float C = 1.0/6.0;
+
+            vec2 texSize = textureSize(tex, 0);
+            vec2 samplePos = uv * texSize;
+            vec2 texPos1 = floor(samplePos - 0.5) + 0.5;
+            vec2 f = samplePos - texPos1;
+
+            // Calculate weights for 4 taps in each direction
+            float wx[4], wy[4];
+            for (int i = 0; i < 4; i++) {
+                wx[i] = mitchell(f.x - float(i - 1), B, C);
+                wy[i] = mitchell(f.y - float(i - 1), B, C);
+            }
+
+            // Combine middle weights for bilinear optimization
+            float wx12 = wx[1] + wx[2];
+            float wy12 = wy[1] + wy[2];
+            vec2 offset12 = vec2(wx[2] / (wx12 + 0.0001), wy[2] / (wy12 + 0.0001));
+
+            // Calculate sample positions
+            vec2 texPos0 = texPos1 - 1.0;
+            vec2 texPos3 = texPos1 + 2.0;
+            vec2 texPos12 = texPos1 + offset12;
+
+            texPos0 /= texSize;
+            texPos3 /= texSize;
+            texPos12 /= texSize;
+
+            // Sample with bilinear optimization (9 samples instead of 16)
+            vec4 result = vec4(0.0);
+            result += sampleLevel0(tex, vec2(texPos0.x, texPos0.y)) * wx[0] * wy[0];
+            result += sampleLevel0(tex, vec2(texPos12.x, texPos0.y)) * wx12 * wy[0];
+            result += sampleLevel0(tex, vec2(texPos3.x, texPos0.y)) * wx[3] * wy[0];
+            result += sampleLevel0(tex, vec2(texPos0.x, texPos12.y)) * wx[0] * wy12;
+            result += sampleLevel0(tex, vec2(texPos12.x, texPos12.y)) * wx12 * wy12;
+            result += sampleLevel0(tex, vec2(texPos3.x, texPos12.y)) * wx[3] * wy12;
+            result += sampleLevel0(tex, vec2(texPos0.x, texPos3.y)) * wx[0] * wy[3];
+            result += sampleLevel0(tex, vec2(texPos12.x, texPos3.y)) * wx12 * wy[3];
+            result += sampleLevel0(tex, vec2(texPos3.x, texPos3.y)) * wx[3] * wy[3];
+
+            return result;
+        }
+
+        // Smart texture sampling that only interpolates when scaling
+        vec4 sampleTextureAdaptive(sampler2D tex, vec2 uv) {
+        #ifdef GL_ES // Don't do extra interpolation on embedded platforms, it's too slow
+            return texture(tex, uv);
+        #endif
+            vec2 texSize = vec2(textureSize(tex, 0));
+
+            vec2 dudx = dFdx(uv) * texSize;
+            vec2 dudy = dFdy(uv) * texSize;
+
+            float footprint = max(length(dudx), length(dudy));
+
+            // Upscale using Mitchell-Netravali
+            if (footprint < 0.995)
+                return textureMitchellNetravali(tex, uv);
+
+            return texture(tex, uv, -0.5);
+        }
+
         float texFetchLerp(sampler2D texture, vec2 ij, vec2 ijmin, vec2 ijmax)
         {
           vec2 ij00 = clamp(ij, ijmin, ijmax);
@@ -743,6 +861,7 @@ int nvg__renderCreate(void* uptr)
           float cov = (s11 - s01 - s10 + s00)/(255.0f*4.0f*dx*dy);
           return clamp(cov, 0.0f, 1.0f);
         }
+
         )" << R"(
         void main(void) {
             vec4 result;
@@ -767,9 +886,9 @@ int nvg__renderCreate(void* uptr)
             case NSVG_SHADER_OBJECT_RECT: {
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy;
 
-                int flagType = (stateData >> 10) & 0x03;     // 2 bits
+                int flagType = (stateData >> 9) & 0x03;     // 2 bits
                 float flagSize = 5.0f;
-                bool objectOutline = bool((stateData >> 12) & 0x01); // 1 bit (off or on)
+                bool objectOutline = bool((stateData >> 11) & 0x01); // 1 bit (off or on)
                 float offset = objectOutline ? 0.2f : -0.5f;
                 float flag;
 
@@ -924,32 +1043,28 @@ int nvg__renderCreate(void* uptr)
             case NSVG_SHADER_FILLIMG: {
                 // Calculate color from texture
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
-
                 float strokeAlpha = strokeMask(getLineStyle());
-                vec4 color = texture(tex, vec2(pt.x, getReverse() ? 1.0f - pt.y : pt.y));
+                vec4 color = sampleTextureAdaptive(tex, vec2(pt.x, getReverse() ? 1.0f - pt.y : pt.y));
+
                 int texType = getTexType();
-                if (texType == 1) color = vec4(color.xyz*color.w,color.w);
-                if (texType == 2) color = vec4(color.x);
-                if (texType == 3) color = color.bgra; // swizzle for JUCE colour image
-                outColor = color * strokeAlpha * scissor;
+                if (texType == NSVG_TEXTURE_ALPHA) color = vec4(color.x);
+                else if (texType == NSVG_TEXTURE_ARGB) color = color;
+                else if (texType == NSVG_TEXTURE_ARGB_SRGB) color = linearToSrgb(color);
+                outColor = color.rgba * strokeAlpha * scissor;
                 return;
             }
             case NSVG_SHADER_FILLIMG_ALPHA: {
                 // Calculate alpha from texture
                 vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy / extent;
-
                 float strokeAlpha = strokeMask(getLineStyle());
                 vec4 color = texture(tex, pt);
                 float alpha = color.a;
-                int texType = getTexType();
-                if (texType == 1) alpha = color.w;
-                if (texType == 2) alpha = color.x;
-                if (texType == 4) alpha = color.r; // single channel GL_RED
+                if (getTexType() == NSVG_TEXTURE_ALPHA) alpha = color.r;
                 vec3 maskColor = getRawColour(innerCol).rgb;
                 outColor = vec4(maskColor * alpha, alpha) * strokeAlpha * scissor;
                 return;
             }
-            case NSVG_SHADER_IMG: { // Textured tris
+            case NSVG_SHADER_TEXT: {
                 float cov = scissor * summedTextCov(tex, ftcoord);
                 outColor = vec4(cov) * convertColour(innerCol);
                 return;
@@ -1025,22 +1140,9 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
         case PAINT_TYPE_FILLIMG: {
             GLNVGtexture* tex = glnvg__findTexture(gl, paint->image);
             if (tex == NULL) return 0;
+            frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, tex->type);
             if ((tex->flags & NVG_IMAGE_FLIPY) != 0) {
                 frag->stateData |= glnvg__packStateDataUniform(PACK_REVERSE, true);
-            }
-            switch(tex->type){
-                case NVG_TEXTURE_RGBA:
-                    frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, (tex->flags & NVG_IMAGE_PREMULTIPLIED) ? 0 : 1);
-                    break;
-                case NVG_TEXTURE_ARGB:
-                    frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, 3);
-                    break;
-                case NVG_TEXTURE_ALPHA:
-                    frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, 4);
-                    break;
-                default:
-                    frag->stateData |= glnvg__packStateDataUniform(PACK_TEX_TYPE, 2);
-                    break;
             }
             break;
         }
@@ -1228,7 +1330,6 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
         // Setup require GL state.
         glUseProgram(gl->shader.prog);
 
-        //glEnable(GL_FRAMEBUFFER_SRGB);
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
@@ -1572,8 +1673,7 @@ void nvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationStat
     frag = nvg__fragUniformPtr(gl, call->uniformOffset);
     glnvg__convertPaint(gl, frag, paint, scissor, 1.0f, fringe, -1.0f, 0.0f, 0);
     if(text) {
-        frag->type = PAINT_TYPE_IMG;
-        frag->stateData = glnvg__packStateDataUniform(PACK_TEX_TYPE, 2);
+        frag->type = PAINT_TYPE_TEXT;
     }
 
     return;
@@ -1613,6 +1713,17 @@ void nvg__renderDelete(void* uptr)
     free(gl->calls);
 
     free(gl);
+}
+
+int nvg__isTexture(void* uptr, int image)
+{
+    GLNVGcontext* gl = (GLNVGcontext*)uptr;
+    GLNVGtexture* tex = glnvg__findTexture(gl, image);
+
+    if (!tex)
+        return 0;
+
+    return glIsTexture(tex->tex);
 }
 
 #if defined NANOVG_GL3
@@ -1660,22 +1771,6 @@ void nvglClearWithColor(NVGcolor col)
     glClear(GL_COLOR_BUFFER_BIT);
 
     glEnable(GL_SCISSOR_TEST);
-}
-
-int nvglCreateImageFromHandle(NVGcontext* ctx, GLuint textureId, int w, int h, int imageFlags)
-{
-    GLNVGcontext* gl = *(GLNVGcontext**)ctx;
-    GLNVGtexture* tex = glnvg__allocTexture(gl);
-
-    if (tex == NULL) return 0;
-
-    tex->type = NVG_TEXTURE_RGBA;
-    tex->tex = textureId;
-    tex->flags = imageFlags;
-    tex->width = w;
-    tex->height = h;
-
-    return tex->id;
 }
 
 GLuint nvglImageHandle(NVGcontext* ctx, int image)

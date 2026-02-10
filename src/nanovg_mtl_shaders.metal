@@ -30,7 +30,7 @@ typedef enum {
   MNVG_SHADER_FILLGRAD,
   MNVG_SHADER_FILLIMG,
   MNVG_SHADER_FILLIMG_ALPHA,
-  MNVG_SHADER_IMG,
+  MNVG_SHADER_TEXT,
   MNVG_SHADER_FAST_ROUNDEDRECT,
   MNVG_SHADER_FILLCOLOR,
   MNVG_SHADER_DOUBLE_STROKE,
@@ -40,6 +40,12 @@ typedef enum {
   MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY,
   MNVG_SHADER_OBJECT_RECT,
 } FragmentShaderCall;
+
+typedef enum {
+    MNVG_TEXTURE_ALPHA,
+	MNVG_TEXTURE_ARGB,
+    MNVG_TEXTURE_ARGB_SRGB,
+} TexType;
 
 typedef struct {
   float2 pos [[attribute(0)]];
@@ -72,13 +78,92 @@ typedef struct  {
 } Uniforms;
 
 int getLineStyle(constant Uniforms& uniforms){
-    return (uniforms.stateData >> 8) & 0x03;     // 2 bits
+    return (uniforms.stateData >> 7) & 0x03;     // 2 bits
 }
-int getTexType(constant Uniforms& uniforms){
-    return (uniforms.stateData >> 5) & 0x07;     // 3 bits (0,1,2,3,4)
+
+TexType getTexType(constant Uniforms& uniforms){
+    return TexType((uniforms.stateData >> 5) & 0x03);     // 2 bits (0,1,2,3)
 }
 bool getReverse(constant Uniforms& uniforms){
     return bool(uniforms.stateData & 0x01);      // 1 bit
+}
+
+float mitchell(float x, float B, float C) {
+    x = abs(x);
+    if (x < 1.0) {
+        return ((12.0 - 9.0*B - 6.0*C) * x*x*x +
+                (-18.0 + 12.0*B + 6.0*C) * x*x +
+                (6.0 - 2.0*B)) / 6.0;
+    } else if (x < 2.0) {
+        return ((-B - 6.0*C) * x*x*x +
+                (6.0*B + 30.0*C) * x*x +
+                (-12.0*B - 48.0*C) * x +
+                (8.0*B + 24.0*C)) / 6.0;
+    }
+    return 0.0;
+}
+
+float4 textureMitchellNetravali(texture2d<float> tex, sampler samp, float2 uv) {
+    const float B = 1.0/2.0;
+    const float C = 1.0/6.0;
+
+    float2 texSize = float2(tex.get_width(), tex.get_height());
+    float2 samplePos = uv * texSize;
+    float2 texPos1 = floor(samplePos - 0.5) + 0.5;
+    float2 f = samplePos - texPos1;
+
+    // Calculate weights for 4 taps in each direction
+    float wx[4], wy[4];
+    for (int i = 0; i < 4; i++) {
+        wx[i] = mitchell(f.x - float(i - 1), B, C);
+        wy[i] = mitchell(f.y - float(i - 1), B, C);
+    }
+
+    // Combine middle weights for bilinear optimization
+    float wx12 = wx[1] + wx[2];
+    float wy12 = wy[1] + wy[2];
+    float2 offset12 = float2(wx[2] / (wx12 + 0.0001), wy[2] / (wy12 + 0.0001));
+
+    // Calculate sample positions
+    float2 texPos0 = texPos1 - 1.0;
+    float2 texPos3 = texPos1 + 2.0;
+    float2 texPos12 = texPos1 + offset12;
+
+    texPos0 /= texSize;
+    texPos3 /= texSize;
+    texPos12 /= texSize;
+
+    // Sample with bilinear optimization (9 samples instead of 16)
+    float4 result = float4(0.0);
+    result += tex.sample(samp, float2(texPos0.x, texPos0.y), level(0)) * wx[0] * wy[0];
+    result += tex.sample(samp, float2(texPos12.x, texPos0.y), level(0)) * wx12 * wy[0];
+    result += tex.sample(samp, float2(texPos3.x, texPos0.y), level(0)) * wx[3] * wy[0];
+    result += tex.sample(samp, float2(texPos0.x, texPos12.y), level(0)) * wx[0] * wy12;
+    result += tex.sample(samp, float2(texPos12.x, texPos12.y), level(0)) * wx12 * wy12;
+    result += tex.sample(samp, float2(texPos3.x, texPos12.y), level(0)) * wx[3] * wy12;
+    result += tex.sample(samp, float2(texPos0.x, texPos3.y), level(0)) * wx[0] * wy[3];
+    result += tex.sample(samp, float2(texPos12.x, texPos3.y), level(0)) * wx12 * wy[3];
+    result += tex.sample(samp, float2(texPos3.x, texPos3.y), level(0)) * wx[3] * wy[3];
+
+    return result;
+}
+
+float4 sampleTextureAdaptive(texture2d<float> tex,
+                             sampler samp,
+                             float2 uv)
+{
+    float2 texSize = float2(tex.get_width(), tex.get_height());
+
+    float2 dudx = dfdx(uv) * texSize;
+    float2 dudy = dfdy(uv) * texSize;
+
+    float footprint = max(length(dudx), length(dudy));
+
+    // Upscale using Michell-Netravali
+    if (footprint < 0.995)
+        return textureMitchellNetravali(tex, samp, uv);
+
+    return tex.sample(samp, uv, bias(-0.5));
 }
 
 float inverseLerp(float a, float b, float value) {
@@ -122,6 +207,14 @@ float dashed(float2 uv, float rad, float thickness, float featherVal) {
     float aa = delta;
     float w = clamp(inverseLerp(aa, -aa, seg), 0.0f, 1.0f);
     return w;
+}
+
+inline float4 linearToSrgb(float4 col)
+{
+    float3 c = col.rgb;
+    float3 lo = c * 12.92;
+    float3 hi = 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+    return float4(select(hi, lo, c <= 0.0031308), col.a);
 }
 
 float dotted(float2 uv) {
@@ -208,16 +301,9 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
 
   switch(uniforms.type)
   {
-    case MNVG_SHADER_IMG: {
+    case MNVG_SHADER_TEXT: {
         float4 color = texture.sample(sampler, float2(in.ftcoord.x, getReverse(uniforms) ? 1.0f - in.ftcoord.y : in.ftcoord.y));
-        if (getTexType(uniforms) == 1)
-            color = float4(color.xyz * color.w, color.w);
-        else if (getTexType(uniforms) == 2)
-            color = float4(color.x);
-        else if (getTexType(uniforms) == 3)
-            color = color;
-        color *= scissor;
-        return (color * convertColour(uniforms.innerCol));
+        return float4(color.x) * scissor * convertColour(uniforms.innerCol);
     }
     case MNVG_SHADER_FAST_ROUNDEDRECT:
     {
@@ -309,13 +395,13 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     case MNVG_SHADER_OBJECT_RECT:
     {
         float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos,1.0f)).xy;
-        int flagType = (uniforms.stateData >> 10) & 0x03;     // 2 bits
+        int flagType = (uniforms.stateData >> 9) & 0x03;     // 2 bits
 
         float2 flagPoints[3];
         float flagSize = 5.0f;
         flagPoints[2] = float2(0.0f, -1.0f) * flagSize;
 
-        bool objectOutline = bool((uniforms.stateData >> 12) & 0x01); // 1 bit (off or on)
+        bool objectOutline = bool((uniforms.stateData >> 11) & 0x01); // 1 bit (off or on)
 
         float offset = objectOutline ? 0.2f : -0.5f;
 
@@ -394,11 +480,9 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         float strokeAlpha = strokeMask(uniforms, in);
         float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
         float4 color = texture.sample(sampler, float2(pt.x, getReverse(uniforms) ? 1.0f - pt.y : pt.y));
-        float alpha = color.a;
-        if (getTexType(uniforms) == 1) alpha = color.w;
-        if (getTexType(uniforms) == 2) alpha = color.x;
-        if (getTexType(uniforms) == 4) alpha = color.r; // single channel GL_RED
-        // Apply color tint and alpha.
+        float alpha = color.x;
+        if (getTexType(uniforms) == MNVG_TEXTURE_ALPHA) alpha = color.r;
+        // Apply color tint and alpha
         float3 maskColor = getRawColour(uniforms.innerCol).bgr;
         return float4(maskColor * alpha, alpha) * strokeAlpha * scissor;
     }
@@ -406,10 +490,12 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     {
         float strokeAlpha = strokeMask(uniforms, in);
         float2 pt = (transformInverse(uniforms.paintMat) * float3(in.fpos, 1.0)).xy / uniforms.extent;
-        float4 color = texture.sample(sampler, float2(pt.x, getReverse(uniforms) ? 1.0f - pt.y : pt.y));
-        if (getTexType(uniforms) == 1) color = float4(color.xyz * color.w, color.w);
-        else if (getTexType(uniforms) == 2) color = float4(color.x);
-        else if (getTexType(uniforms) == 3) color = color;
+        float4 color = sampleTextureAdaptive(texture, sampler, float2(pt.x, getReverse(uniforms) ? 1.0f - pt.y : pt.y));
+
+        int texType = getTexType(uniforms);
+        if (texType == MNVG_TEXTURE_ALPHA) color = float4(color.x);
+        else if (texType == MNVG_TEXTURE_ARGB) color = color;
+        else if (texType == MNVG_TEXTURE_ARGB_SRGB) color = linearToSrgb(color);
         return (color * scissor * strokeAlpha).rgba;
     }
   }
