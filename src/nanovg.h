@@ -858,8 +858,9 @@ struct NVGpath {
     bool reversed : 1;
     bool closed : 1;
 	bool convex : 1;
-    bool winding : 1;
     bool nonzero : 1;
+    bool restart : 1;
+    bool winding : 1;
 };
 typedef struct NVGpath NVGpath;
 

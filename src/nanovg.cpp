@@ -68,6 +68,7 @@ enum NVGcommands {
     NVG_WINDING_CW = 4,
 	NVG_WINDING_CCW = 5,
     NVG_WINDING_NONZERO = 6,
+    NVG_RESTART = 7
 };
 
 enum NVGpointFlags
@@ -1442,11 +1443,25 @@ static void nvg__closePath(NVGcontext* ctx)
 	path->closed = 1;
 }
 
+static void nvg__restartPath(NVGcontext* ctx)
+{
+    NVGpath* path = nvg__lastPath(ctx);
+    if (path == NULL) return;
+    path->restart = 1;
+}
+
 static void nvg__pathWinding(NVGcontext* ctx, NVGwinding winding)
 {
 	NVGpath* path = nvg__lastPath(ctx);
 	if (path == NULL) return;
-	path->winding = winding;
+    if(winding == NVG_NONZERO)
+    {
+        path->nonzero = true;
+    }
+    else {
+        path->nonzero = false;
+        path->winding = winding;
+    }
 }
 
 static float nvg__getAverageScale(float *t)
@@ -1615,7 +1630,6 @@ static void nvg__flattenPaths(NVGcontext* ctx)
 {
     NVGpathCache* cache = ctx->cache;
     NVGpoint* last;
-    int nonzero = 0;
     
     if (cache->npaths > 0)
         return;
@@ -1646,14 +1660,15 @@ static void nvg__flattenPaths(NVGcontext* ctx)
                 break;
             case NVG_WINDING_CW:
                 nvg__pathWinding(ctx, NVG_HOLE);
-                nonzero = false;
                 break;
             case NVG_WINDING_CCW:
                 nvg__pathWinding(ctx, NVG_SOLID);
-                nonzero = false;
                 break;
             case NVG_WINDING_NONZERO:
-                nonzero = true;
+                nvg__pathWinding(ctx, NVG_NONZERO);
+                break;
+            case NVG_RESTART:
+                nvg__restartPath(ctx);
                 break;
         }
     }
@@ -1675,20 +1690,6 @@ static void nvg__flattenPaths(NVGcontext* ctx)
             path->closed = 1;
         }
         
-        // Enforce winding.
-        path->reversed = 0;
-        if (path->count > 2) {
-            float area = nvg__polyArea(pts, path->count);
-            if (path->winding == NVG_SOLID && area < 0.0f) {
-                nvg__polyReverse(pts, path->count);
-                path->reversed = 1;
-            }
-            if (path->winding == NVG_HOLE && area > 0.0f) {
-                nvg__polyReverse(pts, path->count);
-                path->reversed = 1;
-            }
-        }
-        
         for(int i = 0; i < path->count; i++) {
             // Calculate segment direction and length
             p0->dx = p1->x - p0->x;
@@ -1704,50 +1705,78 @@ static void nvg__flattenPaths(NVGcontext* ctx)
         }
         
         // Calculate nonzero winding rule
-        if(nonzero) {
-            struct Point
-            {
-                float x, y;
-            };
+        if(path->nonzero) {
+            struct Point { float x, y; };
             
-            auto getLineCrossing = [](Point p0, Point p1, Point p2, Point p3) -> float {
-                auto b = Point{p2.x - p0.x, p2.y - p0.y};
-                auto d = Point{p1.x - p0.x, p1.y - p0.y};
-                auto e = Point{p3.x - p2.x, p3.y - p2.y};
-                float m = d.x * e.y - d.y * e.x;
-                // Check if lines are parallel, or if either pair of points are equal
-                if (fabsf(m) < 1e-6)
-                    return NAN;
-                return -(d.x * b.y - d.y * b.x) / m;
+            auto doesEdgeCrossRay = [](Point rayOrigin, Point edgeStart, Point edgeEnd) -> bool {
+                float py = rayOrigin.y + 1e-5f;
+                float y1 = edgeStart.y;
+                float y2 = edgeEnd.y;
+
+                if ((y1 > py) != (y2 > py)) {
+                    float x1 = edgeStart.x;
+                    float x2 = edgeEnd.x;
+                    float xIntersect = (x2 - x1) * (py - y1) / (y2 - y1) + x1;
+                    if (rayOrigin.x < xIntersect)
+                        return true;
+                }
+                return false;
             };
             
             int crossings = 0;
+            int currentGroup = 0;
+
+            // Find which group this path belongs to
+            for (int k = 0; k <= j; k++) {
+                if (cache->paths[k].restart) {
+                    currentGroup = k;
+                }
+            }
             
-            Point point0 = {cache->points[0].x, cache->points[0].y};
-            Point point1 = {cache->bounds[0] - 1.0f, cache->bounds[1] - 1.0f};
+            Point point1 = {cache->points[path->first].x, cache->points[path->first].y};
+            
             // Iterate all other paths
             for (int i = 0; i < cache->npaths; i++) {
                 if (i == j) continue;
                 
+                // Skip if this path is before the current group's restart point
+               if (cache->paths[i].restart && i < currentGroup)
+                   continue;
+               
+               // Skip if this path started a new group after our path
+               if (cache->paths[i].restart && i > j)
+                   break;
+            
                 // Iterate all lines on the path
                 if (cache->paths[i].count < 2)
                     continue;
                 
-                for (int i = 1; i < cache->paths[i].count + 3; i += 3) {
-                    // The previous point
-                    Point point2 = {cache->points[i-1].x, cache->points[i-1].y};
-                    // The current point
-                    Point point3 = (i < cache->paths[i].count) ? Point{cache->points[i-1].x, cache->points[i-1].y} : Point{cache->points[i].x, cache->points[i].y};
-                    float crossing = getLineCrossing(point0, point1, point2, point3);
-                    float crossing2 = getLineCrossing(point2, point3, point0, point1);
-                    if (0.0 <= crossing && crossing < 1.0 && 0.0 <= crossing2) {
+                int pathStart = cache->paths[i].first;
+                int pathEnd = pathStart + cache->paths[i].count;
+                
+                for (int k = pathStart + 1; k < pathEnd; k++) {
+                    Point point2 = {cache->points[k-1].x, cache->points[k-1].y};
+                    Point point3 = {cache->points[k].x, cache->points[k].y};
+                    if (doesEdgeCrossRay(point1, point2, point3)) {
                         crossings++;
                     }
                 }
             }
-            if(j <= cache->npaths)
-            {
-                cache->paths[j+1].winding = crossings % 2 ? NVG_SOLID : NVG_HOLE;
+            
+            cache->paths[j].winding = crossings % 2 ? NVG_HOLE : NVG_SOLID;
+        }
+        
+        // Enforce winding.
+        path->reversed = 0;
+        if (path->count > 2) {
+            float area = nvg__polyArea(pts, path->count);
+            if (path->winding == NVG_SOLID && area < 0.0f) {
+                nvg__polyReverse(pts, path->count);
+                path->reversed = 1;
+            }
+            if (path->winding == NVG_HOLE && area > 0.0f) {
+                nvg__polyReverse(pts, path->count);
+                path->reversed = 1;
             }
         }
     }
@@ -3288,11 +3317,11 @@ static void nvg__drawSTBTTGlyph(NVGcontext* ctx, stbtt_fontinfo* font, int glyph
   int n_points = stbtt_GetGlyphShape(font, glyph, &points);
   for (int i = 0; i < n_points; i++) {
     if (points[i].type == STBTT_vmove) {
-      nvgPathWinding(ctx, NVG_NONZERO);
       nvgMoveTo(ctx, points[i].x, points[i].y);
+      nvgPathWinding(ctx, NVG_NONZERO);
       if(i == 0) {
-        //uint8_t restart[] = { NVG_RESTART };  // flag indicating start of new path (and not just subpath)
-        //nvg__appendCommands(ctx, restart, 1, NULL, 0);
+        uint8_t restart[] = { NVG_RESTART };  // flag indicating start of new path (and not just subpath)
+        nvg__appendCommands(ctx, restart, 1, NULL, 0);
       }
     }
     else if (points[i].type == STBTT_vline)
