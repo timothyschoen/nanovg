@@ -32,33 +32,33 @@ extern "C" {
 
 // Create flags
 enum NVGcreateFlags {
-  // Render text using SDF
-  NVG_SDF_TEXT = 1 << 0,
-  // Flag indicating if double buffering scheme is used.
-  NVG_DOUBLE_BUFFER = 1 << 12,
-  // Flag indicating if triple buffering scheme is used.
-  NVG_TRIPLE_BUFFER = 1 << 13,
-  // Flag indicating that additional debug checks are done.
-  NVG_DEBUG = 1 << 2,
+    // Render text using SDF
+    NVG_SDF_TEXT = 1 << 0,
+    // Flag indicating if double buffering scheme is used.
+    NVG_DOUBLE_BUFFER = 1 << 12,
+    // Flag indicating if triple buffering scheme is used.
+    NVG_TRIPLE_BUFFER = 1 << 13,
+    // Flag indicating that additional debug checks are done.
+    NVG_DEBUG = 1 << 2,
 };
 
 // These are additional flags on top of NVGimageFlags.
 enum NVGimageFlagsMetal {
-  NVG_IMAGE_NODELETE = 1 << 16, // Do not delete Metal texture handle.
+    NVG_IMAGE_NODELETE = 1 << 16, // Do not delete Metal texture handle.
 };
 
 // The possible OS targets.
 enum MNVGTarget {
-  MNVG_IOS,
-  MNVG_MACOS,
-  MNVG_SIMULATOR,
-  MNVG_TVOS,
-  MNVG_UNKNOWN,
+    MNVG_IOS,
+    MNVG_MACOS,
+    MNVG_SIMULATOR,
+    MNVG_TVOS,
+    MNVG_UNKNOWN,
 };
 
 struct MNVGframebuffer {
-  NVGcontext* ctx;
-  int image;
+    NVGcontext* ctx;
+    int image;
 };
 typedef struct MNVGframebuffer MNVGframebuffer;
 

@@ -336,7 +336,7 @@ static int nvg__packStateDataUniform(PackType packType, int value) {
 static int nvg__maxi(int a, int b) { return a > b ? a : b; }
 
 static int nvg__maxVertCount(const NVGpath* paths, int npaths,
-                                int* indexCount, int* strokeCount) {
+                             int* indexCount, int* strokeCount) {
     int count = 0;
     if (indexCount != NULL) *indexCount = 0;
     if (strokeCount != NULL) *strokeCount = 0;
@@ -363,8 +363,8 @@ void nvg__renderCancel(void* uptr) {
 }
 
 int nvg__renderCreateTexture(void* uptr, int type, int width,
-                                       int height, int imageFlags,
-                                       const unsigned char* data) {
+                             int height, int imageFlags,
+                             const unsigned char* data) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
     return [mtl renderCreateTextureWithType:type
                                       width:width
@@ -389,10 +389,10 @@ int nvg__renderDeleteTexture(void* uptr, int image) {
 }
 
 void nvg__renderFill(void* uptr, NVGpaint* paint,
-                               NVGcompositeOperationState compositeOperation,
-                               NVGscissor* scissor, float fringe,
-                               const float* bounds, const NVGpath* paths,
-                               int npaths) {
+                     NVGcompositeOperationState compositeOperation,
+                     NVGscissor* scissor, float fringe,
+                     const float* bounds, const NVGpath* paths,
+                     int npaths) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
     [mtl renderFillWithPaint:paint
           compositeOperation:compositeOperation
@@ -416,10 +416,10 @@ int nvg__renderGetTextureSize(void* uptr, int image, int* w, int* h) {
 }
 
 void nvg__renderStroke(void* uptr, NVGpaint* paint,
-                                 NVGcompositeOperationState compositeOperation,
-                                 NVGscissor* scissor, float fringe,
-                                 float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths,
-                                 int npaths) {
+                       NVGcompositeOperationState compositeOperation,
+                       NVGscissor* scissor, float fringe,
+                       float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths,
+                       int npaths) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
     [mtl renderStrokeWithPaint:paint
             compositeOperation:compositeOperation
@@ -433,8 +433,8 @@ void nvg__renderStroke(void* uptr, NVGpaint* paint,
 }
 
 void nvg__renderTriangles(
-                                    void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation,
-                                    NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe, int text) {
+                          void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation,
+                          NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe, int text) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
     [mtl renderTrianglesWithPaint:paint
                compositeOperation:compositeOperation
@@ -446,8 +446,8 @@ void nvg__renderTriangles(
 }
 
 int nvg__renderUpdateTexture(void* uptr, int image, int x, int y,
-                                       int w, int h,
-                                       const unsigned char* data) {
+                             int w, int h,
+                             const unsigned char* data) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
     return [mtl renderUpdateTextureWithImage:image
                                            x:x
@@ -458,7 +458,7 @@ int nvg__renderUpdateTexture(void* uptr, int image, int x, int y,
 }
 
 void nvg__renderViewport(void* uptr, float width, float height,
-                                   float devicePixelRatio) {
+                         float devicePixelRatio) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
     [mtl renderViewportWithWidth:width
                           height:height
@@ -481,9 +481,9 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     CAMetalLayer *metalLayer = (CAMetalLayer*)[(__bridge UIView*)view layer];
     id<MTLDevice> metalDevice = MTLCreateSystemDefaultDevice();
     if (!metalDevice) return NULL;
-
+    
     MTLPixelFormat pixelFormat = MTLPixelFormatBGRA8Unorm;
-
+    
     [metalLayer setPixelFormat:pixelFormat];
     [metalLayer setDevice: metalDevice];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
@@ -494,7 +494,7 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
 void mnvgSetViewBounds(void* view, int width, int height) {
     CGSize newSize = CGSizeMake(width, height);
     CAMetalLayer* layer = (CAMetalLayer*)[(__bridge NSView*)view layer];
-                                          
+    
     if (!CGSizeEqualToSize(layer.drawableSize, newSize)) {
         [layer setDrawableSize:CGSizeMake(width, height)];
     }
@@ -504,9 +504,9 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     CAMetalLayer *metalLayer = [CAMetalLayer new];
     id<MTLDevice> metalDevice = MTLCreateSystemDefaultDevice();
     if (!metalDevice) return NULL;
-
+    
     MTLPixelFormat pixelFormat = MTLPixelFormatBGRA8Unorm;
-
+    
     ((__bridge NSView*) view).layer = metalLayer;
     [metalLayer setPixelFormat:pixelFormat];
     [metalLayer setDevice: metalDevice];
@@ -522,9 +522,9 @@ NVGcontext* nvgCreateMTL(void* metalLayer, int flags) {
     printf("Metal is only supported on iOS, macOS, and tvOS.\n");
     return NULL;
 #endif  // MNVG_INVALID_TARGET
-
+    
     MNVGcontext* mtl = [MNVGcontext new];
-
+    
     mtl.flags = flags;
 #if __aarch64__ && !TARGET_OS_SIMULATOR
     mtl.fragSize = sizeof(MNVGfragUniforms);
@@ -535,11 +535,11 @@ NVGcontext* nvgCreateMTL(void* metalLayer, int flags) {
     mtl.lastBoundTexture = -1;
     mtl.indexSize = 4;  // MTLIndexTypeUInt32
     mtl.metalLayer = (__bridge CAMetalLayer*)metalLayer;
-
+    
     NVGcontext* ctx = nvgCreateInternal((__bridge_retained void*)mtl);
     if (ctx == NULL) goto error;
     return ctx;
-
+    
 error:
     // 'mtl' is freed by nvgDeleteInternal.
     if (ctx != NULL) nvgDeleteInternal(ctx);
@@ -567,12 +567,12 @@ MNVGframebuffer* mnvgCreateFramebuffer(NVGcontext* ctx, int width,
     MNVGframebuffer* framebuffer = (MNVGframebuffer*)malloc(sizeof(MNVGframebuffer));
     if (framebuffer == NULL)
         return NULL;
-
+    
     memset(framebuffer, 0, sizeof(MNVGframebuffer));
     framebuffer->image = nvgCreateImageARGB(ctx, width, height,
                                             imageFlags,
                                             NULL);
-
+    
     framebuffer->ctx = ctx;
     return framebuffer;
 }
@@ -594,7 +594,7 @@ int mnvgBlitFramebuffer(NVGcontext* ctx, MNVGframebuffer* fb, int x, int y, int 
 }
 
 void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
-
+    
     MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
     float alpha = (float)color.a;
     mtl.clearColor = MTLClearColorMake((float)color.r * alpha,
@@ -606,56 +606,56 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
 
 void mnvgReadPixels(NVGcontext* ctx, MNVGframebuffer* fb, int x, int y, int width,
                     int height, void* data) {
-  MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
-
-  MNVGtexture* tex = [mtl findTexture:fb->image];
-  if (tex == nil) return;
-
-  NSUInteger bytesPerRow;
-  if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB) {
-    bytesPerRow = width * 4;
-  } else {
-    bytesPerRow = width;
-  }
-
-  // Makes sure the command execution for the image has been done.
-  for (MNVGbuffers* buffers in mtl.cbuffers) {
-    if (buffers.isBusy && buffers.renderData && buffers.renderData->image == fb->image && buffers.commandBuffer) {
-      id<MTLCommandBuffer> commandBuffer = buffers.commandBuffer;
-      while(buffers.isBusy) usleep(10);
-      break;
+    MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
+    
+    MNVGtexture* tex = [mtl findTexture:fb->image];
+    if (tex == nil) return;
+    
+    NSUInteger bytesPerRow;
+    if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB) {
+        bytesPerRow = width * 4;
+    } else {
+        bytesPerRow = width;
     }
-  }
-
+    
+    // Makes sure the command execution for the image has been done.
+    for (MNVGbuffers* buffers in mtl.cbuffers) {
+        if (buffers.isBusy && buffers.renderData && buffers.renderData->image == fb->image && buffers.commandBuffer) {
+            id<MTLCommandBuffer> commandBuffer = buffers.commandBuffer;
+            while(buffers.isBusy) usleep(10);
+            break;
+        }
+    }
+    
 #if TARGET_OS_SIMULATOR
-  CAMetalLayer* metalLayer = mtl.metalLayer;
-  const NSUInteger kBufferSize = bytesPerRow * height;
-  id<MTLBuffer> buffer = [metalLayer.device
-      newBufferWithLength:kBufferSize
-      options:MTLResourceStorageModeShared];
-
-  id<MTLCommandBuffer> commandBuffer = [mtl.commandQueue commandBuffer];
-  id<MTLBlitCommandEncoder> blitCommandEncoder = [commandBuffer
-      blitCommandEncoder];
-  [blitCommandEncoder copyFromTexture:tex->tex
-      sourceSlice:0
-      sourceLevel:0
-      sourceOrigin:MTLOriginMake(x, y, 0)
-      sourceSize:MTLSizeMake(width, height, 1)
-      toBuffer:buffer
-      destinationOffset:0
-      destinationBytesPerRow:bytesPerRow
-      destinationBytesPerImage:kBufferSize];
-
-  [blitCommandEncoder endEncoding];
-  [commandBuffer commit];
-  [commandBuffer waitUntilCompleted];
-  memcpy(data, [buffer contents], kBufferSize);
+    CAMetalLayer* metalLayer = mtl.metalLayer;
+    const NSUInteger kBufferSize = bytesPerRow * height;
+    id<MTLBuffer> buffer = [metalLayer.device
+                            newBufferWithLength:kBufferSize
+                            options:MTLResourceStorageModeShared];
+    
+    id<MTLCommandBuffer> commandBuffer = [mtl.commandQueue commandBuffer];
+    id<MTLBlitCommandEncoder> blitCommandEncoder = [commandBuffer
+                                                    blitCommandEncoder];
+    [blitCommandEncoder copyFromTexture:tex->tex
+                            sourceSlice:0
+                            sourceLevel:0
+                           sourceOrigin:MTLOriginMake(x, y, 0)
+                             sourceSize:MTLSizeMake(width, height, 1)
+                               toBuffer:buffer
+                      destinationOffset:0
+                 destinationBytesPerRow:bytesPerRow
+               destinationBytesPerImage:kBufferSize];
+    
+    [blitCommandEncoder endEncoding];
+    [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
+    memcpy(data, [buffer contents], kBufferSize);
 #else
-  [tex->tex getBytes:data
-         bytesPerRow:bytesPerRow
-          fromRegion:MTLRegionMake2D(x, y, width, height)
-         mipmapLevel:0];
+    [tex->tex getBytes:data
+           bytesPerRow:bytesPerRow
+            fromRegion:MTLRegionMake2D(x, y, width, height)
+           mipmapLevel:0];
 #endif  // TARGET_OS_SIMULATOR
 }
 
@@ -730,7 +730,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 
 - (MNVGtexture*)allocTexture {
     MNVGtexture* tex = nil;
-
+    
     for (MNVGtexture* texture in _textures) {
         if (texture->valid == 0) {
             tex = texture;
@@ -782,7 +782,7 @@ void* mnvgDevice(NVGcontext* ctx) {
         blend.srcAlpha = MNVGBlendFactors[op.srcAlpha];
         blend.dstAlpha = MNVGBlendFactors[op.dstAlpha];
     }
-
+    
     return blend;
 }
 
@@ -803,7 +803,7 @@ void* mnvgDevice(NVGcontext* ctx) {
                 lineLength:(float)lineLength
               lineReversed: (int)lineReversed {
     memset(frag, 0, sizeof(*frag));
-
+    
     frag->type = paint->type;
     frag->innerCol = paint->innerColor.rgba32;
     frag->outerCol = paint->outerColor.rgba32;
@@ -815,7 +815,7 @@ void* mnvgDevice(NVGcontext* ctx) {
     frag->strokeMult = (width * 0.5f + fringe * 0.5f) / fringe;
     frag->lineLength = lineLength;
     memcpy(frag->paintMat, paint->xform, 6 * sizeof(float));
-
+    
     if (scissor->extent[0] < -0.5f || scissor->extent[1] < -0.5f) {
         memset(frag->scissorMat, 0, 6 * sizeof(float));
         frag->scissorExt.x = 1.0f;
@@ -827,7 +827,7 @@ void* mnvgDevice(NVGcontext* ctx) {
         frag->scissorExt.y = scissor->extent[1];
         frag->scissorRadius = scissor->radius;
     }
-
+    
     switch (paint->type) {
         case PAINT_TYPE_FILLIMG_ALPHA:
         case PAINT_TYPE_FILLIMG: {
@@ -848,8 +848,8 @@ void* mnvgDevice(NVGcontext* ctx) {
         case PAINT_TYPE_DOUBLE_STROKE:
         case PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY:
         case PAINT_TYPE_DOUBLE_STROKE_ACTIVITY: {
-        if(paint->type == PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY ||
-           paint->type == PAINT_TYPE_DOUBLE_STROKE_ACTIVITY)
+            if(paint->type == PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY ||
+               paint->type == PAINT_TYPE_DOUBLE_STROKE_ACTIVITY)
             {
                 frag->offset = paint->offset;
                 frag->strokeMult = (width * 0.18f + fringe * 0.5f) / fringe;
@@ -884,7 +884,7 @@ void* mnvgDevice(NVGcontext* ctx) {
                                   indexBuffer:_buffers.indexBuffer
                             indexBufferOffset:kIndexBufferOffset];
     }
-
+    
     // Draw fringes
     if (call->strokeCount > 0) {
         [_renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
@@ -906,11 +906,11 @@ void* mnvgDevice(NVGcontext* ctx) {
                                   indexBuffer:_buffers.indexBuffer
                             indexBufferOffset:kIndexBufferOffset];
     }
-
+    
     // Restores states.
     [_renderEncoder setCullMode:MTLCullModeBack];
     [_renderEncoder setRenderPipelineState:_pipelineState];
-
+    
     // Draws anti-aliased fragments.
     [self setUniforms:call->uniformOffset image:call->image];
     if (call->strokeCount > 0) { // anti-aliasing
@@ -919,7 +919,7 @@ void* mnvgDevice(NVGcontext* ctx) {
                            vertexStart:call->strokeOffset
                            vertexCount:call->strokeCount];
     }
-
+    
     // Draws fill.
     [_renderEncoder setDepthStencilState:_fillStencilState];
     [_renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
@@ -939,7 +939,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 
 - (void)renderCancel {
     MNVGrenderData* renderData = _buffers.renderData;
-
+    
     _buffers.isBusy = NO;
     if(renderData) {
         renderData->image = 0;
@@ -948,7 +948,7 @@ void* mnvgDevice(NVGcontext* ctx) {
         renderData->ncalls = 0;
         renderData->nuniforms = 0;
     }
-
+    
     // terrible, but it fixes a crash when closing the MNVGContext
     // we need to be very sure that _semaphore has a value of at least 3
     dispatch_semaphore_signal(_semaphore);
@@ -962,38 +962,38 @@ void* mnvgDevice(NVGcontext* ctx) {
     if (descriptor == nil) {
         return nil;
     }
-
+    
     descriptor.colorAttachments[0].clearColor = _clearColor;
     descriptor.colorAttachments[0].loadAction = _clearBufferOnFlush ? MTLLoadActionClear : MTLLoadActionLoad;
     descriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
     descriptor.colorAttachments[0].texture = colorTexture;
     _clearBufferOnFlush = NO;
-
-     descriptor.stencilAttachment.clearStencil = 0;
-     descriptor.stencilAttachment.loadAction = MTLLoadActionClear;
-     descriptor.stencilAttachment.storeAction = MTLStoreActionDontCare;
-     descriptor.stencilAttachment.texture = _buffers.stencilTexture;
-
+    
+    descriptor.stencilAttachment.clearStencil = 0;
+    descriptor.stencilAttachment.loadAction = MTLLoadActionClear;
+    descriptor.stencilAttachment.storeAction = MTLStoreActionDontCare;
+    descriptor.stencilAttachment.texture = _buffers.stencilTexture;
+    
     id<MTLCommandBuffer> commandBuffer = _buffers.commandBuffer;
     id<MTLRenderCommandEncoder> encoder = [commandBuffer
                                            renderCommandEncoderWithDescriptor:descriptor];
-
+    
     [encoder setCullMode:MTLCullModeBack];
     [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
     [encoder setStencilReferenceValue:0];
     [encoder setViewport:(MTLViewport)
      {0.0, 0.0, _viewPortSize.x, _viewPortSize.y, 0.0, 1.0}];
-
+    
     [encoder setVertexBuffer:_buffers.vertBuffer
                       offset:0
                      atIndex:MNVG_VERTEX_INPUT_INDEX_VERTICES];
-
+    
     [encoder setVertexBuffer:_buffers.viewSizeBuffer
                       offset:0
                      atIndex:MNVG_VERTEX_INPUT_INDEX_VIEW_SIZE];
-
+    
     [encoder setFragmentBuffer:_buffers.uniformBuffer offset:0 atIndex:0];
-
+    
     return encoder;
 }
 
@@ -1002,7 +1002,7 @@ void* mnvgDevice(NVGcontext* ctx) {
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         _metalLayer.device = device;
     }
-
+    
     // Loads shaders from pre-compiled metal library..
     NSError* error;
     id<MTLDevice> device = _metalLayer.device;
@@ -1010,7 +1010,7 @@ void* mnvgDevice(NVGcontext* ctx) {
     id<MTLLibrary> library = nil;
     return 0;
 #endif
-
+    
     unsigned char* metal_library_bitcode;
     unsigned int metal_library_bitcode_len;
 #if TARGET_OS_SIMULATOR
@@ -1034,23 +1034,23 @@ void* mnvgDevice(NVGcontext* ctx) {
     metal_library_bitcode = mnvg_bitcode_tvos;
     metal_library_bitcode_len = mnvg_bitcode_tvos_len;
 #endif
-
+    
     dispatch_data_t data = dispatch_data_create(metal_library_bitcode,
                                                 metal_library_bitcode_len,
                                                 NULL,
                                                 DISPATCH_DATA_DESTRUCTOR_DEFAULT);
     id<MTLLibrary> library = [device newLibraryWithData:data error:&error];
-
+    
     [self checkError:error withMessage:"init library"];
     if (library == nil) {
         return 0;
     }
-
+    
     _vertexFunction = [library newFunctionWithName:@"vertexShader"];
     _fragmentFunction = [library newFunctionWithName:@"fragmentShaderAA"];
-
+    
     _commandQueue = [device newCommandQueue];
-
+    
     // Initializes the number of available buffers.
     if (_flags & NVG_TRIPLE_BUFFER) {
         _maxBuffers = 3;
@@ -1068,28 +1068,28 @@ void* mnvgDevice(NVGcontext* ctx) {
     }
     _clearBufferOnFlush = NO;
     _semaphore = dispatch_semaphore_create(_maxBuffers);
-
+    
     // Initializes vertex descriptor.
     _vertexDescriptor = [MTLVertexDescriptor vertexDescriptor];
     _vertexDescriptor.attributes[0].format = MTLVertexFormatFloat2;
     _vertexDescriptor.attributes[0].bufferIndex = 0;
     _vertexDescriptor.attributes[0].offset = offsetof(NVGvertex, x);
-
+    
     _vertexDescriptor.attributes[1].format = MTLVertexFormatShort4Normalized;
     _vertexDescriptor.attributes[1].bufferIndex = 0;
     _vertexDescriptor.attributes[1].offset = offsetof(NVGvertex, u);
-
+    
     _vertexDescriptor.layouts[0].stride = sizeof(NVGvertex);
     _vertexDescriptor.layouts[0].stepFunction = MTLVertexStepFunctionPerVertex;
-
+    
     // Initialzes textures.
     _textureId = 0;
     _textures = [NSMutableArray array];
-
+    
     MTLSamplerDescriptor* samplerDescriptor = [MTLSamplerDescriptor new];
-     _pseudoSampler = [_metalLayer.device
-         newSamplerStateWithDescriptor:samplerDescriptor];
-
+    _pseudoSampler = [_metalLayer.device
+                      newSamplerStateWithDescriptor:samplerDescriptor];
+    
     // Initializes pseudo texture
     const int kPseudoTextureImage = [self
                                      renderCreateTextureWithType:NVG_TEXTURE_ALPHA
@@ -1099,89 +1099,89 @@ void* mnvgDevice(NVGcontext* ctx) {
                                      data:NULL];
     MNVGtexture* tex = [self findTexture:kPseudoTextureImage];
     _pseudoTexture = tex->tex;
-
+    
     // Initializes default blend states.
     _blendFunc = malloc(sizeof(MNVGblend));
     _blendFunc->srcRGB = MTLBlendFactorOne;
     _blendFunc->dstRGB = MTLBlendFactorOneMinusSourceAlpha;
     _blendFunc->srcAlpha = MTLBlendFactorOne;
     _blendFunc->dstAlpha = MTLBlendFactorOneMinusSourceAlpha;
-
+    
     // Initializes stencil states.
     MTLDepthStencilDescriptor* stencilDescriptor = [MTLDepthStencilDescriptor new];
-
+    
     // Default stencil state.
     _defaultStencilState = [device
                             newDepthStencilStateWithDescriptor:stencilDescriptor];
-
-
+    
+    
     // Fill shape stencil.
     MTLStencilDescriptor* frontFaceStencilDescriptor = [MTLStencilDescriptor new];
     frontFaceStencilDescriptor.stencilCompareFunction = MTLCompareFunctionAlways;
     frontFaceStencilDescriptor.depthStencilPassOperation = MTLStencilOperationIncrementWrap;
-
+    
     MTLStencilDescriptor* backFaceStencilDescriptor = [MTLStencilDescriptor new];
     backFaceStencilDescriptor.stencilCompareFunction = MTLCompareFunctionAlways;
     backFaceStencilDescriptor.depthStencilPassOperation = MTLStencilOperationDecrementWrap;
-
+    
     stencilDescriptor.depthCompareFunction = MTLCompareFunctionAlways;
     stencilDescriptor.backFaceStencil = backFaceStencilDescriptor;
     stencilDescriptor.frontFaceStencil = frontFaceStencilDescriptor;
     _fillShapeStencilState = [device
                               newDepthStencilStateWithDescriptor:stencilDescriptor];
-
+    
     // Fill anti-aliased stencil.
     frontFaceStencilDescriptor.stencilCompareFunction = MTLCompareFunctionEqual;
     frontFaceStencilDescriptor.stencilFailureOperation = MTLStencilOperationKeep;
     frontFaceStencilDescriptor.depthFailureOperation = MTLStencilOperationKeep;
     frontFaceStencilDescriptor.depthStencilPassOperation = MTLStencilOperationZero;
-
+    
     stencilDescriptor.backFaceStencil = nil;
     stencilDescriptor.frontFaceStencil = frontFaceStencilDescriptor;
     _fillAntiAliasStencilState = [device
                                   newDepthStencilStateWithDescriptor:stencilDescriptor];
-
+    
     // Fill stencil.
     frontFaceStencilDescriptor.stencilCompareFunction = MTLCompareFunctionNotEqual;
     frontFaceStencilDescriptor.stencilFailureOperation = MTLStencilOperationZero;
     frontFaceStencilDescriptor.depthFailureOperation = MTLStencilOperationZero;
     frontFaceStencilDescriptor.depthStencilPassOperation = MTLStencilOperationZero;
-
+    
     stencilDescriptor.backFaceStencil = nil;
     stencilDescriptor.frontFaceStencil = frontFaceStencilDescriptor;
     _fillStencilState = [device
                          newDepthStencilStateWithDescriptor:stencilDescriptor];
-
+    
     // Stroke shape stencil.
     frontFaceStencilDescriptor.stencilCompareFunction = MTLCompareFunctionEqual;
     frontFaceStencilDescriptor.stencilFailureOperation = MTLStencilOperationKeep;
     frontFaceStencilDescriptor.depthFailureOperation = MTLStencilOperationKeep;
     frontFaceStencilDescriptor.depthStencilPassOperation = MTLStencilOperationIncrementClamp;
-
+    
     stencilDescriptor.backFaceStencil = nil;
     stencilDescriptor.frontFaceStencil = frontFaceStencilDescriptor;
     _strokeShapeStencilState = [device
                                 newDepthStencilStateWithDescriptor:stencilDescriptor];
-
+    
     // Stroke anti-aliased stencil.
     frontFaceStencilDescriptor.depthStencilPassOperation = MTLStencilOperationKeep;
-
+    
     stencilDescriptor.backFaceStencil = nil;
     stencilDescriptor.frontFaceStencil = frontFaceStencilDescriptor;
     _strokeAntiAliasStencilState = [device
                                     newDepthStencilStateWithDescriptor:stencilDescriptor];
-
+    
     // Stroke clear stencil.
     frontFaceStencilDescriptor.stencilCompareFunction = MTLCompareFunctionAlways;
     frontFaceStencilDescriptor.stencilFailureOperation = MTLStencilOperationZero;
     frontFaceStencilDescriptor.depthFailureOperation = MTLStencilOperationZero;
     frontFaceStencilDescriptor.depthStencilPassOperation = MTLStencilOperationZero;
-
+    
     stencilDescriptor.backFaceStencil = nil;
     stencilDescriptor.frontFaceStencil = frontFaceStencilDescriptor;
     _strokeClearStencilState = [device
                                 newDepthStencilStateWithDescriptor:stencilDescriptor];
-
+    
     return 1;
 }
 
@@ -1191,9 +1191,9 @@ void* mnvgDevice(NVGcontext* ctx) {
                         imageFlags:(int)imageFlags
                               data:(const unsigned char*)data {
     MNVGtexture* tex = [self allocTexture];
-
+    
     if (tex == nil) return 0;
-
+    
     MTLPixelFormat pixelFormat = MTLPixelFormatBGRA8Unorm;
     if (type == NVG_TEXTURE_ALPHA) {
         pixelFormat = MTLPixelFormatR8Unorm;
@@ -1202,10 +1202,10 @@ void* mnvgDevice(NVGcontext* ctx) {
     {
         pixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
     }
-
+    
     tex->type = type;
     tex->flags = imageFlags;
-
+    
     MTLTextureDescriptor *textureDescriptor = [MTLTextureDescriptor
                                                texture2DDescriptorWithPixelFormat:pixelFormat
                                                width:width
@@ -1217,7 +1217,7 @@ void* mnvgDevice(NVGcontext* ctx) {
     textureDescriptor.storageMode = MTLStorageModePrivate;
 #endif  // TARGET_OS_SIMULATOR
     tex->tex = [_metalLayer.device newTextureWithDescriptor:textureDescriptor];
-
+    
     if (data != NULL) {
         NSUInteger bytesPerRow;
         if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB) {
@@ -1225,14 +1225,14 @@ void* mnvgDevice(NVGcontext* ctx) {
         } else {
             bytesPerRow = (width + 3) & ~3;
         }
-
+        
         if (textureDescriptor.storageMode == MTLStorageModePrivate) {
             const NSUInteger kBufferSize = bytesPerRow * height;
             id<MTLBuffer> buffer = [_metalLayer.device
                                     newBufferWithLength:kBufferSize
                                     options:MTLResourceStorageModeShared];
             memcpy([buffer contents], data, kBufferSize);
-
+            
             id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
             id<MTLBlitCommandEncoder> blitCommandEncoder = [commandBuffer
                                                             blitCommandEncoder];
@@ -1245,7 +1245,7 @@ void* mnvgDevice(NVGcontext* ctx) {
                               destinationSlice:0
                               destinationLevel:0
                              destinationOrigin:MTLOriginMake(0, 0, 0)];
-
+            
             [blitCommandEncoder endEncoding];
             [commandBuffer commit];
             [commandBuffer waitUntilCompleted];
@@ -1255,7 +1255,7 @@ void* mnvgDevice(NVGcontext* ctx) {
                           withBytes:data
                         bytesPerRow:bytesPerRow];
         }
-
+        
         if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS) {
             id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
             id<MTLBlitCommandEncoder> encoder = [commandBuffer blitCommandEncoder];
@@ -1265,7 +1265,7 @@ void* mnvgDevice(NVGcontext* ctx) {
             [commandBuffer waitUntilCompleted];
         }
     }
-
+    
     MTLSamplerDescriptor* samplerDescriptor = [MTLSamplerDescriptor new];
     if (imageFlags & NVG_IMAGE_NEAREST) {
         samplerDescriptor.minFilter = MTLSamplerMinMagFilterNearest;
@@ -1278,29 +1278,29 @@ void* mnvgDevice(NVGcontext* ctx) {
         if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS)
             samplerDescriptor.mipFilter = MTLSamplerMipFilterLinear;
     }
-
+    
     if (imageFlags & NVG_IMAGE_REPEATX) {
         samplerDescriptor.sAddressMode = MTLSamplerAddressModeRepeat;
     } else {
         samplerDescriptor.sAddressMode = MTLSamplerAddressModeClampToEdge;
     }
-
+    
     if (imageFlags & NVG_IMAGE_REPEATY) {
         samplerDescriptor.tAddressMode = MTLSamplerAddressModeRepeat;
     } else {
         samplerDescriptor.tAddressMode = MTLSamplerAddressModeClampToEdge;
     }
-
+    
     tex->sampler = [_metalLayer.device
                     newSamplerStateWithDescriptor:samplerDescriptor];
-
+    
     return tex->id;
 }
 
 - (void)renderDelete {
-
+    
     [self renderCancel];
-
+    
     for (MNVGbuffers* buffers in _cbuffers) {
         buffers.commandBuffer = nil;
         buffers.viewSizeBuffer = nil;
@@ -1310,12 +1310,12 @@ void* mnvgDevice(NVGcontext* ctx) {
         buffers.uniformBuffer = nil;
         free(buffers.renderData->calls);
     }
-
+    
     for (MNVGtexture* texture in _textures) {
         texture->tex = nil;
         texture->sampler = nil;
     }
-
+    
     free(_blendFunc);
     _commandQueue = nil;
     _renderEncoder = nil;
@@ -1341,7 +1341,7 @@ void* mnvgDevice(NVGcontext* ctx) {
     if(image <= 0) return 0;
     MNVGtexture* texture = _textures[image-1];
     if(texture == nil) return 0;
-
+    
     if (texture->tex != nil &&
         (texture->flags & NVG_IMAGE_NODELETE) == 0) {
         texture->tex = nil;
@@ -1361,44 +1361,44 @@ void* mnvgDevice(NVGcontext* ctx) {
                      npaths:(int)npaths {
     MNVGcall* call = [self allocCall];
     if (call == NULL) return;
-
+    
     NVGvertex* quad;
     MNVGrenderData* renderData = _buffers.renderData;
-
+    
     call->type = MNVG_FILL;
     call->triangleCount = 4;
     call->image = paint->image;
     call->blendFunc = [self blendCompositeOperation:compositeOperation];
-
+    
     if (npaths == 1 && paths[0].convex) {
         call->type = MNVG_CONVEXFILL;
         call->triangleCount = 0;  // Bounding box fill quad not needed for convex fill
     }
-
+    
     // Allocate vertices for all the paths.
     int indexCount, strokeCount = 0;
     int maxverts = nvg__maxVertCount(paths, npaths, &indexCount, &strokeCount)
     + call->triangleCount;
     int vertOffset = [self allocVerts:maxverts];
     if (vertOffset == -1) goto error;
-
+    
     int indexOffset = [self allocIndexes:indexCount];
     if (indexOffset == -1) goto error;
     call->indexOffset = indexOffset;
     call->indexCount = indexCount;
     uint32_t* index = &renderData->indexes[indexOffset];
-
+    
     int strokeVertOffset = vertOffset + (maxverts - strokeCount);
     call->strokeOffset = strokeVertOffset + 1;
     call->strokeCount = strokeCount - 2;
     NVGvertex* strokeVert = renderData->verts + strokeVertOffset;
-
+    
     NVGpath* path = (NVGpath*)&paths[0];
     for (int i = npaths; i--; ++path) {
         if (path->nfill > 2) {
             memcpy(&renderData->verts[vertOffset], path->fill,
                    sizeof(NVGvertex) * path->nfill);
-
+            
             int hubVertOffset = vertOffset++;
             for (int j = 2; j < path->nfill; j++) {
                 *index++ = hubVertOffset;
@@ -1414,7 +1414,7 @@ void* mnvgDevice(NVGcontext* ctx) {
             *(strokeVert++) = path->stroke[path->nstroke - 1];
         }
     }
-
+    
     // Setup uniforms for draw calls
     if (call->type == MNVG_FILL) {
         // Quad
@@ -1425,7 +1425,7 @@ void* mnvgDevice(NVGcontext* ctx) {
         nvg__vset(&quad[2], bounds[0], bounds[3], 0.5f, 1.0f);
         nvg__vset(&quad[3], bounds[0], bounds[1], 0.5f, 1.0f);
     }
-
+    
     // Fill shader
     call->uniformOffset = [self allocFragUniforms:1];
     if (call->uniformOffset == -1) goto error;
@@ -1438,7 +1438,7 @@ void* mnvgDevice(NVGcontext* ctx) {
                    lineLength:0.0f
                  lineReversed:0];
     return;
-
+    
 error:
     // We get here if call alloc was ok, but something else is not.
     // Roll back the last call to prevent drawing it.
@@ -1451,7 +1451,7 @@ error:
         [self renderCancel];
         return;
     }
-
+    
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     id<MTLTexture> colorTexture = nil;
     vector_uint2 textureSize;
@@ -1459,7 +1459,7 @@ error:
     __block MNVGbuffers* buffers = _buffers;
     __weak MNVGcontext* weakSelf = self;
     __weak MNVGbuffers* weakBuffers = buffers;
-
+    
     [commandBuffer enqueue];
     [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
         if(weakBuffers) {
@@ -1476,7 +1476,7 @@ error:
             dispatch_semaphore_signal([weakSelf semaphore]);
         }
     }];
-
+    
     MNVGrenderData* renderData = _buffers.renderData;
     if (s_framebuffer == NULL ||
         MNVG_GET_CONTEXT(s_framebuffer->ctx) != (__bridge void*)self) {
@@ -1490,28 +1490,28 @@ error:
     }
     if (textureSize.x == 0 || textureSize.y == 0) return;
     [self updateStencilTextureToSize:&textureSize];
-
+    
     id<CAMetalDrawable> drawable = nil;
     if (colorTexture == nil) {
         drawable = _metalLayer.nextDrawable;
         colorTexture = drawable.texture;
     }
-
+    
     scissorRect.x = MAX(0, scissorRect.x);
     scissorRect.y = MAX(0, scissorRect.y);
     scissorRect.width = MIN(textureSize.x, scissorRect.width);
     scissorRect.height = MIN(textureSize.y, scissorRect.height);
-
+    
     _renderEncoder = [self renderCommandEncoderWithColorTexture:colorTexture];
     [_renderEncoder setScissorRect: scissorRect];
-
+    
     [self updateRenderPipelineStatesForBlend:_blendFunc
                                  pixelFormat:colorTexture.pixelFormat];
     if(_pipelineState != nil) [_renderEncoder setRenderPipelineState:_pipelineState];
     if (_renderEncoder == nil) return;
     _lastUniformOffset = 0;
-
-
+    
+    
     MNVGcall* call = &renderData->calls[0];
     for (int i = renderData->ncalls; i--; ++call) {
         MNVGblend* blend = &call->blendFunc;
@@ -1526,21 +1526,21 @@ error:
         else if (call->type == MNVG_TRIANGLES)
             [self triangles:call];
     }
-
+    
     [_renderEncoder endEncoding];
     _renderEncoder = nil;
-
+    
     if (drawable && !_metalLayer.presentsWithTransaction) {
         [_buffers.commandBuffer presentDrawable:drawable];
     }
-
+    
     [_buffers.commandBuffer commit];
-
+    
     if (drawable && _metalLayer.presentsWithTransaction) {
         [_buffers.commandBuffer waitUntilScheduled];
         [drawable present];
     }
-
+    
     _lastBoundTexture = -1;
 }
 
@@ -1564,13 +1564,13 @@ error:
     // Create a blit command encoder
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
-
+    
     id<CAMetalDrawable> drawable = nil;
     drawable = _metalLayer.nextDrawable;
-
+    
     // Get the texture from the drawable (the screen or render target)
     id<MTLTexture> drawableTexture = drawable.texture;
-
+    
     // Blit the texture onto the drawable texture
     [blitEncoder copyFromTexture:mnvgTexture->tex
                      sourceSlice:0
@@ -1581,10 +1581,10 @@ error:
                 destinationSlice:0
                 destinationLevel:0
                destinationOrigin:MTLOriginMake(0, 0, 0)];
-
+    
     // End encoding
     [blitEncoder endEncoding];
-
+    
     if (drawable && _metalLayer.presentsWithTransaction) {
         [commandBuffer commit];
         [commandBuffer waitUntilScheduled];
@@ -1608,24 +1608,24 @@ error:
                        npaths:(int)npaths
 {
     MNVGcall* call = [self allocCall];
-
+    
     if (call == NULL) return;
-
+    
     MNVGrenderData* renderData = _buffers.renderData;
     call->type = MNVG_STROKE;
     call->image = paint->image;
     call->blendFunc = [self blendCompositeOperation:compositeOperation];
-
+    
     // Allocate vertices for all the paths.
     int strokeCount = 0;
     int maxverts = nvg__maxVertCount(paths, npaths, NULL, &strokeCount);
     int offset = [self allocVerts:maxverts];
     if (offset == -1) goto error;
-
+    
     call->strokeOffset = offset + 1;
     call->strokeCount = strokeCount - 2;
     NVGvertex* strokeVert = renderData->verts + offset;
-
+    
     NVGpath* path = (NVGpath*)&paths[0];
     int lineReversed = 0;
     for (int i = npaths; i--; ++path) {
@@ -1639,7 +1639,7 @@ error:
             ++strokeVert;
         }
     }
-
+    
     // Fill shader
     call->uniformOffset = [self allocFragUniforms:1];
     if (call->uniformOffset == -1) goto error;
@@ -1651,9 +1651,9 @@ error:
                     lineStyle:lineStyle
                    lineLength:lineLength
                  lineReversed:lineReversed];
-
+    
     return;
-
+    
 error:
     // We get here if call alloc was ok, but something else is not.
     // Roll back the last call to prevent drawing it.
@@ -1669,22 +1669,22 @@ error:
                             text:(int)text {
     MNVGcall* call = [self allocCall];
     MNVGfragUniforms* frag;
-
+    
     if (call == NULL) return;
-
+    
     MNVGrenderData* renderData = _buffers.renderData;
     call->type = MNVG_TRIANGLES;
     call->image = paint->image;
     call->blendFunc = [self blendCompositeOperation:compositeOperation];
-
+    
     // Allocate vertices for all the paths.
     call->triangleOffset = [self allocVerts:nverts];
     if (call->triangleOffset == -1) goto error;
     call->triangleCount = nverts;
-
+    
     memcpy(&renderData->verts[call->triangleOffset], verts,
            sizeof(NVGvertex) * nverts);
-
+    
     // Fill shader
     call->uniformOffset = [self allocFragUniforms:1];
     if (call->uniformOffset == -1) goto error;
@@ -1697,13 +1697,13 @@ error:
                     lineStyle:NVG_LINE_SOLID
                    lineLength:0.0f
                  lineReversed:0];
-
+    
     if(text) {
         frag->type = PAINT_TYPE_TEXT;
     }
-
+    
     return;
-
+    
 error:
     // We get here if call alloc was ok, but something else is not.
     // Roll back the last call to prevent drawing it.
@@ -1717,9 +1717,9 @@ error:
                              height:(int)height
                                data:(const unsigned char*)data {
     MNVGtexture* tex = [self findTexture:image];
-
+    
     if (tex == nil) return 0;
-
+    
     unsigned char* bytes;
     NSUInteger bytesPerRow;
     if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB) {
@@ -1729,14 +1729,14 @@ error:
         bytesPerRow = tex->tex.width;
         bytes = (unsigned char*)data + y * bytesPerRow + x;
     }
-
+    
 #if TARGET_OS_SIMULATOR
     const NSUInteger kBufferSize = bytesPerRow * height;
     id<MTLBuffer> buffer = [_metalLayer.device
                             newBufferWithLength:kBufferSize
                             options:MTLResourceStorageModeShared];
     memcpy([buffer contents], bytes, kBufferSize);
-
+    
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     id<MTLBlitCommandEncoder> blitCommandEncoder = [commandBuffer
                                                     blitCommandEncoder];
@@ -1749,7 +1749,7 @@ error:
                       destinationSlice:0
                       destinationLevel:0
                      destinationOrigin:MTLOriginMake(x, y, 0)];
-
+    
     [blitCommandEncoder endEncoding];
     [commandBuffer commit];
     [commandBuffer waitUntilCompleted];
@@ -1760,7 +1760,7 @@ error:
                  withBytes:bytes
                bytesPerRow:bytesPerRow];
 #endif
-
+    
     return 1;
 }
 
@@ -1769,7 +1769,7 @@ error:
                devicePixelRatio:(float)devicePixelRatio {
     _viewPortSize = (vector_uint2){width * devicePixelRatio,
         height * devicePixelRatio};
-
+    
     dispatch_semaphore_wait(_semaphore, DISPATCH_TIME_FOREVER);
     for (MNVGbuffers* buffers in _cbuffers) {
         if (!buffers.isBusy) {
@@ -1778,7 +1778,7 @@ error:
             break;
         }
     }
-
+    
     // Initializes view size buffer for vertex function.
     if (_buffers.viewSizeBuffer == nil) {
         _buffers.viewSizeBuffer = [_metalLayer.device
@@ -1795,7 +1795,7 @@ error:
         [_renderEncoder setFragmentBufferOffset:uniformOffset atIndex:0];
         _lastUniformOffset = uniformOffset;
     }
-
+    
     if ( _lastBoundTexture != image) {
         MNVGtexture* tex = image ? [self findTexture:image] : nil;
         [_renderEncoder setFragmentTexture:(tex != nil ? tex->tex : _pseudoTexture) atIndex:0];
@@ -1808,7 +1808,7 @@ error:
     if (call->strokeCount <= 0) {
         return;
     }
-
+    
     // Draws strokes.
     [self setUniforms:call->uniformOffset image:call->image];
     [_renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
@@ -1835,16 +1835,16 @@ error:
         _blendFunc->dstAlpha == blend->dstAlpha) {
         return;
     }
-
+    
     MTLRenderPipelineDescriptor* pipelineStateDescriptor = [MTLRenderPipelineDescriptor new];
-
+    
     MTLRenderPipelineColorAttachmentDescriptor* colorAttachmentDescriptor = pipelineStateDescriptor.colorAttachments[0];
     colorAttachmentDescriptor.pixelFormat = pixelFormat;
     pipelineStateDescriptor.stencilAttachmentPixelFormat = kStencilFormat;
     pipelineStateDescriptor.fragmentFunction = _fragmentFunction;
     pipelineStateDescriptor.vertexFunction = _vertexFunction;
     pipelineStateDescriptor.vertexDescriptor = _vertexDescriptor;
-
+    
     // Sets blending states.
     colorAttachmentDescriptor.blendingEnabled = YES;
     colorAttachmentDescriptor.sourceRGBBlendFactor = blend->srcRGB;
@@ -1855,20 +1855,20 @@ error:
     _blendFunc->dstRGB = blend->dstRGB;
     _blendFunc->srcAlpha = blend->srcAlpha;
     _blendFunc->dstAlpha = blend->dstAlpha;
-
+    
     NSError* error;
     _pipelineState = [_metalLayer.device
                       newRenderPipelineStateWithDescriptor:pipelineStateDescriptor
                       error:&error];
     [self checkError:error withMessage:"init pipeline state"];
-
+    
     pipelineStateDescriptor.fragmentFunction = nil;
     colorAttachmentDescriptor.writeMask = MTLColorWriteMaskNone;
     _stencilOnlyPipelineState = [_metalLayer.device
                                  newRenderPipelineStateWithDescriptor:pipelineStateDescriptor
                                  error:&error];
     [self checkError:error withMessage:"init pipeline stencil only state"];
-
+    
     _piplelinePixelFormat = pixelFormat;
     [_renderEncoder setRenderPipelineState:_pipelineState];
 }
