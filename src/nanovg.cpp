@@ -1690,20 +1690,6 @@ static void nvg__flattenPaths(NVGcontext* ctx)
             path->closed = 1;
         }
         
-        for(int i = 0; i < path->count; i++) {
-            // Calculate segment direction and length
-            p0->dx = p1->x - p0->x;
-            p0->dy = p1->y - p0->y;
-            p0->len = nvg__normalize(&p0->dx, &p0->dy);
-            // Update bounds
-            cache->bounds[0] = nvg__minf(cache->bounds[0], p0->x);
-            cache->bounds[1] = nvg__minf(cache->bounds[1], p0->y);
-            cache->bounds[2] = nvg__maxf(cache->bounds[2], p0->x);
-            cache->bounds[3] = nvg__maxf(cache->bounds[3], p0->y);
-            // Advance
-            p0 = p1++;
-        }
-        
         // Calculate nonzero winding rule
         if(path->nonzero) {
             struct Point { float x, y; };
@@ -1778,6 +1764,20 @@ static void nvg__flattenPaths(NVGcontext* ctx)
                 nvg__polyReverse(pts, path->count);
                 path->reversed = 1;
             }
+        }
+        
+        for(int i = 0; i < path->count; i++) {
+            // Calculate segment direction and length
+            p0->dx = p1->x - p0->x;
+            p0->dy = p1->y - p0->y;
+            p0->len = nvg__normalize(&p0->dx, &p0->dy);
+            // Update bounds
+            cache->bounds[0] = nvg__minf(cache->bounds[0], p0->x);
+            cache->bounds[1] = nvg__minf(cache->bounds[1], p0->y);
+            cache->bounds[2] = nvg__maxf(cache->bounds[2], p0->x);
+            cache->bounds[3] = nvg__maxf(cache->bounds[3], p0->y);
+            // Advance
+            p0 = p1++;
         }
     }
 }
