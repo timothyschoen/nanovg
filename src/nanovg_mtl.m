@@ -190,6 +190,7 @@ __attribute__((objc_direct_members))
 @property (nonatomic, weak)   id<MTLTexture> lastColorTexture;
 // Textures
 @property (nonatomic, strong) NSMutableArray<MNVGtexture*>* textures;
+@property (nonatomic, strong) NSMutableDictionary<NSNumber*, id<MTLFence>>* framebufferFences;
 @property int textureId;
 
 // Per frame buffers
@@ -511,7 +512,7 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
     [metalLayer setPixelFormat:pixelFormat];
     [metalLayer setDevice: metalDevice];
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
-    [metalLayer setPresentsWithTransaction:TRUE];
+    [metalLayer setPresentsWithTransaction:FALSE];
     [metalLayer setFramebufferOnly:FALSE];
     return nvgCreateMTL((__bridge void*)((__bridge NSView*) view).layer, flags);
 }
@@ -1182,6 +1183,8 @@ void* mnvgDevice(NVGcontext* ctx) {
     _strokeClearStencilState = [device
                                 newDepthStencilStateWithDescriptor:stencilDescriptor];
     
+    _framebufferFences = [NSMutableDictionary dictionary];
+    
     return 1;
 }
 
@@ -1487,6 +1490,16 @@ error:
         colorTexture = tex->tex;
         textureSize = (vector_uint2){(uint)colorTexture.width,
             (uint)colorTexture.height};
+        
+        NSNumber* imageKey = @(renderData->image);
+        id<MTLFence> fence = _framebufferFences[imageKey];
+        if (!fence) {
+            fence = [_metalLayer.device newFence];
+            _framebufferFences[imageKey] = fence;
+        }
+        
+        // Signal fence after rendering completes
+        [_renderEncoder updateFence:fence afterStages:MTLRenderStageFragment];
     }
     if (textureSize.x == 0 || textureSize.y == 0) return;
     [self updateStencilTextureToSize:&textureSize];
@@ -1565,6 +1578,12 @@ error:
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
     
+    NSNumber* imageKey = @(mnvgTexture->id);
+    id<MTLFence> fence = _framebufferFences[imageKey];
+    if (fence) {
+        [blitEncoder waitForFence:fence];
+    }
+
     id<CAMetalDrawable> drawable = nil;
     drawable = _metalLayer.nextDrawable;
     
@@ -1771,6 +1790,7 @@ error:
         height * devicePixelRatio};
     
     dispatch_semaphore_wait(_semaphore, DISPATCH_TIME_FOREVER);
+    
     for (MNVGbuffers* buffers in _cbuffers) {
         if (!buffers.isBusy) {
             buffers.isBusy = YES;
