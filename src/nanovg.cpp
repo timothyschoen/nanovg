@@ -428,6 +428,7 @@ void nvgCancelFrame(NVGcontext* ctx)
 
 void nvgEndFrame(NVGcontext* ctx)
 {
+    nvg__flushTextTexture(ctx);
     nvg__renderFlush(ctx->backend, ctx->globalScissor);
     if (ctx->fontImageIdx != 0) {
         int fontImage = ctx->fontImages[ctx->fontImageIdx];
@@ -3170,10 +3171,9 @@ static float nvg__getFontScale(NVGstate* state)
     return nvg__minf(nvg__quantize(nvg__getAverageScale(state->xform), 0.01f), 4.0f);
 }
 
-static void nvg__flushTextTexture(NVGcontext* ctx)
+void nvg__flushTextTexture(NVGcontext* ctx)
 {
     int dirty[4];
-    
     if (fonsValidateTexture(ctx->fs, dirty)) {
         int fontImage = ctx->fontImages[ctx->fontImageIdx];
         // Update texture
@@ -3304,8 +3304,6 @@ static float nvg__textFromAtlas(NVGcontext* ctx, FONSstate* fons, float x, float
             nverts += 6;
         }
     }
-    // TODO: add back-end bit to do this just once per frame.
-    nvg__flushTextTexture(ctx);
     nvg__renderText(ctx, fons, verts, nverts);
     return iter.nextx;
 }

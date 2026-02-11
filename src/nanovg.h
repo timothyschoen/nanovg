@@ -882,6 +882,7 @@ void nvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationStat
 void nvg__renderDelete(void* uptr);
 int nvg__isTexture(void* uptr, int image);
 int nvg__getFlags(void* uptr);
+void nvg__flushTextTexture(NVGcontext* ctx);
 
 // Constructor and destructor, called by the render back-end.
 NVGcontext* nvgCreateInternal(void* params);
