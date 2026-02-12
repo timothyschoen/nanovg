@@ -319,11 +319,59 @@ int fons__tt_getGlyphKernAdvance(FONSttFontImpl *font, int glyph1, int glyph2)
 #else
 
 #define STB_TRUETYPE_IMPLEMENTATION
+
+static float fons__cos (float x) noexcept
+{
+    float x2 = x * x;
+    float numerator = -(-39251520 + x2 * (18471600 + x2 * (-1075032 + 14615 * x2)));
+    float denominator = 39251520 + x2 * (1154160 + x2 * (16632 + x2 * 127));
+    return numerator / denominator;
+}
+
+static float fons__acos (float x) noexcept
+{
+    // Clamp input to [-1, 1]
+    if (x > 1.0f) x = 1.0f;
+    if (x < -1.0f) x = -1.0f;
+    
+    // Simple approximation: acos(x) ≈ π/2 - x - x³/6 for small x
+    // For better accuracy, use polynomial approximation
+    float abs_x = fabs(x);
+    if (abs_x <= 0.5f) {
+        float x2 = x * x;
+        float x3 = x2 * x;
+        return 1.57079632679f - x - x3/6.0f;
+    } else {
+        // For larger values, use different approximation
+        return sqrtf(1.0f - x) * (1.57079632679f + 0.5f * x);
+    }
+}
+
+static float fons__log(float x) {
+    if (x <= 0) return 0;
+    if (x == 1.0f) return 0;
+    
+    // Use log approximation: log(x) ≈ 2 * (x-1)/(x+1) for x near 1
+    float y = (x - 1.0f) / (x + 1.0f);
+    return 2.0f * y * (1.0f + y*y/3.0f + y*y*y*y/5.0f);
+}
+
+static float fons__exp(float x) {
+    float numerator = 1680 + x * (840 + x * (180 + x * (20 + x)));
+    float denominator = 1680 + x *(-840 + x * (180 + x * (-20 + x)));
+    return numerator / denominator;
+}
+
 static void* fons__tmpalloc(size_t size, void* up);
 static void fons__tmpfree(void* ptr, void* up);
 #define STBTT_malloc(x,u)    fons__tmpalloc(x,u)
 #define STBTT_free(x,u)      fons__tmpfree(x,u)
-//#define STBTT_STATIC
+#define STBTT_cos(x)       fons__cos(x)
+#define STBTT_acos(x)      fons__acos(x)
+#define STBTT_exp(x)       fons__exp(x)
+#define STBTT_log(x)       fons__log(x)
+
+#define STBTT_STATIC
 #include "stb_truetype.h"
 
 struct FONSttFontImpl {

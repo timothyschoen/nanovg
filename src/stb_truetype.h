@@ -4534,10 +4534,7 @@ static int stbtt__compute_crossings_x(float x, float y, int nverts, stbtt_vertex
 
 static float stbtt__cuberoot( float x )
 {
-   if (x<0)
-      return -(float) STBTT_pow(-x,1.0f/3.0f);
-   else
-      return  (float) STBTT_pow( x,1.0f/3.0f);
+    return cbrtf(x);
 }
 
 // x^3 + a*x^2 + b*x + c = 0
