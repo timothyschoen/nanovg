@@ -40,16 +40,18 @@ execute_cmd() {
   TARGET=$2
 
   SUFFIX=""
-  CMD="xcrun -sdk $SDK metal -c nanovg_mtl_shaders.metal"
+  CMD="xcrun -sdk $SDK metal -std=ios-metal2.0 -c nanovg_mtl_shaders.metal"
 
   AIR_FILE_NAME="$PREFIX/$TARGET$SUFFIX.air"
   HEADER_NAME="$PREFIX/$TARGET$SUFFIX.h"
   VARIABLE_NAME="$PREFIX/$TARGET$SUFFIX"
 
   if [ $SDK = "iphoneos" ]; then
-    CMD="$CMD -mios-version-min=8.0"
+    CMD="$CMD -mios-version-min=12.0"
+  elif [ $SDK = "iphonesimulator" ]; then
+    CMD="$CMD -target air64-apple-ios12.0-simulator"
   elif [ $SDK = "macosx" ]; then
-    CMD="$CMD -mmacosx-version-min=10.11"
+    CMD="$CMD -mmacosx-version-min=10.15"
   fi
 
   CMD="$CMD -o $AIR_FILE_NAME"
@@ -65,33 +67,23 @@ execute_cmd() {
   return 0
 }
 
-for SDK in "iphoneos" "iphonesimulator" "macosx" "appletvos"; do
-  if [ $SDK = "appletvos" ]; then
-    echo "* Compiling for tvOS..."
-    TARGET="tvos"
-    execute_cmd $SDK $TARGET
-    if [ $? -ne 0 ]; then
-      result=false
-      break
-    fi
-  else
+for SDK in "iphoneos" "iphonesimulator" "macosx"; do
     if [ $SDK = "iphoneos" ]; then
-      echo "* Compiling for iOS..."
-      TARGET="ios"
+        echo "* Compiling for iOS..."
+        TARGET="ios"
     elif [ $SDK = "iphonesimulator" ]; then
-      echo "* Compiling for Simulator..."
-      TARGET="simulator"
+        echo "* Compiling for Simulator..."
+        TARGET="simulator"
     elif [ $SDK = "macosx" ]; then
-      echo "* Compiling for macOS..."
-      TARGET="macos"
+        echo "* Compiling for macOS..."
+        TARGET="macos"
     fi
 
     execute_cmd $SDK $TARGET
     if [ $? -ne 0 ]; then
-      result=false
-      break
+        result=false
+        break
     fi
-  fi
 done
 
 if $result; then
