@@ -68,7 +68,6 @@ enum NVGcommands {
     NVG_WINDING_CW = 4,
     NVG_WINDING_CCW = 5,
     NVG_WINDING_NONZERO = 6,
-    NVG_RESTART = 7
 };
 
 enum NVGpointFlags
@@ -1444,13 +1443,6 @@ static void nvg__closePath(NVGcontext* ctx)
     path->closed = 1;
 }
 
-static void nvg__restartPath(NVGcontext* ctx)
-{
-    NVGpath* path = nvg__lastPath(ctx);
-    if (path == NULL) return;
-    path->restart = 1;
-}
-
 static void nvg__pathWinding(NVGcontext* ctx, NVGwinding winding)
 {
     NVGpath* path = nvg__lastPath(ctx);
@@ -1668,9 +1660,6 @@ static void nvg__flattenPaths(NVGcontext* ctx)
             case NVG_WINDING_NONZERO:
                 nvg__pathWinding(ctx, NVG_NONZERO);
                 break;
-            case NVG_RESTART:
-                nvg__restartPath(ctx);
-                break;
         }
     }
     
@@ -1692,65 +1681,38 @@ static void nvg__flattenPaths(NVGcontext* ctx)
         }
         
         // Calculate nonzero winding rule
-        if(path->nonzero) {
+        if(path->nonzero && cache->npaths > 1) {
             struct Point { float x, y; };
             
-            auto doesEdgeCrossRay = [](Point rayOrigin, Point edgeStart, Point edgeEnd) -> bool {
-                float py = rayOrigin.y + 1e-5f;
-                float y1 = edgeStart.y;
-                float y2 = edgeEnd.y;
-                
-                if ((y1 > py) != (y2 > py)) {
-                    float x1 = edgeStart.x;
-                    float x2 = edgeEnd.x;
-                    float xIntersect = (x2 - x1) * (py - y1) / (y2 - y1) + x1;
-                    if (rayOrigin.x < xIntersect)
-                        return true;
-                }
-                return false;
-            };
-            
-            int crossings = 0;
-            int currentGroup = 0;
-            
-            // Find which group this path belongs to
-            for (int k = 0; k <= j; k++) {
-                if (cache->paths[k].restart) {
-                    currentGroup = k;
-                }
-            }
-            
-            Point point1 = {cache->points[path->first].x, cache->points[path->first].y};
-            
-            // Iterate all other paths
-            for (int i = 0; i < cache->npaths; i++) {
-                if (i == j) continue;
-                
-                // Skip if this path is before the current group's restart point
-                if (cache->paths[i].restart && i < currentGroup)
-                    continue;
-                
-                // Skip if this path started a new group after our path
-                if (cache->paths[i].restart && i > j)
-                    break;
-                
-                // Iterate all lines on the path
-                if (cache->paths[i].count < 2)
-                    continue;
-                
-                int pathStart = cache->paths[i].first;
-                int pathEnd = pathStart + cache->paths[i].count;
-                
-                for (int k = pathStart + 1; k < pathEnd; k++) {
-                    Point point2 = {cache->points[k-1].x, cache->points[k-1].y};
-                    Point point3 = {cache->points[k].x, cache->points[k].y};
-                    if (doesEdgeCrossRay(point1, point2, point3)) {
-                        crossings++;
+            auto getWindingContribution = [](Point rayOrigin, Point edgeStart, Point edgeEnd) -> int {
+                if (((edgeStart.y > rayOrigin.y) != (edgeEnd.y > rayOrigin.y))) {
+                    float xIntersect = (edgeEnd.x - edgeStart.x) * (rayOrigin.y - edgeStart.y) / (edgeEnd.y - edgeStart.y) + edgeStart.x;
+                    if (rayOrigin.x < xIntersect) {
+                        return (edgeStart.y < edgeEnd.y) ? 1 : -1;
                     }
                 }
+                return 0;
+            };
+
+            NVGpoint* pFirst = &cache->points[path->first];
+            NVGpoint* pNext = &cache->points[path->first + 1];
+            Point testPoint = { (pFirst->x + pNext->x) * 0.5f, (pFirst->y + pNext->y) * 0.5f };
+
+            int totalWinding = 0;
+            for (int i = 0; i < cache->npaths; i++) {
+                if (i == j) continue;
+                if (cache->paths[i].count < 2) continue;
+
+                int pStart = cache->paths[i].first;
+                int pCount = cache->paths[i].count;
+                for (int k = 0; k < pCount; k++) {
+                    Point p2 = { cache->points[pStart + k].x, cache->points[pStart + k].y };
+                    Point p3 = { cache->points[pStart + (k + 1) % pCount].x, cache->points[pStart + (k + 1) % pCount].y };
+                    totalWinding += getWindingContribution(testPoint, p2, p3);
+                }
             }
-            
-            cache->paths[j].winding = crossings % 2 ? NVG_HOLE : NVG_SOLID;
+
+            cache->paths[j].winding = (totalWinding == 0) ? NVG_SOLID : NVG_HOLE;
         }
         
         // Enforce winding.
@@ -3317,10 +3279,6 @@ static void nvg__drawSTBTTGlyph(NVGcontext* ctx, stbtt_fontinfo* font, int glyph
         if (points[i].type == STBTT_vmove) {
             nvgMoveTo(ctx, points[i].x, points[i].y);
             nvgPathWinding(ctx, NVG_NONZERO);
-            if(i == 0) {
-                uint8_t restart[] = { NVG_RESTART };  // flag indicating start of new path (and not just subpath)
-                nvg__appendCommands(ctx, restart, 1, NULL, 0);
-            }
         }
         else if (points[i].type == STBTT_vline)
             nvgLineTo(ctx, points[i].x, points[i].y);

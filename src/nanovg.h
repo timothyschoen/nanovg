@@ -142,7 +142,7 @@ enum NVGlineStyle {
     NVG_LINE_DASHED = 2,
     NVG_LINE_DOTTED = 3,
     NVG_LINE_GLOW = 4,
-    
+
     NVG_DOUBLE_STROKE = 5,
 };
 
@@ -859,7 +859,6 @@ struct NVGpath {
     bool closed : 1;
     bool convex : 1;
     bool nonzero : 1;
-    bool restart : 1;
     bool winding : 1;
 };
 typedef struct NVGpath NVGpath;
