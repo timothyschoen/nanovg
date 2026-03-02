@@ -1315,13 +1315,16 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
         
         // Setup require GL state.
         glUseProgram(gl->shader.prog);
-        
+
+        glDisable(GL_SCISSOR_TEST);
+        glClear(GL_STENCIL_BUFFER_BIT);
+        glEnable(GL_SCISSOR_TEST);
+
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
         glEnable(GL_BLEND);
         glDisable(GL_DEPTH_TEST);
-        glEnable(GL_SCISSOR_TEST);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glStencilMask(0xffffffff);
         glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
