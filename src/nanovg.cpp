@@ -3320,17 +3320,18 @@ static float nvg__textAsPaths(NVGcontext* ctx, FONSstate* fons, float x, float y
     // put all glyphs into a single path for faster rendering - there should not be any overlap between
     //  glyph paths, so coverage from any glyphs sharing a pixel (at small font size) should be added instead
     //  of blended anyway
+    nvgBeginPath(ctx);
     while (fonsTextIterNext(fons, &iter, &q)) {
         stbtt_fontinfo* font = (stbtt_fontinfo*)fonsGetFontImpl(ctx->fs, iter.prevGlyphFont);
         if (!font)
             continue;  // missing glyph
         scale = stbtt_ScaleForPixelHeight(font, pxsize);  // this is fast
-        nvgBeginPath(ctx);
         nvgTransform(ctx, scale, 0, 0, -scale, iter.x, iter.y);
         nvg__drawSTBTTGlyph(ctx, font, iter.prevGlyphIndex);
-        nvgFill(ctx);
         memcpy(state->xform, xform, sizeof(float)*6);  // restore transform
     }
+    nvgFill(ctx);
+
     return iter.nextx;
 }
 
