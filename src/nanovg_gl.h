@@ -1037,6 +1037,7 @@ int nvg__renderCreate(void* uptr)
                 else if (texType == NSVG_TEXTURE_ARGB) color = color;
                 else if (texType == NSVG_TEXTURE_ARGB_SRGB) color = linearToSrgb(color);
                 outColor = color.rgba * strokeAlpha * scissor;
+                outColor.a *= getRawColour(innerCol).a;
                 return;
             }
             case NSVG_SHADER_FILLIMG_ALPHA: {

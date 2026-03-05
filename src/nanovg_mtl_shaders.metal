@@ -521,6 +521,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         if (texType == MNVG_TEXTURE_ALPHA) color = float4(color.x);
         else if (texType == MNVG_TEXTURE_ARGB) color = color;
         else if (texType == MNVG_TEXTURE_ARGB_SRGB) color = linearToSrgb(color);
+        color.a *= getRawColour(uniforms.innerCol).a;
         return (color * scissor * strokeAlpha).rgba;
     }
   }
