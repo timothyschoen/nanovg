@@ -248,8 +248,15 @@ static void nvgluReadPixels(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y,
     // Set the pixel storage alignment (important for correct data reads)
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     
-    glReadPixels(x, total_height - y - height, width, height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    glReadPixels(x, total_height - y - height, width, height, GL_BGRA, GL_UNSIGNED_BYTE, data);
     
+    auto* buffer = static_cast<uint32_t*>(data);
+    for (int row = 0; row < height / 2; row++) {
+        std::swap_ranges(buffer + row * width,
+                         buffer + (row + 1) * width,
+                         buffer + (height - 1 - row) * width);
+    }
+
     // Unbind the framebuffer to restore the default state
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
