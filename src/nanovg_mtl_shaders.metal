@@ -349,7 +349,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
     case MNVG_SHADER_DOUBLE_STROKE_GRAD_ACTIVITY:
     {
         // deal with path flipping here - instead of in geometry
-        float revUVy = (getReverse(uniforms) > 0.5f) ? 0.5f - in.uv.y : in.uv.y;
+        float revUVy = getReverse(uniforms) ? 0.5f - in.uv.y : in.uv.y;
         float2 uvLine = float2(in.uv.x, revUVy * uniforms.lineLength);
         float seg = sdSegment(uvLine, float2(0.0f), float2(0.0f, uniforms.lineLength * 0.5f));
 

@@ -857,9 +857,8 @@ void* mnvgDevice(NVGcontext* ctx) {
             }
             else {
                 frag->strokeMult = (width * 0.11f + fringe * 0.5f) / fringe;
-                // Disabled because it doesn't work well yet:
-                //frag->stateData |= nvg__packStateDataUniform(PACK_REVERSE, lineReversed);
             }
+            frag->stateData |= nvg__packStateDataUniform(PACK_REVERSE, lineReversed);
             if(width * 0.4f < fringe)
             {
                 float alphaMult = (width * 0.4f) / fringe;
