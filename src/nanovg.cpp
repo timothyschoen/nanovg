@@ -509,21 +509,6 @@ NVGcolor nvgTransRGBAf(NVGcolor c, float a)
     return c;
 }
 
-NVGcolor nvgLerpRGBA(NVGcolor c0, NVGcolor c1, float u)
-{
-    float oneminu;
-    NVGcolor cint = {{0}};
-    
-    u = nvg__clampf(u, 0.0f, 1.0f);
-    oneminu = 1.0f - u;
-    for(int i = 0; i <4; i++ )
-    {
-        cint.rgba8[i] = c0.rgba8[i] * oneminu + c1.rgba8[i] * u;
-    }
-    
-    return cint;
-}
-
 NVGcolor nvgHSL(float h, float s, float l)
 {
     return nvgHSLA(h,s,l,255);
@@ -2698,7 +2683,10 @@ int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
     
     cacheEntry.lineLength = ctx->currentLineLength;
     memcpy(cacheEntry.bounds, ctx->cache->bounds, 4*sizeof(float));
-    
+
+    if(ctx->cache->npaths == 0)
+        return -1;
+
     for (int i = 0; i < ctx->cache->npaths; i++) {
         auto& p = ctx->cache->paths[i];
         NVGpath pathCopy = p;

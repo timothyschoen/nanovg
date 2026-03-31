@@ -245,22 +245,13 @@ float circleDist(float2 p, float2 center, float d) {
   return distance(center, p) - d;
 }
 
-float4 getRawColour(int rgba){
-    float4 col;
-    col.b = float((rgba >> 24) & 0xFF) / 255.0f;
-    col.g = float((rgba >> 16) & 0xFF) / 255.0f;
-    col.r = float((rgba >> 8) & 0xFF) / 255.0f;
-    col.a = float(rgba & 0xFF) / 255.0f;
-    return col;
+float4 getRawColour(int bgra){
+    return unpack_unorm4x8_to_float(bgra).bgra;
 }
 
-float4 convertColour(int rgba){
-    float3 col;
-    col.r = float((rgba >> 24) & 0xFF) / 255.0f;
-    col.g = float((rgba >> 16) & 0xFF) / 255.0f;
-    col.b = float((rgba >> 8) & 0xFF) / 255.0f;
-    float a = float(rgba & 0xFF) / 255.0f;
-    return float4((col * a).rgb, a);
+float4 convertColour(int bgra){
+    float4 col = getRawColour(bgra);
+    return float4(col.rgb * col.a, col.a);
 }
 
 float sigmoid(float t) {
@@ -508,7 +499,7 @@ fragment float4 fragmentShaderAA(RasterizerData in [[stage_in]],
         float alpha = color.x;
         if (getTexType(uniforms) == MNVG_TEXTURE_ALPHA) alpha = color.r;
         // Apply color tint and alpha
-        float3 maskColor = getRawColour(uniforms.innerCol).bgr;
+        float3 maskColor = getRawColour(uniforms.innerCol).rgb;
         return float4(maskColor * alpha, alpha) * strokeAlpha * scissor;
     }
     case MNVG_SHADER_FILLIMG:

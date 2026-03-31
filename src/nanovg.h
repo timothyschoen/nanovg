@@ -91,7 +91,7 @@ struct NVGcolor {
         uint8_t rgba8[4];
         struct {
             // listed in reverse (byte) order
-            uint8_t a,b,g,r;
+            uint8_t b,g,r,a;
         };
     };
 };
@@ -278,10 +278,6 @@ NVGcolor nvgRGBA(unsigned char r, unsigned char g, unsigned char b, unsigned cha
 
 // Returns a color value from red, green, blue and alpha values.
 NVGcolor nvgRGBAf(float r, float g, float b, float a);
-
-
-// Linearly interpolates from color c0 to c1, and returns resulting color value.
-NVGcolor nvgLerpRGBA(NVGcolor c0, NVGcolor c1, float u);
 
 // Sets transparency of a color value.
 NVGcolor nvgTransRGBA(NVGcolor c0, unsigned char a);

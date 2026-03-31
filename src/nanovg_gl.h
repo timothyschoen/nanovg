@@ -633,20 +633,21 @@ int nvg__renderCreate(void* uptr)
         in vec2 fpos;
         smooth in vec2 uv;
         out vec4 outColor;
-        
-        vec4 getRawColour(int rgba){
-            vec4 col;
-            col.r = float((rgba >> 24) & 0xFF) / 255.0f;
-            col.g = float((rgba >> 16) & 0xFF) / 255.0f;
-            col.b = float((rgba >> 8) & 0xFF) / 255.0f;
-            col.a = float(rgba & 0xFF) / 255.0f;
-            return col;
+
+        vec4 getRawColour(int bgra){
+            return vec4(
+                (bgra >> 16) & 0xFF,  // R
+                (bgra >> 8)  & 0xFF,  // G
+                 bgra        & 0xFF,  // B
+                (bgra >> 24) & 0xFF   // A
+            ) / 255.0;
         }
-        vec4 convertColour(int rgba){
-            vec4 col = getRawColour(rgba);
-            // premultiply colour here
-            return vec4((col.rgb * col.a).rgb, col.a);
+
+        vec4 convertColour(int bgra){
+            vec4 col = getRawColour(bgra);
+            return vec4(col.rgb * col.a, col.a);
         }
+
         float sdroundrect(vec2 pt, vec2 ext, float rad) {
             vec2 ext2 = ext - vec2(rad,rad);
             vec2 d = abs(pt) - ext2;
