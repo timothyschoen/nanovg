@@ -502,19 +502,18 @@ void mnvgSetViewBounds(void* view, int width, int height) {
 }
 
 NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
-    CAMetalLayer *metalLayer = [CAMetalLayer new];
-    id<MTLDevice> metalDevice = MTLCreateSystemDefaultDevice();
-    if (!metalDevice) return NULL;
-    
-    MTLPixelFormat pixelFormat = MTLPixelFormatBGRA8Unorm;
-    
-    ((__bridge NSView*) view).layer = metalLayer;
-    [metalLayer setPixelFormat:pixelFormat];
-    [metalLayer setDevice: metalDevice];
+    NSView* nsView = (__bridge NSView*) view;
+    CAMetalLayer* metalLayer = (CAMetalLayer*)nsView.layer;
+    if (![metalLayer isKindOfClass:[CAMetalLayer class]])
+        return NULL;
+
+    if (metalLayer.device == nil)
+        metalLayer.device = MTLCreateSystemDefaultDevice();
+    if (metalLayer.device == nil)
+        return NULL;
+
     [metalLayer setDrawableSize:CGSizeMake(width, height)];
-    [metalLayer setPresentsWithTransaction:FALSE];
-    [metalLayer setFramebufferOnly:FALSE];
-    return nvgCreateMTL((__bridge void*)((__bridge NSView*) view).layer, flags);
+    return nvgCreateMTL((__bridge void*)metalLayer, flags);
 }
 #endif
 

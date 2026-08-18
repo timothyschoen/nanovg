@@ -1,0 +1,965 @@
+//
+// nanovg_async.h
+//
+// A thread-decoupling command-buffer layer around NanoVG.
+//
+// The idea: the message/UI thread records NanoVG drawing calls into a tightly
+// packed byte buffer instead of touching the GPU context directly. When it
+// calls nvgEndFrame() the recorded frame is published (a cheap pointer swap
+// under a very short lock) to the render/GPU thread, which replays it against
+// the real NVGcontext from performRender().
+//
+// Usage
+// -----
+//   // ---- setup, on the render thread (owns the GL/Metal context) ----
+//   NVGcontext* realCtx = nvgCreateContext(...);      // backend specific
+//   NVGcontext* nvg     = nanovg::create(realCtx);    // <- the handle you draw with
+//   nanovg::nvgCreateFontMem(nvg, ...);               // resources: forwarded to realCtx
+//
+//   // ---- message thread: record a frame ----
+//   nanovg::nvgBeginFrame(nvg, w, h, dpr);
+//   nanovg::nvgFillColor(nvg, nanovg::nvgRGBA(40,40,40,255));
+//   nanovg::nvgFillRect(nvg, 0, 0, 40, 22);
+//   nanovg::nvgEndFrame(nvg);                          // publishes the frame
+//
+//   // ---- render thread: draw the freshest published frame ----
+//   nanovg::bindFramebuffer(nvg, fbo);                  // records backend FBO bind
+//   nanovg::performRender(nvg);                        // replays onto realCtx
+//
+//   // ---- teardown ----
+//   nanovg::destroy(nvg);
+//   nvgDeleteContext(realCtx);
+//
+// Rules
+// -----
+//  * All drawing/state calls become nanovg::nvgX(nvg, ...). Because the handle
+//    is disguised as an NVGcontext*, your existing variables and function
+//    signatures (void render(NVGcontext*)) do not have to change.
+//  * The NanoVG backend helpers that are preprocessor macros cannot be
+//    namespaced. Use nanovg::createFramebuffer/bindFramebuffer/viewport/clear
+//    when those operations must be recorded, and call remaining backend macros
+//    on nanovg::underlying(nvg) from the render thread.
+//  * Recording is single-producer: only one thread may record + call nvgEndFrame.
+//    performRender() is single-consumer: only one thread may call it. (SPSC.)
+//  * If a frame is published while a previous one is still waiting to be drawn,
+//    the older one is coalesced away (the render thread always draws the freshest
+//    frame). If you cannot tolerate dropped frames, gate production with
+//    nanovg::hasPendingFrame(nvg).
+//  * Font resources and text queries run synchronously against the real context.
+//    Image and framebuffer resources return virtual ids/handles and are resolved
+//    during replay on the render thread.
+//
+
+#ifndef NANOVG_ASYNC_H
+#define NANOVG_ASYNC_H
+
+#include <cstdint>
+#include <cstring>
+#include <cstddef>
+#include <cmath>
+#include <mutex>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#include <type_traits>
+
+#include "nanovg.h"
+
+namespace nanovg {
+
+// ---------------------------------------------------------------------------
+// Opcodes for every deferred (recorded) command.
+// ---------------------------------------------------------------------------
+enum class Op : uint8_t {
+    // frame
+    BeginFrame,
+    EndFrame,
+    // backend framebuffer commands
+    CreateFramebuffer,
+    DeleteFramebuffer,
+    BindFramebuffer,
+    BindMainFramebuffer,
+    Viewport,
+    Clear,
+    // composite
+    GlobalCompositeOperation,
+    GlobalCompositeBlendFunc,
+    GlobalCompositeBlendFuncSeparate,
+    // state
+    Save,
+    Restore,
+    Reset,
+    // style
+    ShapeAntiAlias,
+    StrokeColor,
+    StrokePaint,
+    FillColor,
+    FillPaint,
+    MiterLimit,
+    StrokeWidth,
+    LineStyle,
+    DashLength,
+    DashPhaseOffset,
+    LineCap,
+    LineJoin,
+    GlobalAlpha,
+    // transforms
+    ResetTransform,
+    Transform,
+    Translate,
+    Rotate,
+    SkewX,
+    SkewY,
+    Scale,
+    TransformQuantize,
+    // scissor
+    GlobalScissor,
+    Scissor,
+    RoundedScissor,
+    IntersectScissor,
+    IntersectRoundedScissor,
+    ResetScissor,
+    // paths
+    BeginPath,
+    MoveTo,
+    LineTo,
+    BezierTo,
+    QuadTo,
+    ArcTo,
+    ClosePath,
+    PathWinding,
+    Arc,
+    Rect,
+    RoundedRect,
+    RoundedRectVarying,
+    Ellipse,
+    Circle,
+    Fill,
+    Stroke,
+    // cached paths
+    SavePath,
+    StrokeCachedPath,
+    FillCachedPath,
+    DeletePath,
+    // image resources
+    CreateImageARGB,
+    CreateImageARGBSRGB,
+    CreateImageAlpha,
+    UpdateImage,
+    DeleteImage,
+    // text
+    Text,
+    TextBox,
+    FontSize,
+    TextLetterSpacing,
+    TextLineHeight,
+    TextAlign,
+    FontFaceId,
+    FontFace,
+    AtlasTextThreshold,
+    // plugdata direct draws
+    FillRect,
+    StrokeRect,
+    DrawRoundedRect,
+    DrawObjectWithFlag,
+    FillRoundedRect,
+    SmoothGlow,
+};
+
+// ---------------------------------------------------------------------------
+// A single recorded frame: a tightly packed, reusable byte buffer.
+//
+// Arguments are appended by value with memcpy (so unaligned access is never a
+// problem). reset() keeps the underlying storage, so after a few warm-up frames
+// no further allocation happens while recording.
+// ---------------------------------------------------------------------------
+class CommandBuffer {
+public:
+    explicit CommandBuffer(size_t initialBytes)
+    {
+        if (initialBytes < 64)
+            initialBytes = 64;
+        storage_.resize(initialBytes);
+    }
+
+    // --- writing (producer thread) ---
+    inline void reset() noexcept { size_ = 0; }
+    inline size_t size() const noexcept { return size_; }
+
+    template <typename T>
+    inline void put(T const& value)
+    {
+        static_assert(std::is_trivially_copyable<T>::value, "recorded arg must be trivially copyable");
+        ensure(sizeof(T));
+        std::memcpy(storage_.data() + size_, &value, sizeof(T));
+        size_ += sizeof(T);
+    }
+
+    inline void putOp(Op op) { put(static_cast<uint8_t>(op)); }
+
+    // Copies n raw bytes inline (length-prefixed) - used for text/font strings.
+    inline void putBytes(void const* src, uint32_t n)
+    {
+        put(n);
+        if (n) {
+            ensure(n);
+            std::memcpy(storage_.data() + size_, src, n);
+            size_ += n;
+        }
+    }
+
+    // --- reading (consumer thread) ---
+    template <typename T>
+    inline T get(size_t& pos) const
+    {
+        T value;
+        std::memcpy(&value, storage_.data() + pos, sizeof(T));
+        pos += sizeof(T);
+        return value;
+    }
+
+    inline Op getOp(size_t& pos) const { return static_cast<Op>(get<uint8_t>(pos)); }
+
+    // Returns a pointer into the buffer valid for the duration of the replay.
+    inline char const* getBytes(size_t& pos, uint32_t& n) const
+    {
+        n = get<uint32_t>(pos);
+        char const* p = reinterpret_cast<char const*>(storage_.data() + pos);
+        pos += n;
+        return p;
+    }
+
+private:
+    inline void ensure(size_t extra)
+    {
+        size_t const need = size_ + extra;
+        if (need > storage_.size())
+            grow(need);
+    }
+
+    // Only ever taken during warm-up; steady-state frames stay within capacity.
+    void grow(size_t need)
+    {
+        size_t cap = storage_.size() ? storage_.size() : 64;
+        while (cap < need)
+            cap *= 2;
+        storage_.resize(cap);
+    }
+
+    std::vector<uint8_t> storage_;
+    size_t size_ = 0;
+};
+
+// ---------------------------------------------------------------------------
+// The async context. Disguised behind an NVGcontext* handle so that call sites
+// and signatures that use NVGcontext* keep working unchanged.
+// ---------------------------------------------------------------------------
+struct Context {
+    NVGcontext* real = nullptr;       // real GPU context; touched only by the consumer
+    float devicePxRatio = 1.0f;       // cached from nvgBeginFrame (for nvgDoubleStroke)
+
+    // The surface's persistent main/damage framebuffer. Owned entirely by the
+    // consumer (GL) thread: it sets this each frame before performRender, and the
+    // recorded `Op::BindMainFramebuffer` binds it. Touched only by the consumer, so
+    // no lock. Lets the message thread record "bind the main target" without
+    // knowing (or managing) the real framebuffer.
+    void* mainTarget = nullptr;
+
+    // When true, nvgEndFrame replays the frame immediately on the calling thread
+    // instead of publishing it for a separate render thread. Used to run the
+    // whole system single-threaded (record + flush on one thread).
+    bool synchronous = false;
+
+    // Producer-thread-only: the buffer currently being recorded into.
+    CommandBuffer* record = nullptr;
+
+    // -----------------------------------------------------------------------
+    // Shadow CPU-side state.
+    //
+    // In a deferred model the real context has no live transform/scissor while
+    // the producer is recording (those commands only take effect at replay).
+    // So the few state-reading queries (nvgCurrentPixelScale,
+    // nvgTransformGetSubpixelOffset, nvgCurrentTransform, nvgCurrentScissor)
+    // cannot be answered from the real context during recording. We mirror the
+    // relevant NanoVG state here as commands are recorded and answer from it.
+    //
+    // The transform is state-stacked (nvgSave/Restore); the scissor rectangle
+    // is a context-level field in NanoVG, so it is not stacked here either.
+    // -----------------------------------------------------------------------
+    static constexpr int kMaxStates = 32;   // matches NanoVG's NVG_MAX_STATES
+    float xformStack[kMaxStates][6];
+    int stateDepth = 1;                       // active states; top == stateDepth-1
+    float scissorRect[4] = { 0.0f, 0.0f, 1.0e6f, 1.0e6f };  // mirrors ctx->scissor
+
+    inline float* topXform() { return xformStack[stateDepth - 1]; }
+
+    inline void shadowBeginFrame()
+    {
+        stateDepth = 1;
+        ::nvgTransformIdentity(xformStack[0]);
+        scissorRect[0] = 0.0f; scissorRect[1] = 0.0f;
+        scissorRect[2] = 1.0e6f; scissorRect[3] = 1.0e6f;
+    }
+    inline void shadowSave()
+    {
+        if (stateDepth < kMaxStates) {
+            std::memcpy(xformStack[stateDepth], xformStack[stateDepth - 1], sizeof(float) * 6);
+            ++stateDepth;
+        }
+    }
+    inline void shadowRestore() { if (stateDepth > 1) --stateDepth; }
+    inline void shadowResetTop() { ::nvgTransformIdentity(topXform()); }
+
+    // Shared handoff, guarded by mutex_. Kept intentionally tiny.
+    std::mutex mutex;
+    std::vector<CommandBuffer*> ownedBuffers;   // owns every allocation
+    std::vector<CommandBuffer*> freeList;        // buffers available for recording
+    CommandBuffer* pending = nullptr;            // freshest published frame, or null
+
+    struct ImageInfo {
+        int realId = 0;
+        int width = 0;
+        int height = 0;
+        int bytesPerPixel = 4;
+    };
+    struct FramebufferInfo {
+        void* real = nullptr;
+        int virtualImageId = 0;
+        int width = 0;
+        int height = 0;
+        int imageFlags = 0;
+    };
+    struct BackendFunctions {
+        void* (*createFramebuffer)(NVGcontext*, int, int, int) = nullptr;
+        void (*deleteFramebuffer)(void*) = nullptr;
+        void (*bindFramebuffer)(void*) = nullptr;
+        int (*framebufferImage)(void*) = nullptr;
+        void (*viewport)(int, int, int, int) = nullptr;
+        void (*clear)(NVGcontext*) = nullptr;
+    };
+    mutable std::mutex resourceMutex;
+    std::unordered_map<int, ImageInfo> images;
+    std::unordered_map<void*, FramebufferInfo> framebuffers;
+    std::unordered_set<uint32_t> paths;
+    BackendFunctions backendFunctions;
+    int nextImageId = 0x40000000;
+    uint64_t nextFramebufferId = 1;
+    uint32_t nextPathId = 1;
+
+    // -----------------------------------------------------------------------
+    // Resource queue.
+    //
+    // Image create/update/delete must NOT ride in the per-frame command buffer:
+    // frames are coalesced (only the freshest published frame is replayed), so a
+    // frame that created an image can be dropped, leaving its realId at 0 and a
+    // virtual id (>= 0x40000000) leaking into the GL backend -- which indexes
+    // gl->textures[id-1] and reads wildly out of bounds -> crash. Instead these
+    // ops go into this queue, which the consumer drains IN FULL before every
+    // replay, so a resource op is never lost to coalescing.
+    // -----------------------------------------------------------------------
+    struct ResourceOp {
+        enum class Kind : uint8_t { CreateARGB, CreateARGBSRGB, CreateAlpha, Update, Delete };
+        Kind kind;
+        int image = 0;
+        int width = 0;
+        int height = 0;
+        int flags = 0;
+        std::vector<unsigned char> data;   // pixel payload (empty == none)
+    };
+    // Resource ops are staged per-frame and committed to the consumer ATOMICALLY
+    // with the frame that uses them. Draining them independently of the published
+    // frame would let a delete recorded by a not-yet-published frame run ahead of
+    // the older frame still referencing that resource (resolveImageId -> 0 -> the
+    // image draws nothing for one frame == flicker, seen on zoom's updateFramebuffers).
+    std::vector<ResourceOp> recordingResources;   // producer-only: current frame's ops
+    std::vector<ResourceOp> committedResources;    // guarded by `mutex`: published, awaiting the consumer
+
+    void enqueueResource(ResourceOp&& op);            // producer: stage into the current frame
+    void applyResources(std::vector<ResourceOp>& ops); // consumer: create/update/delete on the real ctx
+
+    int allocateImageId(int width, int height, int bytesPerPixel);
+    void* allocateFramebuffer(int width, int height, int imageFlags);
+    int framebufferImage(void* framebuffer) const;
+    void* underlyingFramebuffer(void* framebuffer) const;   // real FBO for a virtual handle (consumer side)
+
+    uint32_t allocatePathId(uint32_t pathId);   // producer: assign an id (does not mark cached)
+    void confirmPathSaved(uint32_t pathId);      // consumer: real nvgSavePath succeeded
+    void confirmPathDeleted(uint32_t pathId);    // consumer: real nvgDeletePath ran
+    bool checkPathId(uint32_t pathId);           // producer: is it confirmed-cached?
+
+    int resolveImageId(int image) const;
+    NVGpaint resolvePaint(NVGpaint paint) const;
+
+    // Publish the current record buffer and pick up a fresh one to record into.
+    void publish();
+
+    // Replay a command buffer onto `real` (consumer thread). Defined in the .cpp.
+    void replayBuffer(CommandBuffer const& buf);
+
+    // Replay the freshest published frame onto `real`. Returns true if it drew.
+    bool performRender();
+};
+
+// ---------------------------------------------------------------------------
+// Lifetime / control.
+// ---------------------------------------------------------------------------
+
+// Wrap an existing (backend-created) NVGcontext. `poolSize` buffers are
+// pre-allocated (minimum 3 to guarantee the producer never allocates or blocks);
+// `initialBufferBytes` is the starting capacity of each buffer.
+//
+// When `synchronous` is true the layer runs on a single thread: nvgEndFrame
+// replays the frame immediately on the calling thread (performRender becomes a
+// no-op). This is the drop-in, single-threaded configuration.
+NVGcontext* create(NVGcontext* underlyingCtx, bool synchronous = false, int poolSize = 3, size_t initialBufferBytes = 1u << 18);
+
+// Destroy the wrapper. Does NOT delete the underlying NVGcontext.
+void destroy(NVGcontext* handle);
+
+// Toggle synchronous (same-thread flush) mode. Only change this when no frame
+// is mid-recording and no performRender is running.
+inline void setSynchronous(NVGcontext* handle, bool synchronous)
+{
+    reinterpret_cast<Context*>(handle)->synchronous = synchronous;
+}
+
+// The real GPU context, for backend macros (framebuffers, blit, viewport, ...).
+inline NVGcontext* underlying(NVGcontext* handle)
+{
+    return reinterpret_cast<Context*>(handle)->real;
+}
+
+// Replay the freshest published frame. Call from the render/GPU thread.
+inline bool performRender(NVGcontext* handle)
+{
+    return reinterpret_cast<Context*>(handle)->performRender();
+}
+
+// True if a published-but-not-yet-drawn frame is waiting.
+bool hasPendingFrame(NVGcontext* handle);
+
+// Backend helpers supplied by the GL/Metal owner. These keep macro-only NanoVG
+// backend calls on the render thread while letting the UI thread record them.
+using BackendFunctions = Context::BackendFunctions;
+void setBackendFunctions(NVGcontext* handle, BackendFunctions functions);
+
+void* createFramebuffer(NVGcontext* c, int width, int height, int imageFlags);
+void deleteFramebuffer(NVGcontext* c, void* framebuffer);
+void bindFramebuffer(NVGcontext* c, void* framebuffer);
+void viewport(NVGcontext* c, int x, int y, int width, int height);
+void clear(NVGcontext* c);
+int framebufferImage(NVGcontext* c, void* framebuffer);
+
+// Consumer (GL) thread: designate the real framebuffer that recorded
+// `bindMainFramebuffer()` ops resolve to. Call before performRender. The main
+// framebuffer is owned entirely by the GL thread; the message thread never sees
+// the real handle.
+void setMainFramebuffer(NVGcontext* c, void* realFramebuffer);
+// Producer (message) thread: record "bind the main render target" at this point
+// in the stream. Resolves to whatever the consumer last passed to
+// setMainFramebuffer.
+void bindMainFramebuffer(NVGcontext* c);
+
+// The real backend framebuffer behind a virtual handle, or nullptr if it has
+// not been created yet. Call from the render thread (after performRender) to
+// blit / read back the persistent framebuffer.
+void* underlyingFramebuffer(NVGcontext* c, void* framebuffer);
+
+// ---------------------------------------------------------------------------
+// Internal helpers used by the inline recording wrappers below.
+// ---------------------------------------------------------------------------
+namespace detail {
+    inline Context* ctx(NVGcontext* c) { return reinterpret_cast<Context*>(c); }
+    inline CommandBuffer& rec(NVGcontext* c) { return *reinterpret_cast<Context*>(c)->record; }
+    inline NVGcontext* real(NVGcontext* c) { return reinterpret_cast<Context*>(c)->real; }
+}
+
+// ===========================================================================
+// DEFERRED commands - recorded, replayed later on the render thread.
+// ===========================================================================
+
+// --- frame ---
+inline void nvgBeginFrame(NVGcontext* c, float windowWidth, float windowHeight, float devicePixelRatio)
+{
+    auto* x = detail::ctx(c);
+    x->devicePxRatio = devicePixelRatio;
+    x->shadowBeginFrame();
+    auto& b = *x->record;
+    b.putOp(Op::BeginFrame);
+    b.put(windowWidth); b.put(windowHeight); b.put(devicePixelRatio);
+}
+
+inline void nvgEndFrame(NVGcontext* c)
+{
+    auto* x = detail::ctx(c);
+    x->record->putOp(Op::EndFrame);
+    if (x->synchronous) {
+        // Single-threaded: apply this frame's resources, then replay immediately on
+        // this thread and reuse the buffer. No hand-off, no pending slot.
+        if (!x->recordingResources.empty())
+            x->applyResources(x->recordingResources);
+        x->recordingResources.clear();
+        x->replayBuffer(*x->record);
+        x->record->reset();
+    } else {
+        x->publish();
+    }
+}
+
+inline void nvgEndFrameWithoutPublishing(NVGcontext* c)
+{
+    detail::ctx(c)->record->putOp(Op::EndFrame);
+}
+
+// Abort the frame being recorded: discard it, publish nothing.
+inline void nvgCancelFrame(NVGcontext* c)
+{
+    detail::rec(c).reset();
+}
+
+// --- composite ---
+inline void nvgGlobalCompositeOperation(NVGcontext* c, int op)
+{
+    auto& b = detail::rec(c); b.putOp(Op::GlobalCompositeOperation); b.put(op);
+}
+inline void nvgGlobalCompositeBlendFunc(NVGcontext* c, enum NVGblendFactor sfactor, enum NVGblendFactor dfactor)
+{
+    auto& b = detail::rec(c); b.putOp(Op::GlobalCompositeBlendFunc); b.put((int)sfactor); b.put((int)dfactor);
+}
+inline void nvgGlobalCompositeBlendFuncSeparate(NVGcontext* c, enum NVGblendFactor srcRGB, enum NVGblendFactor dstRGB, enum NVGblendFactor srcAlpha, enum NVGblendFactor dstAlpha)
+{
+    auto& b = detail::rec(c); b.putOp(Op::GlobalCompositeBlendFuncSeparate);
+    b.put((int)srcRGB); b.put((int)dstRGB); b.put((int)srcAlpha); b.put((int)dstAlpha);
+}
+
+// --- state ---
+inline void nvgSave(NVGcontext* c)    { auto* x = detail::ctx(c); x->record->putOp(Op::Save); x->shadowSave(); }
+inline void nvgRestore(NVGcontext* c) { auto* x = detail::ctx(c); x->record->putOp(Op::Restore); x->shadowRestore(); }
+inline void nvgReset(NVGcontext* c)   { auto* x = detail::ctx(c); x->record->putOp(Op::Reset); x->shadowResetTop(); }
+
+// --- style ---
+inline void nvgShapeAntiAlias(NVGcontext* c, int enabled) { auto& b = detail::rec(c); b.putOp(Op::ShapeAntiAlias); b.put(enabled); }
+inline void nvgStrokeColor(NVGcontext* c, NVGcolor color) { auto& b = detail::rec(c); b.putOp(Op::StrokeColor); b.put(color); }
+inline void nvgStrokePaint(NVGcontext* c, NVGpaint paint) { auto& b = detail::rec(c); b.putOp(Op::StrokePaint); b.put(paint); }
+inline void nvgFillColor(NVGcontext* c, NVGcolor color)   { auto& b = detail::rec(c); b.putOp(Op::FillColor); b.put(color); }
+inline void nvgFillPaint(NVGcontext* c, NVGpaint paint)   { auto& b = detail::rec(c); b.putOp(Op::FillPaint); b.put(paint); }
+inline void nvgMiterLimit(NVGcontext* c, float limit)     { auto& b = detail::rec(c); b.putOp(Op::MiterLimit); b.put(limit); }
+inline void nvgStrokeWidth(NVGcontext* c, float size)     { auto& b = detail::rec(c); b.putOp(Op::StrokeWidth); b.put(size); }
+inline void nvgLineStyle(NVGcontext* c, int lineStyle)    { auto& b = detail::rec(c); b.putOp(Op::LineStyle); b.put(lineStyle); }
+inline void nvgDashLength(NVGcontext* c, float length)    { auto& b = detail::rec(c); b.putOp(Op::DashLength); b.put(length); }
+inline void nvgDashPhaseOffset(NVGcontext* c, float offset){ auto& b = detail::rec(c); b.putOp(Op::DashPhaseOffset); b.put(offset); }
+inline void nvgLineCap(NVGcontext* c, int cap)            { auto& b = detail::rec(c); b.putOp(Op::LineCap); b.put(cap); }
+inline void nvgLineJoin(NVGcontext* c, int join)          { auto& b = detail::rec(c); b.putOp(Op::LineJoin); b.put(join); }
+inline void nvgGlobalAlpha(NVGcontext* c, float alpha)    { auto& b = detail::rec(c); b.putOp(Op::GlobalAlpha); b.put(alpha); }
+
+// --- transforms (also update the shadow transform, mirroring nanovg.cpp) ---
+inline void nvgResetTransform(NVGcontext* c)
+{
+    auto* x = detail::ctx(c); x->record->putOp(Op::ResetTransform);
+    ::nvgTransformIdentity(x->topXform());
+}
+inline void nvgTransform(NVGcontext* c, float a, float b_, float cc, float d, float e, float f)
+{
+    auto* x = detail::ctx(c); auto& b = *x->record; b.putOp(Op::Transform);
+    b.put(a); b.put(b_); b.put(cc); b.put(d); b.put(e); b.put(f);
+    float t[6] = { a, b_, cc, d, e, f }; ::nvgTransformPremultiply(x->topXform(), t);
+}
+inline void nvgTranslate(NVGcontext* c, float x, float y)
+{
+    auto* X = detail::ctx(c); auto& b = *X->record; b.putOp(Op::Translate); b.put(x); b.put(y);
+    float t[6]; ::nvgTransformTranslate(t, x, y); ::nvgTransformPremultiply(X->topXform(), t);
+}
+inline void nvgRotate(NVGcontext* c, float angle)
+{
+    auto* x = detail::ctx(c); auto& b = *x->record; b.putOp(Op::Rotate); b.put(angle);
+    float t[6]; ::nvgTransformRotate(t, angle); ::nvgTransformPremultiply(x->topXform(), t);
+}
+inline void nvgSkewX(NVGcontext* c, float angle)
+{
+    auto* x = detail::ctx(c); auto& b = *x->record; b.putOp(Op::SkewX); b.put(angle);
+    float t[6]; ::nvgTransformSkewX(t, angle); ::nvgTransformPremultiply(x->topXform(), t);
+}
+inline void nvgSkewY(NVGcontext* c, float angle)
+{
+    auto* x = detail::ctx(c); auto& b = *x->record; b.putOp(Op::SkewY); b.put(angle);
+    float t[6]; ::nvgTransformSkewY(t, angle); ::nvgTransformPremultiply(x->topXform(), t);
+}
+inline void nvgScale(NVGcontext* c, float x, float y)
+{
+    auto* X = detail::ctx(c); auto& b = *X->record; b.putOp(Op::Scale); b.put(x); b.put(y);
+    float t[6]; ::nvgTransformScale(t, x, y); ::nvgTransformPremultiply(X->topXform(), t);
+}
+inline void nvgTransformQuantize(NVGcontext* c)
+{
+    auto* x = detail::ctx(c); x->record->putOp(Op::TransformQuantize);
+    // Mirror nvgTransformQuantize: subtract the subpixel offset from the top xform.
+    float* m = x->topXform();
+    float sx = x->devicePxRatio / std::sqrt(m[0] * m[0] + m[1] * m[1]);
+    float sy = x->devicePxRatio / std::sqrt(m[2] * m[2] + m[3] * m[3]);
+    m[4] -= m[4] - std::round(m[4] * sx) / sx;
+    m[5] -= m[5] - std::round(m[5] * sy) / sy;
+}
+
+// --- scissor ---
+inline void nvgGlobalScissor(NVGcontext* c, int x, int y, int w, int h)
+{
+    auto& b = detail::rec(c); b.putOp(Op::GlobalScissor); b.put(x); b.put(y); b.put(w); b.put(h);
+}
+inline void nvgScissor(NVGcontext* c, float x, float y, float w, float h)
+{
+    auto* X = detail::ctx(c); auto& b = *X->record; b.putOp(Op::Scissor); b.put(x); b.put(y); b.put(w); b.put(h);
+    X->scissorRect[0] = x; X->scissorRect[1] = y; X->scissorRect[2] = w; X->scissorRect[3] = h;
+}
+inline void nvgRoundedScissor(NVGcontext* c, float x, float y, float w, float h, float r)
+{
+    auto* X = detail::ctx(c); auto& b = *X->record; b.putOp(Op::RoundedScissor); b.put(x); b.put(y); b.put(w); b.put(h); b.put(r);
+    X->scissorRect[0] = x; X->scissorRect[1] = y; X->scissorRect[2] = w; X->scissorRect[3] = h;
+}
+inline void nvgIntersectScissor(NVGcontext* c, float x, float y, float w, float h)
+{
+    auto& b = detail::rec(c); b.putOp(Op::IntersectScissor); b.put(x); b.put(y); b.put(w); b.put(h);
+}
+inline void nvgIntersectRoundedScissor(NVGcontext* c, float x, float y, float w, float h, float r)
+{
+    auto& b = detail::rec(c); b.putOp(Op::IntersectRoundedScissor); b.put(x); b.put(y); b.put(w); b.put(h); b.put(r);
+}
+inline void nvgResetScissor(NVGcontext* c) { detail::rec(c).putOp(Op::ResetScissor); }
+
+// --- paths ---
+inline void nvgBeginPath(NVGcontext* c) { detail::rec(c).putOp(Op::BeginPath); }
+inline void nvgMoveTo(NVGcontext* c, float x, float y) { auto& b = detail::rec(c); b.putOp(Op::MoveTo); b.put(x); b.put(y); }
+inline void nvgLineTo(NVGcontext* c, float x, float y) { auto& b = detail::rec(c); b.putOp(Op::LineTo); b.put(x); b.put(y); }
+inline void nvgBezierTo(NVGcontext* c, float c1x, float c1y, float c2x, float c2y, float x, float y)
+{
+    auto& b = detail::rec(c); b.putOp(Op::BezierTo); b.put(c1x); b.put(c1y); b.put(c2x); b.put(c2y); b.put(x); b.put(y);
+}
+inline void nvgQuadTo(NVGcontext* c, float cx, float cy, float x, float y)
+{
+    auto& b = detail::rec(c); b.putOp(Op::QuadTo); b.put(cx); b.put(cy); b.put(x); b.put(y);
+}
+inline void nvgArcTo(NVGcontext* c, float x1, float y1, float x2, float y2, float radius)
+{
+    auto& b = detail::rec(c); b.putOp(Op::ArcTo); b.put(x1); b.put(y1); b.put(x2); b.put(y2); b.put(radius);
+}
+inline void nvgClosePath(NVGcontext* c) { detail::rec(c).putOp(Op::ClosePath); }
+inline void nvgPathWinding(NVGcontext* c, enum NVGwinding dir) { auto& b = detail::rec(c); b.putOp(Op::PathWinding); b.put((int)dir); }
+inline void nvgArc(NVGcontext* c, float cx, float cy, float r, float a0, float a1, int dir)
+{
+    auto& b = detail::rec(c); b.putOp(Op::Arc); b.put(cx); b.put(cy); b.put(r); b.put(a0); b.put(a1); b.put(dir);
+}
+inline void nvgRect(NVGcontext* c, float x, float y, float w, float h)
+{
+    auto& b = detail::rec(c); b.putOp(Op::Rect); b.put(x); b.put(y); b.put(w); b.put(h);
+}
+inline void nvgRoundedRect(NVGcontext* c, float x, float y, float w, float h, float r)
+{
+    auto& b = detail::rec(c); b.putOp(Op::RoundedRect); b.put(x); b.put(y); b.put(w); b.put(h); b.put(r);
+}
+inline void nvgRoundedRectVarying(NVGcontext* c, float x, float y, float w, float h, float radTopLeft, float radTopRight, float radBottomRight, float radBottomLeft)
+{
+    auto& b = detail::rec(c); b.putOp(Op::RoundedRectVarying);
+    b.put(x); b.put(y); b.put(w); b.put(h);
+    b.put(radTopLeft); b.put(radTopRight); b.put(radBottomRight); b.put(radBottomLeft);
+}
+inline void nvgEllipse(NVGcontext* c, float cx, float cy, float rx, float ry)
+{
+    auto& b = detail::rec(c); b.putOp(Op::Ellipse); b.put(cx); b.put(cy); b.put(rx); b.put(ry);
+}
+inline void nvgCircle(NVGcontext* c, float cx, float cy, float r)
+{
+    auto& b = detail::rec(c); b.putOp(Op::Circle); b.put(cx); b.put(cy); b.put(r);
+}
+inline void nvgFill(NVGcontext* c)   { detail::rec(c).putOp(Op::Fill); }
+inline void nvgStroke(NVGcontext* c) { detail::rec(c).putOp(Op::Stroke); }
+
+// --- cached paths ---
+// nvgSavePath records the current (deferred) path into the cache at replay time.
+// The id is supplied by the caller, so we can hand it straight back.
+inline int32_t nvgSavePath(NVGcontext* c, uint32_t pathId)
+{
+    pathId = detail::ctx(c)->allocatePathId(pathId);
+    auto& b = detail::rec(c); b.putOp(Op::SavePath); b.put(pathId); return (int32_t)pathId;
+}
+inline int nvgStrokeCachedPath(NVGcontext* c, uint32_t pathId) {
+    auto& b = detail::rec(c); b.putOp(Op::StrokeCachedPath); b.put(pathId);
+    return detail::ctx(c)->checkPathId(pathId);
+}
+inline int nvgFillCachedPath(NVGcontext* c, uint32_t pathId)   {
+    auto& b = detail::rec(c); b.putOp(Op::FillCachedPath); b.put(pathId);
+    return detail::ctx(c)->checkPathId(pathId);
+}
+inline void nvgDeletePath(NVGcontext* c, uint32_t pathId)      {
+    // `paths` membership is dropped by the consumer when it actually replays the
+    // DeletePath op (confirmPathDeleted), so it stays in step with the real cache.
+    auto& b = detail::rec(c); b.putOp(Op::DeletePath); b.put(pathId);
+}
+
+// --- text ---
+// The advance width returned by the real nvgText is not available until replay,
+// so the recorded version returns 0. The string bytes are copied into the buffer.
+inline float nvgText(NVGcontext* c, float x, float y, char const* string, char const* end)
+{
+    auto& b = detail::rec(c); b.putOp(Op::Text); b.put(x); b.put(y);
+    uint32_t len = string ? (uint32_t)(end ? (size_t)(end - string) : std::strlen(string)) : 0u;
+    b.putBytes(string, len);
+    return 0.0f;
+}
+inline void nvgTextBox(NVGcontext* c, float x, float y, float breakRowWidth, char const* string, char const* end)
+{
+    auto& b = detail::rec(c); b.putOp(Op::TextBox); b.put(x); b.put(y); b.put(breakRowWidth);
+    uint32_t len = string ? (uint32_t)(end ? (size_t)(end - string) : std::strlen(string)) : 0u;
+    b.putBytes(string, len);
+}
+inline void nvgFontSize(NVGcontext* c, float size)            { auto& b = detail::rec(c); b.putOp(Op::FontSize); b.put(size); }
+// Note: nvgFontBlur and nvgFontDilate are declared in nanovg.h but not
+// implemented in this fork, so they are intentionally not wrapped here
+// (referencing them would fail to link).
+inline void nvgTextLetterSpacing(NVGcontext* c, float spacing){ auto& b = detail::rec(c); b.putOp(Op::TextLetterSpacing); b.put(spacing); }
+inline void nvgTextLineHeight(NVGcontext* c, float lineHeight){ auto& b = detail::rec(c); b.putOp(Op::TextLineHeight); b.put(lineHeight); }
+inline void nvgTextAlign(NVGcontext* c, int align)           { auto& b = detail::rec(c); b.putOp(Op::TextAlign); b.put(align); }
+inline void nvgAtlasTextThreshold(NVGcontext* c, float threshold){ auto& b = detail::rec(c); b.putOp(Op::AtlasTextThreshold); b.put(threshold); }
+// Font selection sets deferred state; the return value (font id / error) is not
+// resolved until replay, so 0 is returned here.
+inline int nvgFontFaceId(NVGcontext* c, int font) { auto& b = detail::rec(c); b.putOp(Op::FontFaceId); b.put(font); return 0; }
+inline int nvgFontFace(NVGcontext* c, char const* font)
+{
+    auto& b = detail::rec(c); b.putOp(Op::FontFace);
+    uint32_t len = font ? (uint32_t)(std::strlen(font) + 1) : 0u;  // include terminator
+    b.putBytes(font, len);
+    return 0;
+}
+
+// --- plugdata direct draws ---
+inline void nvgFillRect(NVGcontext* c, float x1, float y1, float w, float h)
+{
+    auto& b = detail::rec(c); b.putOp(Op::FillRect); b.put(x1); b.put(y1); b.put(w); b.put(h);
+}
+inline void nvgStrokeRect(NVGcontext* c, float x1, float y1, float w, float h)
+{
+    auto& b = detail::rec(c); b.putOp(Op::StrokeRect); b.put(x1); b.put(y1); b.put(w); b.put(h);
+}
+inline void nvgDrawRoundedRect(NVGcontext* c, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius)
+{
+    auto& b = detail::rec(c); b.putOp(Op::DrawRoundedRect);
+    b.put(x); b.put(y); b.put(w); b.put(h); b.put(icol); b.put(ocol); b.put(radius);
+}
+inline void nvgDrawObjectWithFlag(NVGcontext* c, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, NVGcolor flagCol, float radius, enum ObjectFlagType flagType, bool flagOutline)
+{
+    auto& b = detail::rec(c); b.putOp(Op::DrawObjectWithFlag);
+    b.put(x); b.put(y); b.put(w); b.put(h);
+    b.put(icol); b.put(ocol); b.put(flagCol); b.put(radius);
+    b.put((int)flagType); b.put((uint8_t)(flagOutline ? 1 : 0));
+}
+inline void nvgFillRoundedRect(NVGcontext* c, float x, float y, float w, float h, float radius)
+{
+    auto& b = detail::rec(c); b.putOp(Op::FillRoundedRect); b.put(x); b.put(y); b.put(w); b.put(h); b.put(radius);
+}
+inline void nvgSmoothGlow(NVGcontext* c, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius, float feather)
+{
+    auto& b = detail::rec(c); b.putOp(Op::SmoothGlow);
+    b.put(x); b.put(y); b.put(w); b.put(h); b.put(icol); b.put(ocol); b.put(radius); b.put(feather);
+}
+
+// nvgDoubleStroke both builds a paint AND mutates the state's line style. We can
+// build the paint on the calling thread (it depends only on the arguments and
+// the cached device pixel ratio) and record the state change so it lands in the
+// right order on the render thread. Mirrors nvgDoubleStroke in nanovg.cpp.
+inline NVGpaint nvgDoubleStroke(NVGcontext* c, NVGcolor icol, NVGcolor ocol, NVGcolor dashCol, float dashSize, bool isGradientStroke, bool showActivity, float activityOffset)
+{
+    auto* x = detail::ctx(c);
+    NVGpaint p;
+    std::memset(&p, 0, sizeof(p));
+    p.xform[0] = 1.0f;
+    p.xform[3] = 1.0f;
+    p.radius = dashSize;
+    p.feather = x->devicePxRatio < 2.0f ? 0.8f : 0.6f;
+    p.innerColor = icol;
+    p.outerColor = ocol;
+    p.dashColor = dashCol;
+    p.offset = activityOffset;
+    if (showActivity)
+        p.type = isGradientStroke ? PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY : PAINT_TYPE_DOUBLE_STROKE_ACTIVITY;
+    else
+        p.type = isGradientStroke ? PAINT_TYPE_DOUBLE_STROKE_GRAD : PAINT_TYPE_DOUBLE_STROKE;
+    p.connection_activity = showActivity;
+
+    auto& b = *x->record; b.putOp(Op::LineStyle); b.put((int)NVG_DOUBLE_STROKE);
+    return p;
+}
+
+// ===========================================================================
+// PURE helpers - no dependency on live context state; forwarded immediately.
+// ===========================================================================
+
+// --- colors (no context) ---
+inline NVGcolor nvgRGB(unsigned char r, unsigned char g, unsigned char b) { return ::nvgRGB(r, g, b); }
+inline NVGcolor nvgRGBf(float r, float g, float b) { return ::nvgRGBf(r, g, b); }
+inline NVGcolor nvgRGBA32(unsigned char r, unsigned char g, unsigned char b, unsigned char a) { return ::nvgRGBA32(r, g, b, a); }
+inline NVGcolor nvgRGBA(unsigned char r, unsigned char g, unsigned char b, unsigned char a) { return ::nvgRGBA(r, g, b, a); }
+inline NVGcolor nvgRGBAf(float r, float g, float b, float a) { return ::nvgRGBAf(r, g, b, a); }
+inline NVGcolor nvgTransRGBA(NVGcolor c0, unsigned char a) { return ::nvgTransRGBA(c0, a); }
+inline NVGcolor nvgTransRGBAf(NVGcolor c0, float a) { return ::nvgTransRGBAf(c0, a); }
+inline NVGcolor nvgHSL(float h, float s, float l) { return ::nvgHSL(h, s, l); }
+inline NVGcolor nvgHSLA(float h, float s, float l, unsigned char a) { return ::nvgHSLA(h, s, l, a); }
+
+// --- gradient / pattern paint builders (pure w.r.t. live state) ---
+inline NVGpaint nvgLinearGradient(NVGcontext* c, float sx, float sy, float ex, float ey, NVGcolor icol, NVGcolor ocol)
+{ return ::nvgLinearGradient(detail::real(c), sx, sy, ex, ey, icol, ocol); }
+inline NVGpaint nvgBoxGradient(NVGcontext* c, float x, float y, float w, float h, float r, float f, NVGcolor icol, NVGcolor ocol)
+{ return ::nvgBoxGradient(detail::real(c), x, y, w, h, r, f, icol, ocol); }
+inline NVGpaint nvgRadialGradient(NVGcontext* c, float cx, float cy, float inr, float outr, NVGcolor icol, NVGcolor ocol)
+{ return ::nvgRadialGradient(detail::real(c), cx, cy, inr, outr, icol, ocol); }
+inline NVGpaint nvgImagePattern(NVGcontext* c, float ox, float oy, float ex, float ey, float angle, int image, float alpha)
+{ return ::nvgImagePattern(detail::real(c), ox, oy, ex, ey, angle, image, alpha); }
+inline NVGpaint nvgImageAlphaPattern(NVGcontext* c, float ox, float oy, float ex, float ey, float angle, int image, NVGcolor iCol)
+{ return ::nvgImageAlphaPattern(detail::real(c), ox, oy, ex, ey, angle, image, iCol); }
+inline NVGpaint nvgDotPattern(NVGcontext* c, NVGcolor icol, NVGcolor ocol, float patternSize, float dotRadius, float feather)
+{ return ::nvgDotPattern(detail::real(c), icol, ocol, patternSize, dotRadius, feather); }
+
+// --- transform math (operate on float[], no context) ---
+inline void nvgTransformIdentity(float* dst) { ::nvgTransformIdentity(dst); }
+inline void nvgTransformTranslate(float* dst, float tx, float ty) { ::nvgTransformTranslate(dst, tx, ty); }
+inline void nvgTransformScale(float* dst, float sx, float sy) { ::nvgTransformScale(dst, sx, sy); }
+inline void nvgTransformRotate(float* dst, float a) { ::nvgTransformRotate(dst, a); }
+inline void nvgTransformSkewX(float* dst, float a) { ::nvgTransformSkewX(dst, a); }
+inline void nvgTransformSkewY(float* dst, float a) { ::nvgTransformSkewY(dst, a); }
+inline void nvgTransformMultiply(float* dst, const float* src) { ::nvgTransformMultiply(dst, src); }
+inline void nvgTransformPremultiply(float* dst, const float* src) { ::nvgTransformPremultiply(dst, src); }
+inline int nvgTransformInverse(float* dst, const float* src) { return ::nvgTransformInverse(dst, src); }
+inline void nvgTransformPoint(float* dstx, float* dsty, const float* xform, float srcx, float srcy) { ::nvgTransformPoint(dstx, dsty, xform, srcx, srcy); }
+inline float nvgDegToRad(float deg) { return ::nvgDegToRad(deg); }
+inline float nvgRadToDeg(float rad) { return ::nvgRadToDeg(rad); }
+
+// ===========================================================================
+// SYNCHRONOUS on the real context - resources & queries. These return values,
+// so they run immediately against the underlying context. Only call them where
+// that is safe (see the header notes at the top).
+// ===========================================================================
+
+// --- images ---
+inline int nvgCreateImage(NVGcontext* c, char const* filename, int imageFlags) { return ::nvgCreateImage(detail::real(c), filename, imageFlags); }
+inline int nvgCreateImageMem(NVGcontext* c, int imageFlags, unsigned char* data, int ndata) { return ::nvgCreateImageMem(detail::real(c), imageFlags, data, ndata); }
+
+inline int nvgCreateImageARGB(NVGcontext* c, int w, int h, int imageFlags, const unsigned char* data)
+{
+    auto* x = detail::ctx(c);
+    int const image = x->allocateImageId(w, h, 4);
+    Context::ResourceOp op;
+    op.kind = Context::ResourceOp::Kind::CreateARGB;
+    op.image = image; op.width = w; op.height = h; op.flags = imageFlags;
+    if (data) op.data.assign(data, data + static_cast<size_t>(w) * h * 4);
+    x->enqueueResource(std::move(op));
+    return image;
+}
+inline int nvgCreateImageARGB_sRGB(NVGcontext* c, int w, int h, int imageFlags, const unsigned char* data)
+{
+    auto* x = detail::ctx(c);
+    int const image = x->allocateImageId(w, h, 4);
+    Context::ResourceOp op;
+    op.kind = Context::ResourceOp::Kind::CreateARGBSRGB;
+    op.image = image; op.width = w; op.height = h; op.flags = imageFlags;
+    if (data) op.data.assign(data, data + static_cast<size_t>(w) * h * 4);
+    x->enqueueResource(std::move(op));
+    return image;
+}
+inline int nvgCreateImageAlpha(NVGcontext* c, int w, int h, int imageFlags, const unsigned char* data)
+{
+    auto* x = detail::ctx(c);
+    int const image = x->allocateImageId(w, h, 1);
+    Context::ResourceOp op;
+    op.kind = Context::ResourceOp::Kind::CreateAlpha;
+    op.image = image; op.width = w; op.height = h; op.flags = imageFlags;
+    if (data) op.data.assign(data, data + static_cast<size_t>(w) * h);
+    x->enqueueResource(std::move(op));
+    return image;
+}
+inline void nvgUpdateImage(NVGcontext* c, int image, const unsigned char* data)
+{
+    auto* x = detail::ctx(c);
+    size_t byteCount = 0;
+    {
+        std::lock_guard<std::mutex> lock(x->resourceMutex);
+        auto const iter = x->images.find(image);
+        byteCount = iter == x->images.end() ? 0u : static_cast<size_t>(iter->second.width) * iter->second.height * iter->second.bytesPerPixel;
+    }
+    Context::ResourceOp op;
+    op.kind = Context::ResourceOp::Kind::Update;
+    op.image = image;
+    if (data && byteCount) op.data.assign(data, data + byteCount);
+    x->enqueueResource(std::move(op));
+}
+inline void nvgImageSize(NVGcontext* c, int image, int* w, int* h)
+{
+    auto* x = detail::ctx(c);
+    {
+        std::lock_guard<std::mutex> lock(x->resourceMutex);
+        auto const iter = x->images.find(image);
+        if (iter != x->images.end()) {
+            if (w) *w = iter->second.width;
+            if (h) *h = iter->second.height;
+            return;
+        }
+    }
+
+    ::nvgImageSize(detail::real(c), image, w, h);
+}
+inline void nvgDeleteImage(NVGcontext* c, int image)
+{
+    Context::ResourceOp op;
+    op.kind = Context::ResourceOp::Kind::Delete;
+    op.image = image;
+    detail::ctx(c)->enqueueResource(std::move(op));
+}
+inline int nvgGetImageTextureId(NVGcontext* c, int handle) { return ::nvgGetImageTextureId(detail::real(c), detail::ctx(c)->resolveImageId(handle)); }
+inline int nvgIsTexture(NVGcontext* c, int textureId) { return ::nvgIsTexture(detail::real(c), textureId); }
+
+// --- fonts ---
+inline int nvgCreateFont(NVGcontext* c, char const* name, char const* filename) { return ::nvgCreateFont(detail::real(c), name, filename); }
+inline int nvgCreateFontAtIndex(NVGcontext* c, char const* name, char const* filename, const int fontIndex) { return ::nvgCreateFontAtIndex(detail::real(c), name, filename, fontIndex); }
+inline int nvgCreateFontMem(NVGcontext* c, char const* name, unsigned char* data, int ndata, int freeData) { return ::nvgCreateFontMem(detail::real(c), name, data, ndata, freeData); }
+inline int nvgCreateFontMemAtIndex(NVGcontext* c, char const* name, unsigned char* data, int ndata, int freeData, const int fontIndex) { return ::nvgCreateFontMemAtIndex(detail::real(c), name, data, ndata, freeData, fontIndex); }
+inline int nvgFindFont(NVGcontext* c, char const* name) { return ::nvgFindFont(detail::real(c), name); }
+inline int nvgAddFallbackFontId(NVGcontext* c, int baseFont, int fallbackFont) { return ::nvgAddFallbackFontId(detail::real(c), baseFont, fallbackFont); }
+inline int nvgAddFallbackFont(NVGcontext* c, char const* baseFont, char const* fallbackFont) { return ::nvgAddFallbackFont(detail::real(c), baseFont, fallbackFont); }
+inline void nvgResetFallbackFontsId(NVGcontext* c, int baseFont) { ::nvgResetFallbackFontsId(detail::real(c), baseFont); }
+inline void nvgResetFallbackFonts(NVGcontext* c, char const* baseFont) { ::nvgResetFallbackFonts(detail::real(c), baseFont); }
+
+// --- queries answered from shadow state (correct during deferred recording) ---
+inline void nvgCurrentScissor(NVGcontext* c, float* x, float* y, float* w, float* h)
+{
+    auto* X = detail::ctx(c);
+    *x = X->scissorRect[0]; *y = X->scissorRect[1]; *w = X->scissorRect[2]; *h = X->scissorRect[3];
+}
+// nvgCurrentPixelScale is just the device pixel ratio in nanovg.cpp, which we
+// cache at nvgBeginFrame; forwarding to the real ctx would give the previous
+// frame's value while a frame is being recorded.
+inline float nvgCurrentPixelScale(NVGcontext* c) { return detail::ctx(c)->devicePxRatio; }
+inline void setCurrentPixelScale(NVGcontext* c, float const devicePixelRatio) { detail::ctx(c)->devicePxRatio = devicePixelRatio; }
+inline void nvgCurrentTransform(NVGcontext* c, float* xform)
+{
+    if (xform) std::memcpy(xform, detail::ctx(c)->topXform(), sizeof(float) * 6);
+}
+inline void nvgTransformGetSubpixelOffset(NVGcontext* c, float* tx, float* ty)
+{
+    auto* X = detail::ctx(c);
+    float const* m = X->topXform();
+    float sx = X->devicePxRatio / std::sqrt(m[0] * m[0] + m[1] * m[1]);
+    float sy = X->devicePxRatio / std::sqrt(m[2] * m[2] + m[3] * m[3]);
+    *tx = m[4] - std::round(m[4] * sx) / sx;
+    *ty = m[5] - std::round(m[5] * sy) / sy;
+}
+inline int nvgGetFontFaceId(NVGcontext* c) { return ::nvgGetFontFaceId(detail::real(c)); }
+inline float nvgGetFontSize(NVGcontext* c) { return ::nvgGetFontSize(detail::real(c)); }
+inline float nvgGetStrokeWidth(NVGcontext* c) { return ::nvgGetStrokeWidth(detail::real(c)); }
+inline int nvgGetTextAlign(NVGcontext* c) { return ::nvgGetTextAlign(detail::real(c)); }
+inline float nvgTextBounds(NVGcontext* c, float x, float y, char const* string, char const* end, float* bounds) { return ::nvgTextBounds(detail::real(c), x, y, string, end, bounds); }
+inline void nvgTextBoxBounds(NVGcontext* c, float x, float y, float breakRowWidth, char const* string, char const* end, float* bounds) { ::nvgTextBoxBounds(detail::real(c), x, y, breakRowWidth, string, end, bounds); }
+inline int nvgTextGlyphPositions(NVGcontext* c, float x, float y, char const* string, char const* end, NVGglyphPosition* positions, int maxPositions) { return ::nvgTextGlyphPositions(detail::real(c), x, y, string, end, positions, maxPositions); }
+inline void nvgTextMetrics(NVGcontext* c, float* ascender, float* descender, float* lineh) { ::nvgTextMetrics(detail::real(c), ascender, descender, lineh); }
+inline int nvgTextBreakLines(NVGcontext* c, char const* string, char const* end, float breakRowWidth, FONStextRow* rows, int maxRows) { return ::nvgTextBreakLines(detail::real(c), string, end, breakRowWidth, rows, maxRows); }
+
+inline void nvgDebugDumpPathCache(NVGcontext* c) { ::nvgDebugDumpPathCache(detail::real(c)); }
+
+} // namespace nanovg
+
+#endif // NANOVG_ASYNC_H
