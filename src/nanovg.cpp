@@ -133,6 +133,16 @@ struct StrokeCacheLine {
 
 using StrokeCache = std::unordered_map<uint32_t, StrokeCacheLine>;
 
+// A cached signed-distance-field glyph tile living on the real context (consumer thread), analogous
+// to the StrokeCache. `image` is a real alpha texture; (ex0,ey0,ew,eh) is the em-space rect the tile
+// covers, used to position the draw quad under the current transform. image <= 0 marks an empty glyph
+// (e.g. space) that was handled but draws nothing.
+struct NVGSDFGlyph {
+    int image;
+    float ex0, ey0, ew, eh;
+};
+using SDFGlyphCache = std::unordered_map<uint64_t, NVGSDFGlyph>;
+
 struct NVGcontext {
     NVGbackend backend;
     uint8_t* commands;
@@ -163,6 +173,7 @@ struct NVGcontext {
     struct NVGscissorBounds globalScissor;
     int numCached;
     StrokeCache* strokeCache;
+    SDFGlyphCache* sdfGlyphs;
 };
 
 static inline float nvg__sqrtf(float a) { return sqrtf(a); }
@@ -357,7 +368,8 @@ NVGcontext* nvgCreateInternal(NVGbackend backend)
     ctx->fontImageIdx = -1;
     
     ctx->strokeCache = new StrokeCache();
-    
+    ctx->sdfGlyphs = new SDFGlyphCache();
+
     return ctx;
     
 error:
@@ -392,7 +404,16 @@ void nvgDeleteInternal(NVGcontext* ctx)
             ctx->fontImages[i] = 0;
         }
     }
-    
+
+    if (ctx->sdfGlyphs != NULL) {
+        for (auto& [hash, glyph] : *ctx->sdfGlyphs) {
+            if (glyph.image > 0)
+                nvgDeleteImage(ctx, glyph.image);
+        }
+        delete ctx->sdfGlyphs;
+        ctx->sdfGlyphs = NULL;
+    }
+
     nvg__renderDelete(ctx->backend);
     
     free(ctx);
@@ -3165,6 +3186,160 @@ static void nvg__renderText(NVGcontext* ctx, FONSstate* fons, NVGvertex* verts, 
     paint.outerColor.a *= state->alpha;
     paint.radius = 0.5;
     nvg__renderTriangles(ctx->backend, &paint, state->compositeOperation, &state->scissor, verts, nverts, ctx->fringeWidth, 1);
+}
+
+void nvgDrawSDFGlyph(NVGcontext* ctx, int image, float x, float y, float w, float h, NVGcolor color)
+{
+    if (image <= 0 || w <= 0.0f || h <= 0.0f)
+        return;
+
+    NVGstate* state = nvg__getState(ctx);
+    float* tf = state->xform;
+
+    // Transform the four corners of the quad (given in local space) by the current transform,
+    // exactly like nvg__textFromAtlas does for fontstash quads.
+    float c[4 * 2];
+    nvgTransformPoint(&c[0], &c[1], tf, x,     y);
+    nvgTransformPoint(&c[2], &c[3], tf, x + w, y);
+    nvgTransformPoint(&c[4], &c[5], tf, x + w, y + h);
+    nvgTransformPoint(&c[6], &c[7], tf, x,     y + h);
+
+    // Reverse winding on a flipped transform so the front face stays CCW (matches nvg__textFromAtlas).
+    int const rev = (tf[0] * tf[3] < 0) ? 1 : 0;
+
+    NVGvertex* verts = nvg__allocTempVerts(ctx, 6);
+    if (verts == NULL)
+        return;
+
+    // UVs span the whole tile; s/t (line-AA channels) are unused for text and left at 0.
+    nvg__vset(&verts[0],       c[0], c[1], 0.0f, 0.0f, 0, 0);
+    nvg__vset(&verts[1 + rev], c[4], c[5], 1.0f, 1.0f, 0, 0);
+    nvg__vset(&verts[2 - rev], c[2], c[3], 1.0f, 0.0f, 0, 0);
+    nvg__vset(&verts[3],       c[0], c[1], 0.0f, 0.0f, 0, 0);
+    nvg__vset(&verts[4 + rev], c[6], c[7], 0.0f, 1.0f, 0, 0);
+    nvg__vset(&verts[5 - rev], c[4], c[5], 1.0f, 1.0f, 0, 0);
+
+    NVGpaint paint;
+    memset(&paint, 0, sizeof(paint));
+    nvgTransformIdentity(paint.xform);
+    paint.radius = 0.5f;   // superSDF's sdfCov() offset: coverage crosses 0.5 at the 127 iso-value
+    paint.feather = 1.0f;
+    paint.innerColor = color;
+    paint.outerColor = color;
+    paint.innerColor.a *= state->alpha;
+    paint.outerColor.a *= state->alpha;
+    paint.image = image;
+    paint.type = PAINT_TYPE_TEXT;
+
+    nvg__renderTriangles(ctx->backend, &paint, state->compositeOperation, &state->scissor, verts, 6, ctx->fringeWidth, 1);
+}
+
+// Builds and caches an SDF tile from the CURRENT (already flattened) path. Runs on the consumer /
+// render thread via nvgSaveSDFGlyph. The path is expected to have been recorded under a plain scale
+// transform (the caller uses referenceEmPx); we read that scale back off the transform so the stored
+// rect is in em space, independent of the reference size. Encoding matches superSDF / sdfCov:
+//   byte = clamp(127 + 32 * signedDistanceInTilePixels), positive == inside.
+static void nvg__buildGlyphSDF(NVGcontext* ctx, uint64_t hash)
+{
+    constexpr int sdfPadding = 4;
+    constexpr float sdfPixelDist = 32.0f;
+    constexpr int maxTile = 256;
+
+    NVGpathCache* cache = ctx->cache;
+    NVGstate* state = nvg__getState(ctx);
+
+    nvg__flattenPaths(ctx);
+
+    // Empty glyph (e.g. space): store a sentinel so the producer stops re-recording it.
+    if (cache->npaths == 0 || cache->bounds[2] <= cache->bounds[0] || cache->bounds[3] <= cache->bounds[1]) {
+        (*ctx->sdfGlyphs)[hash] = NVGSDFGlyph { 0, 0.0f, 0.0f, 0.0f, 0.0f };
+        return;
+    }
+
+    float const S = nvg__maxf(nvg__getAverageScale(state->xform), 1.0e-6f);
+
+    // Tile geometry in the flattened (reference-pixel) space. Width is padded to a multiple of 4 so
+    // R8 texture rows stay 4-byte aligned on both backends (avoids the diagonal-shear/over-read bug).
+    float const sx0 = cache->bounds[0] - sdfPadding;
+    float const sy0 = cache->bounds[1] - sdfPadding;
+    int W = (int)ceilf(cache->bounds[2] - cache->bounds[0] + 2 * sdfPadding);
+    int H = (int)ceilf(cache->bounds[3] - cache->bounds[1] + 2 * sdfPadding);
+    W = nvg__clampi((W + 3) & ~3, 4, maxTile);
+    H = nvg__clampi(H, 1, maxTile);
+
+    // Collect flattened segments, offset into tile-pixel space, closing each subpath.
+    struct Seg { float ax, ay, bx, by; };
+    std::vector<Seg> segs;
+    segs.reserve(64);
+    for (int pi = 0; pi < cache->npaths; pi++) {
+        NVGpath const* path = &cache->paths[pi];
+        NVGpoint const* pts = &cache->points[path->first];
+        int const n = path->count;
+        for (int k = 0; k < n; k++) {
+            NVGpoint const& a = pts[k];
+            NVGpoint const& b = pts[(k + 1) % n];
+            segs.push_back({ a.x - sx0, a.y - sy0, b.x - sx0, b.y - sy0 });
+        }
+    }
+
+    std::vector<unsigned char> pixels(static_cast<size_t>(W) * H);
+    for (int j = 0; j < H; j++) {
+        float const py = j + 0.5f;
+        for (int i = 0; i < W; i++) {
+            float const px = i + 0.5f;
+            float minDistSq = 1e30f;
+            int winding = 0;
+            for (auto const& s : segs) {
+                float const ex = s.bx - s.ax, ey = s.by - s.ay;
+                float const lenSq = ex * ex + ey * ey;
+                float t = lenSq > 0.0f ? ((px - s.ax) * ex + (py - s.ay) * ey) / lenSq : 0.0f;
+                t = nvg__clampf(t, 0.0f, 1.0f);
+                float const dx = px - (s.ax + t * ex), dy = py - (s.ay + t * ey);
+                minDistSq = nvg__minf(minDistSq, dx * dx + dy * dy);
+                if ((s.ay <= py) != (s.by <= py)) {
+                    float const cross = s.ax + (py - s.ay) / (s.by - s.ay) * ex;
+                    if (cross > px)
+                        winding += (s.by > s.ay) ? 1 : -1;
+                }
+            }
+            float const dist = nvg__sqrtf(minDistSq) * (winding != 0 ? 1.0f : -1.0f);
+            int v = (int)(127.0f + sdfPixelDist * dist + 0.5f);
+            pixels[static_cast<size_t>(j) * W + i] = (unsigned char)nvg__clampi(v, 0, 255);
+        }
+    }
+
+    int const image = nvgCreateImageAlpha(ctx, W, H, 0, pixels.data());
+    (*ctx->sdfGlyphs)[hash] = NVGSDFGlyph { image, sx0 / S, sy0 / S, W / S, H / S };
+}
+
+// Consumer thread: generate the SDF tile for `hash` from the current path and cache it. Returns 1 on
+// success (or a handled empty glyph), -1 if the tile could not be created (so the caller won't confirm
+// it and will retry next frame).
+int32_t nvgSaveSDFGlyph(NVGcontext* ctx, uint64_t hash)
+{
+    // Already generated? Happens when the same glyph appears several times before the producer sees
+    // the confirmation (e.g. "aaa" on first paint) — regenerating would leak the previous texture.
+    if (ctx->sdfGlyphs->find(hash) != ctx->sdfGlyphs->end())
+        return 1;
+
+    nvg__buildGlyphSDF(ctx, hash);
+    auto const it = ctx->sdfGlyphs->find(hash);
+    if (it == ctx->sdfGlyphs->end() || it->second.image < 0)
+        return -1;
+    return 1;
+}
+
+// Consumer thread: draw the cached SDF tile for `hash` at the current transform. Returns 1 if an
+// entry exists (drawn, or an empty glyph that draws nothing), 0 if not yet cached.
+int nvgFillSDFGlyph(NVGcontext* ctx, uint64_t hash, NVGcolor color)
+{
+    auto const it = ctx->sdfGlyphs->find(hash);
+    if (it == ctx->sdfGlyphs->end())
+        return 0;
+    NVGSDFGlyph const& g = it->second;
+    if (g.image > 0)
+        nvgDrawSDFGlyph(ctx, g.image, g.ex0, g.ey0, g.ew, g.eh, color);
+    return 1;
 }
 
 static int nvg__allocTextAtlas(NVGcontext* ctx)

@@ -206,6 +206,20 @@ bool Context::checkPathId(uint32_t pathId)
     return paths.contains(pathId);
 }
 
+// Consumer thread: the real nvgSaveSDFGlyph for `hash` just succeeded.
+void Context::confirmSDFGlyphSaved(uint64_t hash)
+{
+    std::lock_guard<std::mutex> lock(resourceMutex);
+    sdfGlyphs.insert(hash);
+}
+
+// Producer thread: is this glyph's SDF tile known to exist on the real context?
+bool Context::checkSDFGlyph(uint64_t hash)
+{
+    std::lock_guard<std::mutex> lock(resourceMutex);
+    return sdfGlyphs.contains(hash);
+}
+
 int Context::resolveImageId(int const image) const
 {
     if (image == 0)
@@ -631,6 +645,17 @@ void Context::replayBuffer(CommandBuffer const& buf)
             float x = buf.get<float>(pos), y = buf.get<float>(pos), w = buf.get<float>(pos), h = buf.get<float>(pos);
             NVGcolor ic = buf.get<NVGcolor>(pos), oc = buf.get<NVGcolor>(pos); float r = buf.get<float>(pos), fe = buf.get<float>(pos);
             ::nvgSmoothGlow(R, x, y, w, h, ic, oc, r, fe);
+        } break;
+        case Op::SaveSDFGlyph: {
+            uint64_t const hash = buf.get<uint64_t>(pos);
+            // Only mark the glyph cached once the real generation actually happened (mirrors SavePath).
+            if (::nvgSaveSDFGlyph(R, hash) != -1)
+                confirmSDFGlyphSaved(hash);
+        } break;
+        case Op::FillSDFGlyph: {
+            uint64_t const hash = buf.get<uint64_t>(pos);
+            NVGcolor col = buf.get<NVGcolor>(pos);
+            ::nvgFillSDFGlyph(R, hash, col);
         } break;
         }
     }

@@ -569,6 +569,21 @@ void nvgFillRoundedRect(NVGcontext* ctx, float x, float y, float w, float h, flo
 // Fills a rounded rectangle using rounded rectangle shader, also bypassing paths system. Uses current fill colour
 void nvgSmoothGlow(NVGcontext* ctx, float x, float y, float w, float h, NVGcolor icol, NVGcolor ocol, float radius, float feather);
 
+// Draws a single quad sampling an alpha (R8) signed-distance-field tile through the SDF text shader
+// (NSVG_SHADER_TEXT / superSDF). The tile must use the on_edge=127, pixel_dist_scale=32 convention
+// (i.e. the same encoding as stbtt_GetGlyphSDF / fontstash's FONS_SDF glyphs). The quad (x,y,w,h) is
+// given in the current local coordinate space and transformed by the current transform; UVs span the
+// whole image. Used to render cached custom glyph SDFs at any size from one resolution-independent tile.
+void nvgDrawSDFGlyph(NVGcontext* ctx, int image, float x, float y, float w, float h, NVGcolor color);
+
+// Render-thread SDF glyph cache, mirroring the cached-path API (nvgSavePath / nvgFillCachedPath).
+// nvgSaveSDFGlyph generates an SDF tile from the CURRENT path (record it beforehand under a plain
+// scale transform, like a glyph outline) and caches it under `hash`; returns 1 on success (or a
+// handled empty glyph), -1 if it could not be created. nvgFillSDFGlyph draws the cached tile for
+// `hash` at the current transform, returning 1 if an entry exists and 0 if it is not cached yet.
+int32_t nvgSaveSDFGlyph(NVGcontext* ctx, uint64_t hash);
+int nvgFillSDFGlyph(NVGcontext* ctx, uint64_t hash, NVGcolor color);
+
 
 //
 // Scissoring

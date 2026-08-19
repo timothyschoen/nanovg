@@ -164,6 +164,9 @@ enum class Op : uint8_t {
     DrawObjectWithFlag,
     FillRoundedRect,
     SmoothGlow,
+    // SDF glyph cache (generated on the consumer, mirroring SavePath / FillCachedPath)
+    SaveSDFGlyph,
+    FillSDFGlyph,
 };
 
 // ---------------------------------------------------------------------------
@@ -304,6 +307,9 @@ struct Context {
     std::unordered_map<int, ImageInfo> images;
     std::unordered_map<void*, FramebufferInfo> framebuffers;
     std::unordered_set<uint32_t> paths;
+    // Consumer-owned membership for the render-thread SDF glyph cache (same rationale as `paths`:
+    // set only once the real nvgSaveSDFGlyph has actually replayed, so it survives frame coalescing).
+    std::unordered_set<uint64_t> sdfGlyphs;
     BackendFunctions backendFunctions;
     int nextImageId = 0x40000000;
     uint64_t nextFramebufferId = 1;
@@ -349,6 +355,9 @@ struct Context {
     void confirmPathSaved(uint32_t pathId);      // consumer: real nvgSavePath succeeded
     void confirmPathDeleted(uint32_t pathId);    // consumer: real nvgDeletePath ran
     bool checkPathId(uint32_t pathId);           // producer: is it confirmed-cached?
+
+    void confirmSDFGlyphSaved(uint64_t hash);    // consumer: real nvgSaveSDFGlyph succeeded
+    bool checkSDFGlyph(uint64_t hash);           // producer: is this glyph confirmed-cached?
 
     int resolveImageId(int image) const;
     NVGpaint resolvePaint(NVGpaint paint) const;
@@ -705,6 +714,19 @@ inline void nvgSmoothGlow(NVGcontext* c, float x, float y, float w, float h, NVG
 {
     auto& b = detail::rec(c); b.putOp(Op::SmoothGlow);
     b.put(x); b.put(y); b.put(w); b.put(h); b.put(icol); b.put(ocol); b.put(radius); b.put(feather);
+}
+// --- SDF glyph cache (mirrors the cached-path API) ---
+// Producer-side query: has the consumer confirmed a tile for this glyph? (No op recorded.)
+inline bool nvgSDFGlyphCached(NVGcontext* c, uint64_t hash) { return detail::ctx(c)->checkSDFGlyph(hash); }
+// Record the current path as a glyph to be turned into an SDF tile on the consumer.
+inline void nvgSaveSDFGlyph(NVGcontext* c, uint64_t hash)
+{
+    auto& b = detail::rec(c); b.putOp(Op::SaveSDFGlyph); b.put(hash);
+}
+// Draw the cached SDF tile for `hash` at the current transform.
+inline void nvgFillSDFGlyph(NVGcontext* c, uint64_t hash, NVGcolor color)
+{
+    auto& b = detail::rec(c); b.putOp(Op::FillSDFGlyph); b.put(hash); b.put(color);
 }
 
 // nvgDoubleStroke both builds a paint AND mutates the state's line style. We can
