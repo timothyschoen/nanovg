@@ -681,8 +681,6 @@ NVGcontext* create(NVGcontext* underlyingCtx, bool synchronous, int poolSize, si
     auto* x = new Context();
     x->real = underlyingCtx;
     x->synchronous = synchronous;
-    x->stateDepth = 1;
-    ::nvgTransformIdentity(x->xformStack[0]);
     x->ownedBuffers.reserve(poolSize);
     x->freeList.reserve(poolSize);
 

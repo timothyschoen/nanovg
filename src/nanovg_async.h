@@ -273,43 +273,6 @@ struct Context {
     // Producer-thread-only: the buffer currently being recorded into.
     CommandBuffer* record = nullptr;
 
-    // -----------------------------------------------------------------------
-    // Shadow CPU-side state.
-    //
-    // In a deferred model the real context has no live transform/scissor while
-    // the producer is recording (those commands only take effect at replay).
-    // So the few state-reading queries (nvgCurrentPixelScale,
-    // nvgTransformGetSubpixelOffset, nvgCurrentTransform, nvgCurrentScissor)
-    // cannot be answered from the real context during recording. We mirror the
-    // relevant NanoVG state here as commands are recorded and answer from it.
-    //
-    // The transform is state-stacked (nvgSave/Restore); the scissor rectangle
-    // is a context-level field in NanoVG, so it is not stacked here either.
-    // -----------------------------------------------------------------------
-    static constexpr int kMaxStates = 32;   // matches NanoVG's NVG_MAX_STATES
-    float xformStack[kMaxStates][6];
-    int stateDepth = 1;                       // active states; top == stateDepth-1
-    float scissorRect[4] = { 0.0f, 0.0f, 1.0e6f, 1.0e6f };  // mirrors ctx->scissor
-
-    inline float* topXform() { return xformStack[stateDepth - 1]; }
-
-    inline void shadowBeginFrame()
-    {
-        stateDepth = 1;
-        ::nvgTransformIdentity(xformStack[0]);
-        scissorRect[0] = 0.0f; scissorRect[1] = 0.0f;
-        scissorRect[2] = 1.0e6f; scissorRect[3] = 1.0e6f;
-    }
-    inline void shadowSave()
-    {
-        if (stateDepth < kMaxStates) {
-            std::memcpy(xformStack[stateDepth], xformStack[stateDepth - 1], sizeof(float) * 6);
-            ++stateDepth;
-        }
-    }
-    inline void shadowRestore() { if (stateDepth > 1) --stateDepth; }
-    inline void shadowResetTop() { ::nvgTransformIdentity(topXform()); }
-
     // Shared handoff, guarded by mutex_. Kept intentionally tiny.
     std::mutex mutex;
     std::vector<CommandBuffer*> ownedBuffers;   // owns every allocation
@@ -483,7 +446,6 @@ inline void nvgBeginFrame(NVGcontext* c, float windowWidth, float windowHeight, 
 {
     auto* x = detail::ctx(c);
     x->devicePxRatio = devicePixelRatio;
-    x->shadowBeginFrame();
     auto& b = *x->record;
     b.putOp(Op::BeginFrame);
     b.put(windowWidth); b.put(windowHeight); b.put(devicePixelRatio);
@@ -533,9 +495,9 @@ inline void nvgGlobalCompositeBlendFuncSeparate(NVGcontext* c, enum NVGblendFact
 }
 
 // --- state ---
-inline void nvgSave(NVGcontext* c)    { auto* x = detail::ctx(c); x->record->putOp(Op::Save); x->shadowSave(); }
-inline void nvgRestore(NVGcontext* c) { auto* x = detail::ctx(c); x->record->putOp(Op::Restore); x->shadowRestore(); }
-inline void nvgReset(NVGcontext* c)   { auto* x = detail::ctx(c); x->record->putOp(Op::Reset); x->shadowResetTop(); }
+inline void nvgSave(NVGcontext* c)    { auto* x = detail::ctx(c); x->record->putOp(Op::Save); }
+inline void nvgRestore(NVGcontext* c) { auto* x = detail::ctx(c); x->record->putOp(Op::Restore);}
+inline void nvgReset(NVGcontext* c)   { auto* x = detail::ctx(c); x->record->putOp(Op::Reset); }
 
 // --- style ---
 inline void nvgShapeAntiAlias(NVGcontext* c, int enabled) { auto& b = detail::rec(c); b.putOp(Op::ShapeAntiAlias); b.put(enabled); }
@@ -552,52 +514,39 @@ inline void nvgLineCap(NVGcontext* c, int cap)            { auto& b = detail::re
 inline void nvgLineJoin(NVGcontext* c, int join)          { auto& b = detail::rec(c); b.putOp(Op::LineJoin); b.put(join); }
 inline void nvgGlobalAlpha(NVGcontext* c, float alpha)    { auto& b = detail::rec(c); b.putOp(Op::GlobalAlpha); b.put(alpha); }
 
-// --- transforms (also update the shadow transform, mirroring nanovg.cpp) ---
+// --- transforms ---
 inline void nvgResetTransform(NVGcontext* c)
 {
     auto* x = detail::ctx(c); x->record->putOp(Op::ResetTransform);
-    ::nvgTransformIdentity(x->topXform());
 }
 inline void nvgTransform(NVGcontext* c, float a, float b_, float cc, float d, float e, float f)
 {
     auto* x = detail::ctx(c); auto& b = *x->record; b.putOp(Op::Transform);
     b.put(a); b.put(b_); b.put(cc); b.put(d); b.put(e); b.put(f);
-    float t[6] = { a, b_, cc, d, e, f }; ::nvgTransformPremultiply(x->topXform(), t);
 }
 inline void nvgTranslate(NVGcontext* c, float x, float y)
 {
     auto* X = detail::ctx(c); auto& b = *X->record; b.putOp(Op::Translate); b.put(x); b.put(y);
-    float t[6]; ::nvgTransformTranslate(t, x, y); ::nvgTransformPremultiply(X->topXform(), t);
 }
 inline void nvgRotate(NVGcontext* c, float angle)
 {
     auto* x = detail::ctx(c); auto& b = *x->record; b.putOp(Op::Rotate); b.put(angle);
-    float t[6]; ::nvgTransformRotate(t, angle); ::nvgTransformPremultiply(x->topXform(), t);
 }
 inline void nvgSkewX(NVGcontext* c, float angle)
 {
     auto* x = detail::ctx(c); auto& b = *x->record; b.putOp(Op::SkewX); b.put(angle);
-    float t[6]; ::nvgTransformSkewX(t, angle); ::nvgTransformPremultiply(x->topXform(), t);
 }
 inline void nvgSkewY(NVGcontext* c, float angle)
 {
     auto* x = detail::ctx(c); auto& b = *x->record; b.putOp(Op::SkewY); b.put(angle);
-    float t[6]; ::nvgTransformSkewY(t, angle); ::nvgTransformPremultiply(x->topXform(), t);
 }
 inline void nvgScale(NVGcontext* c, float x, float y)
 {
     auto* X = detail::ctx(c); auto& b = *X->record; b.putOp(Op::Scale); b.put(x); b.put(y);
-    float t[6]; ::nvgTransformScale(t, x, y); ::nvgTransformPremultiply(X->topXform(), t);
 }
 inline void nvgTransformQuantize(NVGcontext* c)
 {
     auto* x = detail::ctx(c); x->record->putOp(Op::TransformQuantize);
-    // Mirror nvgTransformQuantize: subtract the subpixel offset from the top xform.
-    float* m = x->topXform();
-    float sx = x->devicePxRatio / std::sqrt(m[0] * m[0] + m[1] * m[1]);
-    float sy = x->devicePxRatio / std::sqrt(m[2] * m[2] + m[3] * m[3]);
-    m[4] -= m[4] - std::round(m[4] * sx) / sx;
-    m[5] -= m[5] - std::round(m[5] * sy) / sy;
 }
 
 // --- scissor ---
@@ -608,12 +557,10 @@ inline void nvgGlobalScissor(NVGcontext* c, int x, int y, int w, int h)
 inline void nvgScissor(NVGcontext* c, float x, float y, float w, float h)
 {
     auto* X = detail::ctx(c); auto& b = *X->record; b.putOp(Op::Scissor); b.put(x); b.put(y); b.put(w); b.put(h);
-    X->scissorRect[0] = x; X->scissorRect[1] = y; X->scissorRect[2] = w; X->scissorRect[3] = h;
 }
 inline void nvgRoundedScissor(NVGcontext* c, float x, float y, float w, float h, float r)
 {
     auto* X = detail::ctx(c); auto& b = *X->record; b.putOp(Op::RoundedScissor); b.put(x); b.put(y); b.put(w); b.put(h); b.put(r);
-    X->scissorRect[0] = x; X->scissorRect[1] = y; X->scissorRect[2] = w; X->scissorRect[3] = h;
 }
 inline void nvgIntersectScissor(NVGcontext* c, float x, float y, float w, float h)
 {
@@ -924,30 +871,10 @@ inline int nvgAddFallbackFont(NVGcontext* c, char const* baseFont, char const* f
 inline void nvgResetFallbackFontsId(NVGcontext* c, int baseFont) { ::nvgResetFallbackFontsId(detail::real(c), baseFont); }
 inline void nvgResetFallbackFonts(NVGcontext* c, char const* baseFont) { ::nvgResetFallbackFonts(detail::real(c), baseFont); }
 
-// --- queries answered from shadow state (correct during deferred recording) ---
-inline void nvgCurrentScissor(NVGcontext* c, float* x, float* y, float* w, float* h)
-{
-    auto* X = detail::ctx(c);
-    *x = X->scissorRect[0]; *y = X->scissorRect[1]; *w = X->scissorRect[2]; *h = X->scissorRect[3];
-}
-// nvgCurrentPixelScale is just the device pixel ratio in nanovg.cpp, which we
-// cache at nvgBeginFrame; forwarding to the real ctx would give the previous
-// frame's value while a frame is being recorded.
+
 inline float nvgCurrentPixelScale(NVGcontext* c) { return detail::ctx(c)->devicePxRatio; }
 inline void setCurrentPixelScale(NVGcontext* c, float const devicePixelRatio) { detail::ctx(c)->devicePxRatio = devicePixelRatio; }
-inline void nvgCurrentTransform(NVGcontext* c, float* xform)
-{
-    if (xform) std::memcpy(xform, detail::ctx(c)->topXform(), sizeof(float) * 6);
-}
-inline void nvgTransformGetSubpixelOffset(NVGcontext* c, float* tx, float* ty)
-{
-    auto* X = detail::ctx(c);
-    float const* m = X->topXform();
-    float sx = X->devicePxRatio / std::sqrt(m[0] * m[0] + m[1] * m[1]);
-    float sy = X->devicePxRatio / std::sqrt(m[2] * m[2] + m[3] * m[3]);
-    *tx = m[4] - std::round(m[4] * sx) / sx;
-    *ty = m[5] - std::round(m[5] * sy) / sy;
-}
+
 inline int nvgGetFontFaceId(NVGcontext* c) { return ::nvgGetFontFaceId(detail::real(c)); }
 inline float nvgGetFontSize(NVGcontext* c) { return ::nvgGetFontSize(detail::real(c)); }
 inline float nvgGetStrokeWidth(NVGcontext* c) { return ::nvgGetStrokeWidth(detail::real(c)); }
