@@ -1551,7 +1551,7 @@ error:
     _lastUniformOffset = 0;
     
     
-    MNVGcall* call = renderData->calls[0];
+    MNVGcall* call = renderData->calls;
     for (int i = 0; i < renderData->ncalls;)
     {
         MNVGblend* blend = &call->blendFunc;
