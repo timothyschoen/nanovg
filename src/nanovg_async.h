@@ -26,6 +26,15 @@
 //   nanovg::bindFramebuffer(nvg, fbo);                  // records backend FBO bind
 //   nanovg::performRender(nvg);                        // replays onto realCtx
 //
+//   // ---- optional: cache repeated producer-side drawing command streams ----
+//   nanovg::CommandBuffer cached;
+//   cached.clear();
+//   {
+//       nanovg::ScopedCommandRecorder recorder(nvg, cached);
+//       drawExpensiveStaticObject(nvg);
+//   }
+//   nanovg::replay(nvg, cached);                        // appends into this frame
+//
 //   // ---- teardown ----
 //   nanovg::destroy(nvg);
 //   nvgDeleteContext(realCtx);
@@ -48,6 +57,9 @@
 //  * Font resources and text queries run synchronously against the real context.
 //    Image and framebuffer resources return virtual ids/handles and are resolved
 //    during replay on the render thread.
+//  * CommandBuffer caching is producer-side only. Cache regular drawing/state/text
+//    emission; keep frame boundaries, framebuffer/resource lifecycle, and persistent
+//    render-thread cache creation (e.g. nvgSavePath) outside cached replay regions.
 //
 
 #ifndef NANOVG_ASYNC_H
@@ -170,7 +182,8 @@ enum class Op : uint8_t {
 };
 
 // ---------------------------------------------------------------------------
-// A single recorded frame: a tightly packed, reusable byte buffer.
+// A recorded command stream: a tightly packed, reusable byte buffer. Most
+// instances hold a full frame; producer-side caches can hold partial draw streams.
 //
 // Arguments are appended by value with memcpy (so unaligned access is never a
 // problem). reset() keeps the underlying storage, so after a few warm-up frames
@@ -178,7 +191,7 @@ enum class Op : uint8_t {
 // ---------------------------------------------------------------------------
 class CommandBuffer {
 public:
-    explicit CommandBuffer(size_t initialBytes)
+    explicit CommandBuffer(size_t initialBytes = 64)
     {
         if (initialBytes < 64)
             initialBytes = 64;
@@ -187,7 +200,9 @@ public:
 
     // --- writing (producer thread) ---
     inline void reset() noexcept { size_ = 0; }
+    inline void clear() noexcept { reset(); }
     inline size_t size() const noexcept { return size_; }
+    inline bool empty() const noexcept { return size_ == 0; }
 
     template <typename T>
     inline void put(T const& value)
@@ -199,6 +214,20 @@ public:
     }
 
     inline void putOp(Op op) { put(static_cast<uint8_t>(op)); }
+
+    inline void append(CommandBuffer const& other)
+    {
+        if (other.size_ == 0)
+            return;
+
+        size_t const oldSize = size_;
+        ensure(other.size_);
+        if (&other == this)
+            std::memcpy(storage_.data() + oldSize, storage_.data(), oldSize);
+        else
+            std::memcpy(storage_.data() + oldSize, other.storage_.data(), other.size_);
+        size_ = oldSize + other.size_;
+    }
 
     // Copies n raw bytes inline (length-prefixed) - used for text/font strings.
     inline void putBytes(void const* src, uint32_t n)
@@ -444,6 +473,38 @@ namespace detail {
     inline Context* ctx(NVGcontext* c) { return reinterpret_cast<Context*>(c); }
     inline CommandBuffer& rec(NVGcontext* c) { return *reinterpret_cast<Context*>(c)->record; }
     inline NVGcontext* real(NVGcontext* c) { return reinterpret_cast<Context*>(c)->real; }
+}
+
+// Temporarily record async drawing calls into `target` instead of the current
+// frame. This is producer-thread-only and assumes scopes are not nested.
+class ScopedCommandRecorder {
+public:
+    ScopedCommandRecorder(NVGcontext* c, CommandBuffer& target)
+        : context_(detail::ctx(c)), previous_(context_->record)
+    {
+        context_->record = &target;
+    }
+
+    ~ScopedCommandRecorder()
+    {
+        context_->record = previous_;
+    }
+
+    ScopedCommandRecorder(ScopedCommandRecorder const&) = delete;
+    ScopedCommandRecorder& operator=(ScopedCommandRecorder const&) = delete;
+
+private:
+    Context* context_;
+    CommandBuffer* previous_;
+};
+
+// Producer-thread replay: append previously recorded async commands into the
+// frame currently being recorded. Commands must come from the same async context
+// because virtual resource ids are context-owned. The render thread still
+// performs real replay.
+inline void replay(NVGcontext* c, CommandBuffer const& commands)
+{
+    detail::rec(c).append(commands);
 }
 
 // ===========================================================================

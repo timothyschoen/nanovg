@@ -72,6 +72,7 @@ void* nvg__getUptr(void* ctx);
 #define nvgReadPixels(nvg, image, x, y, w, h, total_h, data) nvgluReadPixels(nvg, image, x, y, w, h, total_h, data)
 #define nvgBlitFramebuffer(nvg, fb, x, y, w, h) nvgluBlitFramebuffer(nvg, fb, x, y, w, h)
 #define nvgClear(nvg) glDisable(GL_SCISSOR_TEST); \
+                      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE); \
                       glClearColor(0, 0, 0, 0); \
                       glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT); \
                       glEnable(GL_SCISSOR_TEST);
@@ -881,7 +882,9 @@ int nvg__renderCreate(void* uptr);
 int nvg__renderCreateTexture(void* uptr, int type, int w, int h, int imageFlags, const unsigned char* data);
 int nvg__renderDeleteTexture(void* uptr, int image);
 int nvg__renderUpdateTexture(void* uptr, int image, int x, int y, int w, int h, const unsigned char* data);
+int nvg__renderUpdateTextureWithStride(void* uptr, int image, int x, int y, int w, int h, int stride, const unsigned char* data);
 int nvg__renderGetTextureSize(void* uptr, int image, int* w, int* h);
+int nvg__renderGetMaxTextureSize(void* uptr);
 int nvg__renderGetImageTextureId(void* uptr, int handle);
 void nvg__renderViewport(void* uptr, float width, float height, float devicePixelRatio);
 void nvg__renderCancel(void* uptr);

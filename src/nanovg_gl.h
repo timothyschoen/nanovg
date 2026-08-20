@@ -515,6 +515,34 @@ int nvg__renderUpdateTexture(void* uptr, int image, int x, int y, int w, int h, 
     return 1;
 }
 
+int nvg__renderUpdateTextureWithStride(void* uptr, int image, int x, int y, int w, int h, int stride, const unsigned char* data)
+{
+    GLNVGcontext* gl = (GLNVGcontext*)uptr;
+    GLNVGtexture* tex = glnvg__findTexture(gl, image);
+    int bytesPerPixel = 1;
+
+    if (tex == NULL) return 0;
+    if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB)
+        bytesPerPixel = 4;
+    if (stride <= 0)
+        stride = w * bytesPerPixel;
+    if ((stride % bytesPerPixel) != 0)
+        return 0;
+
+    glnvg__bindTexture(gl, tex->tex);
+
+    glnvg__updateTexPixelStoreiVals(1, 0, 0, stride / bytesPerPixel);
+
+    if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB)
+        glTexSubImage2D(GL_TEXTURE_2D, 0, x,y, w,h, GL_BGRA, GL_UNSIGNED_BYTE, data);
+    else
+        glTexSubImage2D(GL_TEXTURE_2D, 0, x,y, w,h, GL_RED, GL_UNSIGNED_BYTE, data);
+
+    glnvg__bindTexture(gl, 0);
+
+    return 1;
+}
+
 int nvg__renderGetTextureSize(void* uptr, int image, int* w, int* h)
 {
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
@@ -523,6 +551,14 @@ int nvg__renderGetTextureSize(void* uptr, int image, int* w, int* h)
     *w = tex->width;
     *h = tex->height;
     return 1;
+}
+
+int nvg__renderGetMaxTextureSize(void* uptr)
+{
+    NVG_NOTUSED(uptr);
+    GLint maxTextureSize = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
+    return maxTextureSize;
 }
 
 int nvg_checkGLVersion()
@@ -1382,27 +1418,75 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
         
         glBindBuffer(GL_UNIFORM_BUFFER, gl->fragBuf);
         
-        for (i = 0; i < gl->ncalls; i++) {
+        for (i = 0; i < gl->ncalls; i++)
+        {
             GLNVGcall* call = &gl->calls[i];
-            glnvg__blendFuncSeparate(gl,&call->blendFunc);
-            switch (call->type) {
+
+            glnvg__blendFuncSeparate(gl, &call->blendFunc);
+
+            switch (call->type)
+            {
                 case GLNVG_FILL:
                     glnvg__fill(gl, call);
                     break;
+
                 case GLNVG_CONVEXFILL:
                     glnvg__convexFill(gl, call);
                     break;
+
                 case GLNVG_STROKE:
                     glnvg__stroke(gl, call);
                     break;
+
                 case GLNVG_TRIANGLES:
-                    glnvg__triangles(gl, call);
+                {
+                    const int first = call->triangleOffset;
+                    int count = call->triangleCount;
+
+                    GLNVGfragUniforms* uniforms =
+                        nvg__fragUniformPtr(gl, call->uniformOffset);
+
+                    while (i + 1 < gl->ncalls)
+                    {
+                        GLNVGcall* next = &gl->calls[i + 1];
+
+                        if (next->type != GLNVG_TRIANGLES)
+                            break;
+
+                        const bool contiguous = next->triangleOffset == first + count;
+                        const bool sameImage = next->image == call->image;
+                        const bool sameBlend = memcmp(&next->blendFunc, &call->blendFunc, sizeof(call->blendFunc)) == 0;
+                        GLNVGfragUniforms* nextUniforms = nvg__fragUniformPtr(gl, next->uniformOffset);
+                        const bool sameUniforms = memcmp(uniforms, nextUniforms, sizeof(GLNVGfragUniforms)) == 0;
+
+                        if (!contiguous || !sameImage || !sameBlend || !sameUniforms)
+                        {
+                            break;
+                        }
+
+                        count += next->triangleCount;
+                        ++i;
+                    }
+
+                    glnvg__setUniforms(
+                        gl,
+                        call->uniformOffset,
+                        call->image);
+
+                    glnvg__checkError(gl, "triangles fill");
+
+                    glDrawArrays(
+                        GL_TRIANGLES,
+                        first,
+                        count);
+
                     break;
+                }
+
                 default:
                     break;
             }
         }
-        
         glDisableVertexAttribArray(0);
         glDisableVertexAttribArray(1);
         glBindVertexArray(0);

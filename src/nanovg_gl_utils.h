@@ -39,13 +39,28 @@ static GLint defaultFBO = -1;
 
 // Corner radius (physical pixels) and per-corner enable flags for the blit pass.
 static float nvglu__cornerRadius = 0.0f;
-static bool  nvglu__roundBL      = false;
-static bool  nvglu__roundBR      = false;
 
-void nvgluSetCornerRadius(float radius, bool roundedBottomLeft, bool roundedBottomRight) {
+static void nvgluClearCurrentFramebufferTransparent() {
+    GLboolean previousColorMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+    glGetBooleanv(GL_COLOR_WRITEMASK, previousColorMask);
+
+    GLboolean scissorWasEnabled = glIsEnabled(GL_SCISSOR_TEST);
+
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+    glColorMask(previousColorMask[0], previousColorMask[1], previousColorMask[2], previousColorMask[3]);
+
+    if (scissorWasEnabled)
+        glEnable(GL_SCISSOR_TEST);
+    else
+        glDisable(GL_SCISSOR_TEST);
+}
+
+void nvgluSetCornerRadius(float radius) {
     nvglu__cornerRadius = radius;
-    nvglu__roundBL      = roundedBottomLeft;
-    nvglu__roundBR      = roundedBottomRight;
 }
 
 struct NVGLUblitShader {
@@ -54,8 +69,6 @@ struct NVGLUblitShader {
     GLuint vbo;
     GLint locScreenTexture;
     GLint locRadius;
-    GLint locRoundBL;
-    GLint locRoundBR;
 };
 
 std::unordered_map<NVGcontext*, NVGLUblitShader> blitShaders;
@@ -89,8 +102,6 @@ NVGLUblitShader getBlitShaderProgram(NVGcontext* ctx) {
     "in vec2 TexCoord;\n"
     "uniform sampler2D screenTexture;\n"
     "uniform float uRadius;\n"
-    "uniform int uRoundBL;\n"
-    "uniform int uRoundBR;\n"
     "\n"
     "// Coverage for a rounded corner: 1.0 fully inside, 0.0 fully outside,\n"
     "// with a 1px antialiased band on the edge of the quarter circle.\n"
@@ -101,17 +112,17 @@ NVGLUblitShader getBlitShaderProgram(NVGcontext* ctx) {
     "}\n"
     "\n"
     "void main() {\n"
-    "    if (uRadius > 0.0 && (uRoundBL != 0 || uRoundBR != 0)) {\n"
+    "    if (uRadius > 0.0) {\n"
     "        // gl_FragCoord origin is the bottom-left of the default framebuffer,\n"
     "        // so y < uRadius is the bottom edge.\n"
     "        vec2 res = vec2(textureSize(screenTexture, 0));\n"
     "        vec2 fc  = gl_FragCoord.xy;\n"
     "        float inside = 1.0;\n"
     "\n"
-    "        if (uRoundBL != 0 && fc.x < uRadius && fc.y < uRadius) {\n"
+    "        if (fc.x < uRadius && fc.y < uRadius) {\n"
     "            inside = cornerCoverage(fc, vec2(uRadius, uRadius), uRadius);\n"
     "        }\n"
-    "        else if (uRoundBR != 0 && fc.x > res.x - uRadius && fc.y < uRadius) {\n"
+    "        else if (fc.x > res.x - uRadius && fc.y < uRadius) {\n"
     "            inside = cornerCoverage(fc, vec2(res.x - uRadius, uRadius), uRadius);\n"
     "        }\n"
     "\n"
@@ -198,8 +209,6 @@ NVGLUblitShader getBlitShaderProgram(NVGcontext* ctx) {
     entry.vbo              = quadVBO;
     entry.locScreenTexture = glGetUniformLocation(shaderProgram, "screenTexture");
     entry.locRadius        = glGetUniformLocation(shaderProgram, "uRadius");
-    entry.locRoundBL       = glGetUniformLocation(shaderProgram, "uRoundBL");
-    entry.locRoundBR       = glGetUniformLocation(shaderProgram, "uRoundBR");
     blitShaders[ctx] = entry;
     return entry;
 }
@@ -214,10 +223,9 @@ void nvgluBlitFramebuffer(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, i
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
 
     // Clear to fully transparent so corner-discarded pixels show the compositor.
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    nvgluClearCurrentFramebufferTransparent();
 
-    bool cornersActive = (nvglu__cornerRadius > 0.0f) && (nvglu__roundBL || nvglu__roundBR);
+    bool cornersActive = nvglu__cornerRadius > 0.0f;
 
     // Enable blending so the AA band on the corner edge composites correctly
     // against the cleared (0,0,0,0) destination. Premultiplied source.
@@ -236,8 +244,6 @@ void nvgluBlitFramebuffer(NVGcontext* ctx, NVGLUframebuffer* fb, int x, int y, i
     glBindTexture(GL_TEXTURE_2D, fb->texture);
     glUniform1i(blit.locScreenTexture, 0);
     glUniform1f(blit.locRadius, cornersActive ? nvglu__cornerRadius : 0.0f);
-    glUniform1i(blit.locRoundBL, nvglu__roundBL ? 1 : 0);
-    glUniform1i(blit.locRoundBR, nvglu__roundBR ? 1 : 0);
 
     // Draw the fullscreen quad
     glBindVertexArray(blit.vao);
@@ -299,6 +305,8 @@ NVGLUframebuffer* nvgluCreateFramebuffer(NVGcontext* ctx, int w, int h, int imag
 #endif // GL_DEPTH24_STENCIL8
             goto error;
     }
+
+    nvgluClearCurrentFramebufferTransparent();
 
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
     glBindRenderbuffer(GL_RENDERBUFFER, defaultRBO);

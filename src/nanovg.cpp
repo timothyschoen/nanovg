@@ -134,14 +134,25 @@ struct StrokeCacheLine {
 using StrokeCache = std::unordered_map<uint32_t, StrokeCacheLine>;
 
 // A cached signed-distance-field glyph tile living on the real context (consumer thread), analogous
-// to the StrokeCache. `image` is a real alpha texture; (ex0,ey0,ew,eh) is the em-space rect the tile
-// covers, used to position the draw quad under the current transform. image <= 0 marks an empty glyph
+// to the StrokeCache. `image` is a real alpha texture atlas; (ex0,ey0,ew,eh) is the em-space rect the
+// tile covers, and (u0,v0,u1,v1) addresses the tile within the atlas. image == 0 marks an empty glyph
 // (e.g. space) that was handled but draws nothing.
 struct NVGSDFGlyph {
     int image;
     float ex0, ey0, ew, eh;
+    float u0, v0, u1, v1;
 };
 using SDFGlyphCache = std::unordered_map<uint64_t, NVGSDFGlyph>;
+
+struct NVGSDFAtlas {
+    int image;
+    int width;
+    int height;
+    int nextX;
+    int nextY;
+    int rowH;
+};
+using SDFGlyphAtlasCache = std::vector<NVGSDFAtlas>;
 
 struct NVGcontext {
     NVGbackend backend;
@@ -174,6 +185,7 @@ struct NVGcontext {
     int numCached;
     StrokeCache* strokeCache;
     SDFGlyphCache* sdfGlyphs;
+    SDFGlyphAtlasCache* sdfGlyphAtlases;
 };
 
 static inline float nvg__sqrtf(float a) { return sqrtf(a); }
@@ -369,6 +381,7 @@ NVGcontext* nvgCreateInternal(NVGbackend backend)
     
     ctx->strokeCache = new StrokeCache();
     ctx->sdfGlyphs = new SDFGlyphCache();
+    ctx->sdfGlyphAtlases = new SDFGlyphAtlasCache();
 
     return ctx;
     
@@ -405,11 +418,16 @@ void nvgDeleteInternal(NVGcontext* ctx)
         }
     }
 
-    if (ctx->sdfGlyphs != NULL) {
-        for (auto& [hash, glyph] : *ctx->sdfGlyphs) {
-            if (glyph.image > 0)
-                nvgDeleteImage(ctx, glyph.image);
+    if (ctx->sdfGlyphAtlases != NULL) {
+        for (auto& atlas : *ctx->sdfGlyphAtlases) {
+            if (atlas.image > 0)
+                nvgDeleteImage(ctx, atlas.image);
         }
+        delete ctx->sdfGlyphAtlases;
+        ctx->sdfGlyphAtlases = NULL;
+    }
+
+    if (ctx->sdfGlyphs != NULL) {
         delete ctx->sdfGlyphs;
         ctx->sdfGlyphs = NULL;
     }
@@ -3188,7 +3206,125 @@ static void nvg__renderText(NVGcontext* ctx, FONSstate* fons, NVGvertex* verts, 
     nvg__renderTriangles(ctx->backend, &paint, state->compositeOperation, &state->scissor, verts, nverts, ctx->fringeWidth, 1);
 }
 
-void nvgDrawSDFGlyph(NVGcontext* ctx, int image, float x, float y, float w, float h, NVGcolor color)
+static int nvg__sdfAtlasMaxTextureSize(NVGcontext* ctx)
+{
+    int maxTextureSize = nvg__renderGetMaxTextureSize(ctx->backend);
+    if (maxTextureSize <= 0)
+        maxTextureSize = NVG_MAX_FONTIMAGE_SIZE;
+    return nvg__maxi(4, maxTextureSize & ~3);
+}
+
+static int nvg__createSDFAtlas(NVGcontext* ctx, int minSide)
+{
+    if (ctx->sdfGlyphAtlases == NULL)
+        return 0;
+
+    int atlasSize = nvg__sdfAtlasMaxTextureSize(ctx);
+    minSide = nvg__maxi(4, (minSide + 3) & ~3);
+
+    while (atlasSize >= minSide) {
+        int image = nvg__renderCreateTexture(ctx->backend, NVG_TEXTURE_ALPHA, atlasSize, atlasSize, 0, NULL);
+        if (image > 0) {
+            ctx->sdfGlyphAtlases->push_back(NVGSDFAtlas());
+            NVGSDFAtlas& atlas = ctx->sdfGlyphAtlases->back();
+            atlas.image = image;
+            atlas.width = atlasSize;
+            atlas.height = atlasSize;
+            atlas.nextX = 0;
+            atlas.nextY = 0;
+            atlas.rowH = 0;
+            return 1;
+        }
+
+        atlasSize = (atlasSize / 2) & ~3;
+    }
+
+    return 0;
+}
+
+static int nvg__packSDFAtlasSlot(NVGSDFAtlas& atlas, int tileW, int tileH, int gutter, int* x, int* y)
+{
+    int const allocW = tileW + gutter * 2;
+    int const allocH = tileH + gutter * 2;
+
+    if (atlas.image <= 0 || allocW > atlas.width || allocH > atlas.height)
+        return 0;
+
+    if (atlas.nextX + allocW > atlas.width) {
+        atlas.nextX = 0;
+        atlas.nextY += atlas.rowH;
+        atlas.rowH = 0;
+    }
+
+    if (atlas.nextY + allocH > atlas.height)
+        return 0;
+
+    *x = atlas.nextX + gutter;
+    *y = atlas.nextY + gutter;
+    atlas.nextX += allocW;
+    atlas.rowH = nvg__maxi(atlas.rowH, allocH);
+    return 1;
+}
+
+static NVGSDFAtlas* nvg__allocSDFAtlasSlot(NVGcontext* ctx, int tileW, int tileH, int gutter, int* x, int* y)
+{
+    int const minSide = nvg__maxi(tileW + gutter * 2, tileH + gutter * 2);
+
+    if (ctx->sdfGlyphAtlases == NULL)
+        return NULL;
+
+    if (!ctx->sdfGlyphAtlases->empty()) {
+        NVGSDFAtlas& atlas = ctx->sdfGlyphAtlases->back();
+        if (nvg__packSDFAtlasSlot(atlas, tileW, tileH, gutter, x, y))
+            return &atlas;
+    }
+
+    if (!nvg__createSDFAtlas(ctx, minSide))
+        return NULL;
+
+    NVGSDFAtlas& atlas = ctx->sdfGlyphAtlases->back();
+    if (!nvg__packSDFAtlasSlot(atlas, tileW, tileH, gutter, x, y))
+        return NULL;
+
+    return &atlas;
+}
+
+static int nvg__uploadSDFGlyphToAtlas(NVGcontext* ctx, int tileW, int tileH, const unsigned char* pixels, NVGSDFGlyph* glyph)
+{
+    constexpr int sdfAtlasGutter = 4;
+
+    int x = 0, y = 0;
+    NVGSDFAtlas* atlas = nvg__allocSDFAtlasSlot(ctx, tileW, tileH, sdfAtlasGutter, &x, &y);
+    if (atlas == NULL)
+        return 0;
+
+    int const uploadX = x - sdfAtlasGutter;
+    int const uploadY = y - sdfAtlasGutter;
+    int const uploadW = tileW + sdfAtlasGutter * 2;
+    int const uploadH = tileH + sdfAtlasGutter * 2;
+    int const uploadStride = (uploadW + 255) & ~255;
+    std::vector<unsigned char> upload(static_cast<size_t>(uploadStride) * uploadH, 0);
+
+    for (int row = 0; row < tileH; row++) {
+        unsigned char* dst = &upload[static_cast<size_t>(row + sdfAtlasGutter) * uploadStride + sdfAtlasGutter];
+        memcpy(dst, pixels + static_cast<size_t>(row) * tileW, tileW);
+    }
+
+    if (!nvg__renderUpdateTextureWithStride(ctx->backend, atlas->image, uploadX, uploadY, uploadW, uploadH, uploadStride, upload.data()))
+        return 0;
+
+    float const invW = 1.0f / atlas->width;
+    float const invH = 1.0f / atlas->height;
+    glyph->image = atlas->image;
+    glyph->u0 = x * invW;
+    glyph->v0 = y * invH;
+    glyph->u1 = (x + tileW) * invW;
+    glyph->v1 = (y + tileH) * invH;
+    return 1;
+}
+
+static void nvg__drawSDFGlyphUV(NVGcontext* ctx, int image, float x, float y, float w, float h,
+                                float u0, float v0, float u1, float v1, NVGcolor color)
 {
     if (image <= 0 || w <= 0.0f || h <= 0.0f)
         return;
@@ -3211,13 +3347,13 @@ void nvgDrawSDFGlyph(NVGcontext* ctx, int image, float x, float y, float w, floa
     if (verts == NULL)
         return;
 
-    // UVs span the whole tile; s/t (line-AA channels) are unused for text and left at 0.
-    nvg__vset(&verts[0],       c[0], c[1], 0.0f, 0.0f, 0, 0);
-    nvg__vset(&verts[1 + rev], c[4], c[5], 1.0f, 1.0f, 0, 0);
-    nvg__vset(&verts[2 - rev], c[2], c[3], 1.0f, 0.0f, 0, 0);
-    nvg__vset(&verts[3],       c[0], c[1], 0.0f, 0.0f, 0, 0);
-    nvg__vset(&verts[4 + rev], c[6], c[7], 0.0f, 1.0f, 0, 0);
-    nvg__vset(&verts[5 - rev], c[4], c[5], 1.0f, 1.0f, 0, 0);
+    // s/t (line-AA channels) are unused for text and left at 0.
+    nvg__vset(&verts[0],       c[0], c[1], u0, v0, 0, 0);
+    nvg__vset(&verts[1 + rev], c[4], c[5], u1, v1, 0, 0);
+    nvg__vset(&verts[2 - rev], c[2], c[3], u1, v0, 0, 0);
+    nvg__vset(&verts[3],       c[0], c[1], u0, v0, 0, 0);
+    nvg__vset(&verts[4 + rev], c[6], c[7], u0, v1, 0, 0);
+    nvg__vset(&verts[5 - rev], c[4], c[5], u1, v1, 0, 0);
 
     NVGpaint paint;
     memset(&paint, 0, sizeof(paint));
@@ -3234,12 +3370,17 @@ void nvgDrawSDFGlyph(NVGcontext* ctx, int image, float x, float y, float w, floa
     nvg__renderTriangles(ctx->backend, &paint, state->compositeOperation, &state->scissor, verts, 6, ctx->fringeWidth, 1);
 }
 
+void nvgDrawSDFGlyph(NVGcontext* ctx, int image, float x, float y, float w, float h, NVGcolor color)
+{
+    nvg__drawSDFGlyphUV(ctx, image, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color);
+}
+
 // Builds and caches an SDF tile from the CURRENT (already flattened) path. Runs on the consumer /
 // render thread via nvgSaveSDFGlyph. The path is expected to have been recorded under a plain scale
 // transform (the caller uses referenceEmPx); we read that scale back off the transform so the stored
 // rect is in em space, independent of the reference size. Encoding matches superSDF / sdfCov:
 //   byte = clamp(127 + 32 * signedDistanceInTilePixels), positive == inside.
-static void nvg__buildGlyphSDF(NVGcontext* ctx, uint64_t hash)
+static int nvg__buildGlyphSDF(NVGcontext* ctx, uint64_t hash)
 {
     constexpr int sdfPadding = 4;
     constexpr float sdfPixelDist = 32.0f;
@@ -3252,8 +3393,8 @@ static void nvg__buildGlyphSDF(NVGcontext* ctx, uint64_t hash)
 
     // Empty glyph (e.g. space): store a sentinel so the producer stops re-recording it.
     if (cache->npaths == 0 || cache->bounds[2] <= cache->bounds[0] || cache->bounds[3] <= cache->bounds[1]) {
-        (*ctx->sdfGlyphs)[hash] = NVGSDFGlyph { 0, 0.0f, 0.0f, 0.0f, 0.0f };
-        return;
+        (*ctx->sdfGlyphs)[hash] = NVGSDFGlyph { 0, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+        return 1;
     }
 
     float const S = nvg__maxf(nvg__getAverageScale(state->xform), 1.0e-6f);
@@ -3308,8 +3449,16 @@ static void nvg__buildGlyphSDF(NVGcontext* ctx, uint64_t hash)
         }
     }
 
-    int const image = nvgCreateImageAlpha(ctx, W, H, 0, pixels.data());
-    (*ctx->sdfGlyphs)[hash] = NVGSDFGlyph { image, sx0 / S, sy0 / S, W / S, H / S };
+    NVGSDFGlyph glyph = {};
+    if (!nvg__uploadSDFGlyphToAtlas(ctx, W, H, pixels.data(), &glyph))
+        return 0;
+
+    glyph.ex0 = sx0 / S;
+    glyph.ey0 = sy0 / S;
+    glyph.ew = W / S;
+    glyph.eh = H / S;
+    (*ctx->sdfGlyphs)[hash] = glyph;
+    return 1;
 }
 
 // Consumer thread: generate the SDF tile for `hash` from the current path and cache it. Returns 1 on
@@ -3319,10 +3468,12 @@ int32_t nvgSaveSDFGlyph(NVGcontext* ctx, uint64_t hash)
 {
     // Already generated? Happens when the same glyph appears several times before the producer sees
     // the confirmation (e.g. "aaa" on first paint) — regenerating would leak the previous texture.
-    if (ctx->sdfGlyphs->find(hash) != ctx->sdfGlyphs->end())
-        return 1;
+    auto const existing = ctx->sdfGlyphs->find(hash);
+    if (existing != ctx->sdfGlyphs->end())
+        return existing->second.image >= 0 ? 1 : -1;
 
-    nvg__buildGlyphSDF(ctx, hash);
+    if (!nvg__buildGlyphSDF(ctx, hash))
+        return -1;
     auto const it = ctx->sdfGlyphs->find(hash);
     if (it == ctx->sdfGlyphs->end() || it->second.image < 0)
         return -1;
@@ -3338,7 +3489,7 @@ int nvgFillSDFGlyph(NVGcontext* ctx, uint64_t hash, NVGcolor color)
         return 0;
     NVGSDFGlyph const& g = it->second;
     if (g.image > 0)
-        nvgDrawSDFGlyph(ctx, g.image, g.ex0, g.ey0, g.ew, g.eh, color);
+        nvg__drawSDFGlyphUV(ctx, g.image, g.ex0, g.ey0, g.ew, g.eh, g.u0, g.v0, g.u1, g.v1, color);
     return 1;
 }
 

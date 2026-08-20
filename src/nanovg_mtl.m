@@ -256,6 +256,8 @@ stencilOnlyPipelineState;
                               width:(int*)width
                              height:(int*)height;
 
+- (int)renderGetMaxTextureSize;
+
 - (int)renderGetTextureValid:(int)image;
 
 - (void)blitTextureToScreen:(MNVGtexture*)mnvgTexture;
@@ -283,6 +285,14 @@ stencilOnlyPipelineState;
                                   y:(int)y
                               width:(int)width
                              height:(int)height
+                               data:(const unsigned char*)data;
+
+- (int)renderUpdateTextureWithImage:(int)image
+                                  x:(int)x
+                                  y:(int)y
+                              width:(int)width
+                             height:(int)height
+                        bytesPerRow:(NSUInteger)bytesPerRow
                                data:(const unsigned char*)data;
 
 - (void)renderViewportWithWidth:(float)width
@@ -416,6 +426,11 @@ int nvg__renderGetTextureSize(void* uptr, int image, int* w, int* h) {
     return [mtl renderGetTextureSizeForImage:image width:w height:h];
 }
 
+int nvg__renderGetMaxTextureSize(void* uptr) {
+    MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
+    return [mtl renderGetMaxTextureSize];
+}
+
 void nvg__renderStroke(void* uptr, NVGpaint* paint,
                        NVGcompositeOperationState compositeOperation,
                        NVGscissor* scissor, float fringe,
@@ -455,6 +470,19 @@ int nvg__renderUpdateTexture(void* uptr, int image, int x, int y,
                                            y:y
                                        width:w
                                       height:h
+                                        data:data];
+}
+
+int nvg__renderUpdateTextureWithStride(void* uptr, int image, int x, int y,
+                                       int w, int h, int stride,
+                                       const unsigned char* data) {
+    MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
+    return [mtl renderUpdateTextureWithImage:image
+                                           x:x
+                                           y:y
+                                       width:w
+                                      height:h
+                                 bytesPerRow:(NSUInteger)stride
                                         data:data];
 }
 
@@ -1523,21 +1551,72 @@ error:
     _lastUniformOffset = 0;
     
     
-    MNVGcall* call = &renderData->calls[0];
-    for (int i = renderData->ncalls; i--; ++call) {
+    MNVGcall* call = renderData->calls[0];
+    for (int i = 0; i < renderData->ncalls;)
+    {
         MNVGblend* blend = &call->blendFunc;
+
         [self updateRenderPipelineStatesForBlend:blend
                                      pixelFormat:colorTexture.pixelFormat];
+
+        if (call->type == MNVG_TRIANGLES)
+        {
+            int vertexStart = call->triangleOffset;
+            int vertexCount = call->triangleCount;
+
+            MNVGcall* next = call + 1;
+            int numCalls = 1;
+
+            while (i + numCalls < renderData->ncalls)
+            {
+                if (next->type != MNVG_TRIANGLES)
+                    break;
+
+                // Must use the same texture.
+                if (next->image != call->image)
+                    break;
+
+                // Must use the same shader uniforms.
+                if (next->uniformOffset != call->uniformOffset)
+                    break;
+
+                // Must use the same blending.
+                if (memcmp(&next->blendFunc,
+                           &call->blendFunc,
+                           sizeof(MNVGblend)) != 0)
+                    break;
+
+                // Geometry must immediately follow the previous geometry.
+                if (next->triangleOffset != vertexStart + vertexCount)
+                    break;
+
+                vertexCount += next->triangleCount;
+
+                ++next;
+                ++numCalls;
+            }
+
+            [self setUniforms:call->uniformOffset image:call->image];
+
+            [_renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle
+                               vertexStart:vertexStart
+                               vertexCount:vertexCount];
+
+            call += numCalls;
+            i += numCalls;
+            continue;
+        }
         if (call->type == MNVG_FILL)
             [self fill:call];
         else if (call->type == MNVG_CONVEXFILL)
             [self convexFill:call];
         else if (call->type == MNVG_STROKE)
             [self stroke:call];
-        else if (call->type == MNVG_TRIANGLES)
-            [self triangles:call];
+
+        ++call;
+        ++i;
     }
-    
+
     [_renderEncoder endEncoding];
     _renderEncoder = nil;
     
@@ -1563,6 +1642,10 @@ error:
     *width = (int)tex->tex.width;
     *height = (int)tex->tex.height;
     return 1;
+}
+
+- (int)renderGetMaxTextureSize {
+    return 8192;
 }
 
 - (int)renderGetTextureValid:(int)image {
@@ -1778,6 +1861,59 @@ error:
                bytesPerRow:bytesPerRow];
 #endif
     
+    return 1;
+}
+
+- (int)renderUpdateTextureWithImage:(int)image
+                                  x:(int)x
+                                  y:(int)y
+                              width:(int)width
+                             height:(int)height
+                        bytesPerRow:(NSUInteger)bytesPerRow
+                               data:(const unsigned char*)data {
+    MNVGtexture* tex = [self findTexture:image];
+
+    if (tex == nil) return 0;
+
+    if (bytesPerRow == 0) {
+        if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB) {
+            bytesPerRow = width * 4;
+        } else {
+            bytesPerRow = width;
+        }
+    }
+
+#if TARGET_OS_SIMULATOR
+    const NSUInteger kBufferSize = bytesPerRow * height;
+    id<MTLBuffer> buffer = [_metalLayer.device
+                            newBufferWithLength:kBufferSize
+                            options:MTLResourceStorageModeShared];
+    memcpy([buffer contents], data, kBufferSize);
+
+    id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
+    id<MTLBlitCommandEncoder> blitCommandEncoder = [commandBuffer
+                                                    blitCommandEncoder];
+    [blitCommandEncoder copyFromBuffer:buffer
+                          sourceOffset:0
+                     sourceBytesPerRow:bytesPerRow
+                   sourceBytesPerImage:kBufferSize
+                            sourceSize:MTLSizeMake(width, height, 1)
+                             toTexture:tex->tex
+                      destinationSlice:0
+                      destinationLevel:0
+                     destinationOrigin:MTLOriginMake(x, y, 0)];
+
+    [blitCommandEncoder endEncoding];
+    [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
+#else
+    id<MTLTexture> texture = tex->tex;
+    [texture replaceRegion:MTLRegionMake2D(x, y, width, height)
+               mipmapLevel:0
+                 withBytes:data
+               bytesPerRow:bytesPerRow];
+#endif
+
     return 1;
 }
 
