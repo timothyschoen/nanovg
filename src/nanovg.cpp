@@ -2810,20 +2810,35 @@ int nvgFillCachedPath(NVGcontext* ctx, uint32_t pathId)
         nvgTransformInverse(totalTransform, cacheEntry.currentTransform);
         nvgTransformMultiply(totalTransform, state->xform);
         
+        bool hasBounds = false;
+        auto updateBounds = [&cacheEntry, &hasBounds](NVGvertex const& vertex) {
+            if (!hasBounds) {
+                cacheEntry.bounds[0] = cacheEntry.bounds[2] = vertex.x;
+                cacheEntry.bounds[1] = cacheEntry.bounds[3] = vertex.y;
+                hasBounds = true;
+                return;
+            }
+
+            cacheEntry.bounds[0] = nvg__minf(cacheEntry.bounds[0], vertex.x);
+            cacheEntry.bounds[1] = nvg__minf(cacheEntry.bounds[1], vertex.y);
+            cacheEntry.bounds[2] = nvg__maxf(cacheEntry.bounds[2], vertex.x);
+            cacheEntry.bounds[3] = nvg__maxf(cacheEntry.bounds[3], vertex.y);
+        };
+
         // Apply transform
         for (int i = 0; i < cacheEntry.paths.size(); i++) {
             auto& cachedPath = cacheEntry.paths[i];
             for(int j = 0; j < cachedPath.nstroke; j++)
             {
                 nvgTransformPoint(&cachedPath.stroke[j].x, &cachedPath.stroke[j].y, totalTransform, cachedPath.stroke[j].x, cachedPath.stroke[j].y);
+                updateBounds(cachedPath.stroke[j]);
             }
             for(int j = 0; j < cachedPath.nfill; j++)
             {
                 nvgTransformPoint(&cachedPath.fill[j].x, &cachedPath.fill[j].y, totalTransform, cachedPath.fill[j].x, cachedPath.fill[j].y);
+                updateBounds(cachedPath.fill[j]);
             }
         }
-        nvgTransformPoint(&cacheEntry.bounds[0], &cacheEntry.bounds[1], totalTransform, cacheEntry.bounds[0], cacheEntry.bounds[1]);
-        nvgTransformPoint(&cacheEntry.bounds[2], &cacheEntry.bounds[3], totalTransform, cacheEntry.bounds[2], cacheEntry.bounds[3]);
         
         memcpy(cacheEntry.currentTransform, state->xform, 6*sizeof(float));
         
