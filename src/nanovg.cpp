@@ -408,9 +408,9 @@ void nvgDeleteInternal(NVGcontext* ctx)
     if (ctx->commands != NULL) free(ctx->commands);
     if (ctx->cache != NULL) nvg__deletePathCache(ctx->cache);
     
-    if (ctx->fs)
-        fonsDeleteInternal(ctx->fs);
-    
+    //if (ctx->fs)
+    //    fonsDeleteInternal(ctx->fs);
+
     for (int i = 0; i < NVG_MAX_FONTIMAGES; i++) {
         if (ctx->fontImages[i] != 0) {
             nvgDeleteImage(ctx, ctx->fontImages[i]);
@@ -466,7 +466,7 @@ void nvgCancelFrame(NVGcontext* ctx)
 
 void nvgEndFrame(NVGcontext* ctx)
 {
-    nvg__flushTextTexture(ctx);
+    //nvg__flushTextTexture(ctx); disabled because plugdata doesn't use nanovg text rendering
     nvg__renderFlush(ctx->backend, ctx->globalScissor);
     if (ctx->fontImageIdx != 0) {
         int fontImage = ctx->fontImages[ctx->fontImageIdx];
@@ -699,6 +699,8 @@ static void nvg__setPaintColor(NVGpaint* p, NVGcolor color)
 
 static void nvg__fonsSetup(NVGcontext* ctx, FONSstate* fons)  //, float scale)
 {
+    return;
+    
     NVGstate* state = nvg__getState(ctx);
     fonsInitState(ctx->fs, fons);
     fonsSetFont(fons, state->fontId);
@@ -929,6 +931,12 @@ void nvgFillColor(NVGcontext* ctx, NVGcolor color)
 {
     NVGstate* state = nvg__getState(ctx);
     nvg__setPaintColor(&state->fill, color);
+}
+
+NVGcolor nvgCurrentFillColor(NVGcontext* ctx)
+{
+    NVGstate* state = nvg__getState(ctx);
+    return state->fill.innerColor;
 }
 
 void nvgFillPaint(NVGcontext* ctx, NVGpaint paint)

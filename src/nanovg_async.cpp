@@ -413,6 +413,16 @@ void Context::replayBuffer(CommandBuffer const& buf)
             if (backendFunctions.clear)
                 backendFunctions.clear(R);
             break;
+        case Op::RenderCallback: {
+            auto const callback = buf.get<RenderCallback>(pos);
+            uint32_t len = 0;
+            auto const* data = buf.getBytes(pos, len);
+            if (callback != nullptr)
+                callback(R, data, len);
+        } break;
+        case Op::RenderOwnedCallback:
+            buf.callOwnedRenderCallback(R, pos);
+            break;
 
         // --- composite ---
         case Op::GlobalCompositeOperation:

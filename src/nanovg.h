@@ -337,6 +337,9 @@ void nvgStrokePaint(NVGcontext* ctx, NVGpaint paint);
 // Sets current fill style to a solid color.
 void nvgFillColor(NVGcontext* ctx, NVGcolor color);
 
+// Returns the current solid fill colour.
+NVGcolor nvgCurrentFillColor(NVGcontext* ctx);
+
 // Sets current fill style to a paint, which can be a one of the gradients or a pattern.
 void nvgFillPaint(NVGcontext* ctx, NVGpaint paint);
 

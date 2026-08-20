@@ -57,6 +57,9 @@
 //  * Font resources and text queries run synchronously against the real context.
 //    Image and framebuffer resources return virtual ids/handles and are resolved
 //    during replay on the render thread.
+//  * Render callbacks run during replay with the real NanoVG context. Use the
+//    raw byte overload for POD data, or the owned-payload overload for C++ data
+//    that needs construction/destruction if a frame is coalesced away.
 //  * CommandBuffer caching is producer-side only. Cache regular drawing/state/text
 //    emission; keep frame boundaries, framebuffer/resource lifecycle, and persistent
 //    render-thread cache creation (e.g. nvgSavePath) outside cached replay regions.
@@ -69,11 +72,13 @@
 #include <cstring>
 #include <cstddef>
 #include <cmath>
+#include <atomic>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include <type_traits>
+#include <utility>
 
 #include "nanovg.h"
 
@@ -93,6 +98,8 @@ enum class Op : uint8_t {
     BindMainFramebuffer,
     Viewport,
     Clear,
+    RenderCallback,
+    RenderOwnedCallback,
     // composite
     GlobalCompositeOperation,
     GlobalCompositeBlendFunc,
@@ -181,6 +188,10 @@ enum class Op : uint8_t {
     FillSDFGlyph,
 };
 
+using RenderCallback = void (*)(NVGcontext* realContext, void const* data, uint32_t dataSize);
+using OwnedRenderCallback = void (*)(NVGcontext* realContext, void const* data);
+using OwnedRenderPayloadDestroy = void (*)(void* data);
+
 // ---------------------------------------------------------------------------
 // A recorded command stream: a tightly packed, reusable byte buffer. Most
 // instances hold a full frame; producer-side caches can hold partial draw streams.
@@ -190,6 +201,28 @@ enum class Op : uint8_t {
 // no further allocation happens while recording.
 // ---------------------------------------------------------------------------
 class CommandBuffer {
+    struct OwnedRenderPayload {
+        std::atomic<uint32_t> refCount { 1 };
+        OwnedRenderCallback callback = nullptr;
+        void* data = nullptr;
+        OwnedRenderPayloadDestroy destroy = nullptr;
+
+        void incReferenceCount() noexcept
+        {
+            refCount.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        void decReferenceCount() noexcept
+        {
+            if (refCount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                if (destroy != nullptr)
+                    destroy(data);
+
+                delete this;
+            }
+        }
+    };
+
 public:
     explicit CommandBuffer(size_t initialBytes = 64)
     {
@@ -198,8 +231,18 @@ public:
         storage_.resize(initialBytes);
     }
 
+    ~CommandBuffer()
+    {
+        releaseOwnedRenderPayloads();
+    }
+
     // --- writing (producer thread) ---
-    inline void reset() noexcept { size_ = 0; }
+    inline void reset() noexcept
+    {
+        releaseOwnedRenderPayloads();
+        size_ = 0;
+    }
+
     inline void clear() noexcept { reset(); }
     inline size_t size() const noexcept { return size_; }
     inline bool empty() const noexcept { return size_ == 0; }
@@ -220,6 +263,11 @@ public:
         if (other.size_ == 0)
             return;
 
+        auto renderPayloads = other.ownedRenderPayloads_;
+        for (auto* payload : renderPayloads)
+            if (payload != nullptr)
+                payload->incReferenceCount();
+
         size_t const oldSize = size_;
         ensure(other.size_);
         if (&other == this)
@@ -227,6 +275,8 @@ public:
         else
             std::memcpy(storage_.data() + oldSize, other.storage_.data(), other.size_);
         size_ = oldSize + other.size_;
+
+        ownedRenderPayloads_.insert(ownedRenderPayloads_.end(), renderPayloads.begin(), renderPayloads.end());
     }
 
     // Copies n raw bytes inline (length-prefixed) - used for text/font strings.
@@ -261,7 +311,34 @@ public:
         return p;
     }
 
+    inline void putOwnedRenderCallback(OwnedRenderCallback callback, void* data, OwnedRenderPayloadDestroy destroy)
+    {
+        auto* payload = new OwnedRenderPayload();
+        payload->callback = callback;
+        payload->data = data;
+        payload->destroy = destroy;
+        ownedRenderPayloads_.push_back(payload);
+        put(reinterpret_cast<uintptr_t>(payload));
+    }
+
+    inline void callOwnedRenderCallback(NVGcontext* realContext, size_t& pos) const
+    {
+        auto const* payload = reinterpret_cast<OwnedRenderPayload const*>(get<uintptr_t>(pos));
+
+        if (payload != nullptr && payload->callback != nullptr)
+            payload->callback(realContext, payload->data);
+    }
+
 private:
+    void releaseOwnedRenderPayloads() noexcept
+    {
+        for (auto* payload : ownedRenderPayloads_)
+            if (payload != nullptr)
+                payload->decReferenceCount();
+
+        ownedRenderPayloads_.clear();
+    }
+
     inline void ensure(size_t extra)
     {
         size_t const need = size_ + extra;
@@ -279,6 +356,7 @@ private:
     }
 
     std::vector<uint8_t> storage_;
+    std::vector<OwnedRenderPayload*> ownedRenderPayloads_;
     size_t size_ = 0;
 };
 
@@ -505,6 +583,66 @@ private:
 inline void replay(NVGcontext* c, CommandBuffer const& commands)
 {
     detail::rec(c).append(commands);
+}
+
+// Queue custom render-thread work. `data` is copied into the command stream and
+// is valid only for the duration of the callback during replay. The callback
+// receives the real backend NVGcontext, so call raw ::nvg* functions inside it.
+inline void nvgRenderCallback(NVGcontext* c, RenderCallback callback, void const* data = nullptr, uint32_t dataSize = 0)
+{
+    if (callback == nullptr)
+        return;
+
+    auto& b = detail::rec(c);
+    b.putOp(Op::RenderCallback);
+    b.put(callback);
+    b.putBytes(data, data != nullptr ? dataSize : 0u);
+}
+
+namespace detail {
+    template <typename Payload>
+    struct TypedRenderCallbackPayload {
+        using Callback = void (*)(NVGcontext*, Payload const&);
+
+        Callback callback = nullptr;
+        Payload payload;
+    };
+
+    template <typename Payload>
+    inline void invokeTypedRenderCallback(NVGcontext* realContext, void const* data)
+    {
+        auto const& payload = *static_cast<TypedRenderCallbackPayload<Payload> const*>(data);
+
+        if (payload.callback != nullptr)
+            payload.callback(realContext, payload.payload);
+    }
+
+    template <typename Payload>
+    inline void destroyTypedRenderCallbackPayload(void* data)
+    {
+        delete static_cast<TypedRenderCallbackPayload<Payload>*>(data);
+    }
+}
+
+// Queue render-thread work with an owned C++ payload. The payload is moved into
+// the command buffer, shared when command buffers are appended, and destroyed if
+// the command is replayed, coalesced away, cancelled, or the buffer is destroyed.
+template <typename Payload>
+inline void nvgRenderCallback(NVGcontext* c, void (*callback)(NVGcontext*, Payload const&), Payload payload)
+{
+    if (callback == nullptr)
+        return;
+
+    using StoredPayload = std::decay_t<Payload>;
+    using CallbackPayload = detail::TypedRenderCallbackPayload<StoredPayload>;
+
+    auto* callbackPayload = new CallbackPayload { callback, std::move(payload) };
+
+    auto& b = detail::rec(c);
+    b.putOp(Op::RenderOwnedCallback);
+    b.putOwnedRenderCallback(detail::invokeTypedRenderCallback<StoredPayload>,
+        callbackPayload,
+        detail::destroyTypedRenderCallbackPayload<StoredPayload>);
 }
 
 // ===========================================================================
