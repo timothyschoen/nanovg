@@ -1741,14 +1741,20 @@ static void nvg__flattenPaths(NVGcontext* ctx)
 
                 int pStart = cache->paths[i].first;
                 int pCount = cache->paths[i].count;
+                int w = 0;
                 for (int k = 0; k < pCount; k++) {
                     Point p2 = { cache->points[pStart + k].x, cache->points[pStart + k].y };
                     Point p3 = { cache->points[pStart + (k + 1) % pCount].x, cache->points[pStart + (k + 1) % pCount].y };
-                    totalWinding += getWindingContribution(testPoint, p2, p3);
+                    w += getWindingContribution(testPoint, p2, p3);
                 }
+                if (cache->paths[i].reversed)
+                    w = -w;
+                totalWinding += w;
             }
 
-            cache->paths[j].winding = (totalWinding == 0) ? NVG_SOLID : NVG_HOLE;
+            int ownWinding = nvg__polyArea(pts, path->count) > 0.0f ? -1 : 1;
+            bool insideFilled = (totalWinding + ownWinding) != 0;
+            cache->paths[j].winding = insideFilled ? NVG_SOLID : NVG_HOLE;
         }
         
         // Enforce winding.
