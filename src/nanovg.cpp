@@ -42,6 +42,10 @@
 #define NVG_MAX_FONTIMAGE_SIZE   2048
 #define NVG_MAX_FONTIMAGES       4
 
+#ifndef NVG_SDF_GLYPH_ATLAS_SIZE
+#define NVG_SDF_GLYPH_ATLAS_SIZE 2048
+#endif
+
 #define NVG_INIT_COMMANDS_SIZE 32
 #define NVG_INIT_COMMAND_VALUES_SIZE 256
 #define NVG_INIT_POINTS_SIZE 128
@@ -3234,7 +3238,8 @@ static int nvg__sdfAtlasMaxTextureSize(NVGcontext* ctx)
     int maxTextureSize = nvg__renderGetMaxTextureSize(ctx->backend);
     if (maxTextureSize <= 0)
         maxTextureSize = NVG_MAX_FONTIMAGE_SIZE;
-    return nvg__maxi(4, maxTextureSize & ~3);
+    int atlasSize = nvg__mini(maxTextureSize, NVG_SDF_GLYPH_ATLAS_SIZE);
+    return nvg__maxi(4, atlasSize & ~3);
 }
 
 static int nvg__createSDFAtlas(NVGcontext* ctx, int minSide)

@@ -189,7 +189,7 @@ enum class Op : uint8_t {
 };
 
 using RenderCallback = void (*)(NVGcontext* realContext, void const* data, uint32_t dataSize);
-using OwnedRenderCallback = void (*)(NVGcontext* realContext, void const* data);
+using OwnedRenderCallback = void (*)(NVGcontext* realContext, void* data);
 using OwnedRenderPayloadDestroy = void (*)(void* data);
 
 // ---------------------------------------------------------------------------
@@ -323,7 +323,7 @@ public:
 
     inline void callOwnedRenderCallback(NVGcontext* realContext, size_t& pos) const
     {
-        auto const* payload = reinterpret_cast<OwnedRenderPayload const*>(get<uintptr_t>(pos));
+        auto* payload = reinterpret_cast<OwnedRenderPayload*>(get<uintptr_t>(pos));
 
         if (payload != nullptr && payload->callback != nullptr)
             payload->callback(realContext, payload->data);
@@ -602,16 +602,16 @@ inline void nvgRenderCallback(NVGcontext* c, RenderCallback callback, void const
 namespace detail {
     template <typename Payload>
     struct TypedRenderCallbackPayload {
-        using Callback = void (*)(NVGcontext*, Payload const&);
+        using Callback = void (*)(NVGcontext*, Payload&);
 
         Callback callback = nullptr;
         Payload payload;
     };
 
     template <typename Payload>
-    inline void invokeTypedRenderCallback(NVGcontext* realContext, void const* data)
+    inline void invokeTypedRenderCallback(NVGcontext* realContext, void* data)
     {
-        auto const& payload = *static_cast<TypedRenderCallbackPayload<Payload> const*>(data);
+        auto& payload = *static_cast<TypedRenderCallbackPayload<Payload>*>(data);
 
         if (payload.callback != nullptr)
             payload.callback(realContext, payload.payload);
@@ -628,7 +628,7 @@ namespace detail {
 // the command buffer, shared when command buffers are appended, and destroyed if
 // the command is replayed, coalesced away, cancelled, or the buffer is destroyed.
 template <typename Payload>
-inline void nvgRenderCallback(NVGcontext* c, void (*callback)(NVGcontext*, Payload const&), Payload payload)
+inline void nvgRenderCallback(NVGcontext* c, void (*callback)(NVGcontext*, Payload&), Payload payload)
 {
     if (callback == nullptr)
         return;
