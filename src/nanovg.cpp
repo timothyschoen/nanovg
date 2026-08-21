@@ -472,6 +472,7 @@ void nvgEndFrame(NVGcontext* ctx)
 {
     //nvg__flushTextTexture(ctx); disabled because plugdata doesn't use nanovg text rendering
     nvg__renderFlush(ctx->backend, ctx->globalScissor);
+    /*
     if (ctx->fontImageIdx != 0) {
         int fontImage = ctx->fontImages[ctx->fontImageIdx];
         ctx->fontImages[ctx->fontImageIdx] = 0;
@@ -496,7 +497,7 @@ void nvgEndFrame(NVGcontext* ctx)
         ctx->fontImages[j] = ctx->fontImages[0];
         ctx->fontImages[0] = fontImage;
         ctx->fontImageIdx = 0;
-    }
+    } */
 }
 
 NVGcolor nvgRGB(unsigned char r, unsigned char g, unsigned char b)

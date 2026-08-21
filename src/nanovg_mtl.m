@@ -29,6 +29,8 @@
 #include <string.h>
 #include <stdatomic.h>
 
+#define NANOVG_METAL_IMPLEMENTATION 1
+
 #include "nanovg_mtl.h"
 #import <Metal/Metal.h>
 #if TARGET_OS_IPHONE
@@ -301,15 +303,13 @@ stencilOnlyPipelineState;
 
 - (void)stroke:(MNVGcall*)call;
 
-- (void)triangles:(MNVGcall*)call;
-
 - (void)updateRenderPipelineStatesForBlend:(MNVGblend*)blend
                                pixelFormat:(MTLPixelFormat)pixelFormat;
 
 @end
 
 // Keeps the weak reference to the currently binded framebuffer.
-MNVGframebuffer* s_framebuffer = NULL;
+NVGframebuffer* s_framebuffer = NULL;
 
 const MTLResourceOptions kMetalBufferOptions = (MTLResourceCPUCacheModeWriteCombined | MTLResourceStorageModeShared);
 
@@ -506,7 +506,7 @@ void mnvgSetViewBounds(void* view, int width, int height) {
     [(CAMetalLayer*)[(__bridge UIView*)view layer] setDrawableSize:CGSizeMake(width, height)];
 }
 
-NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
+NVGcontext* nvgCreateContext(void* view, int flags, int width, int height) {
     CAMetalLayer *metalLayer = (CAMetalLayer*)[(__bridge UIView*)view layer];
     id<MTLDevice> metalDevice = MTLCreateSystemDefaultDevice();
     if (!metalDevice) return NULL;
@@ -529,7 +529,7 @@ void mnvgSetViewBounds(void* view, int width, int height) {
     }
 }
 
-NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height) {
+NVGcontext* nvgCreateContext(void* view, int flags, int width, int height) {
     NSView* nsView = (__bridge NSView*) view;
     CAMetalLayer* metalLayer = (CAMetalLayer*)nsView.layer;
     if (![metalLayer isKindOfClass:[CAMetalLayer class]])
@@ -582,21 +582,21 @@ static void nvg__vset(NVGvertex* vtx, float x, float y, float u, float v) {
     vtx->v = v * scaling_factor;
 }
 
-void nvgDeleteMTL(NVGcontext* ctx) {
+void nvgDeleteContext(NVGcontext* ctx) {
     nvgDeleteInternal(ctx);
 }
 
-void mnvgBindFramebuffer(MNVGframebuffer* framebuffer) {
+void nvgBindFramebuffer(NVGframebuffer* framebuffer) {
     s_framebuffer = framebuffer;
 }
 
-MNVGframebuffer* mnvgCreateFramebuffer(NVGcontext* ctx, int width,
+NVGframebuffer* nvgCreateFramebuffer(NVGcontext* ctx, int width,
                                        int height, int imageFlags) {
-    MNVGframebuffer* framebuffer = (MNVGframebuffer*)malloc(sizeof(MNVGframebuffer));
+    NVGframebuffer* framebuffer = (NVGframebuffer*)malloc(sizeof(NVGframebuffer));
     if (framebuffer == NULL)
         return NULL;
     
-    memset(framebuffer, 0, sizeof(MNVGframebuffer));
+    memset(framebuffer, 0, sizeof(NVGframebuffer));
     framebuffer->image = nvgCreateImageARGB(ctx, width, height,
                                             imageFlags,
                                             NULL);
@@ -605,7 +605,7 @@ MNVGframebuffer* mnvgCreateFramebuffer(NVGcontext* ctx, int width,
     return framebuffer;
 }
 
-void mnvgDeleteFramebuffer(MNVGframebuffer* framebuffer) {
+void nvgDeleteFramebuffer(NVGframebuffer* framebuffer) {
     if (framebuffer == NULL) return;
     if (framebuffer->image > 0) {
         nvgDeleteImage(framebuffer->ctx, framebuffer->image);
@@ -613,15 +613,29 @@ void mnvgDeleteFramebuffer(MNVGframebuffer* framebuffer) {
     free(framebuffer);
 }
 
-int mnvgBlitFramebuffer(NVGcontext* ctx, MNVGframebuffer* fb, int x, int y, int w, int h)
+void nvgBlitFramebuffer(NVGcontext* ctx, NVGframebuffer* fb, int x, int y, int w, int h)
 {
     MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
     MNVGtexture* tex = [mtl findTexture:fb->image];
     [mtl blitTextureToScreen:tex];
-    return 1;
 }
 
-void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
+int nvgFramebufferImage(NVGframebuffer* fb)
+{
+    return fb->image;
+}
+
+void nvgViewport(int x, int y, int w, int h) {
+    // no-op for Metal
+}
+
+void nvgClear(NVGcontext* ctx) {
+    MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
+    mtl.clearColor = MTLClearColorMake(0.f, 0.f, 0.f, 0.f);
+    mtl.clearBufferOnFlush = YES;
+}
+
+void nvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
     
     MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
     float alpha = (float)color.a;
@@ -632,8 +646,8 @@ void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
     mtl.clearBufferOnFlush = YES;
 }
 
-void mnvgReadPixels(NVGcontext* ctx, MNVGframebuffer* fb, int x, int y, int width,
-                    int height, void* data) {
+void nvgReadPixels(NVGcontext* ctx, NVGframebuffer* fb, int x, int y, int width,
+                    int height, int total_height, void* data) {
     MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
     
     MNVGtexture* tex = [mtl findTexture:fb->image];
@@ -1968,13 +1982,6 @@ error:
     [_renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
                        vertexStart:call->strokeOffset
                        vertexCount:call->strokeCount];
-}
-
-- (void)triangles:(MNVGcall*)call {
-    [self setUniforms:call->uniformOffset image:call->image];
-    [_renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle
-                       vertexStart:call->triangleOffset
-                       vertexCount:call->triangleCount];
 }
 
 - (void)updateRenderPipelineStatesForBlend:(MNVGblend*)blend

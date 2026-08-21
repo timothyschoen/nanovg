@@ -32,60 +32,8 @@ extern "C" {
 #pragma warning(disable: 4201)  // nonstandard extension used : nameless struct/union
 #endif
 
-void* nvg__getUptr(void* ctx);
-
-#if defined NANOVG_GL2_IMPLEMENTATION
-  #define NANOVG_GL_IMPLEMENTATION 1
-  #define nvgCreateContext(flags) nvgCreateGL2(flags)
-  #define nvgDeleteContext(context) nvgDeleteGL2(context)
-#elif defined NANOVG_GLES2_IMPLEMENTATION
-  #define NANOVG_GL_IMPLEMENTATION 1
-  #define nvgCreateContext(flags) nvgCreateGLES2(flags)
-  #define nvgDeleteContext(context) nvgDeleteGLES2(context)
-#elif defined NANOVG_GL3_IMPLEMENTATION
-  #define NANOVG_GL_IMPLEMENTATION 1
-  #define nvgCreateContext(flags) nvgCreateGL3(flags)
-  #define nvgDeleteContext(context) nvgDeleteGL3(context)
-#elif defined NANOVG_GLES3_IMPLEMENTATION
-  #define NANOVG_GL_IMPLEMENTATION 1
-  #define nvgCreateContext(flags) nvgCreateGLES3(flags)
-  #define nvgDeleteContext(context) nvgDeleteGLES3(context)
-#elif defined NANOVG_METAL_IMPLEMENTATION
-  #define nvgCreateContext(layer, flags, width, height) mnvgCreateContext(layer, flags, width, height)
-  #define nvgDeleteContext(context) nvgDeleteMTL(context)
-  #define nvgBindFramebuffer(fb) mnvgBindFramebuffer(fb)
-  #define nvgCreateFramebuffer(ctx, w, h, flags) mnvgCreateFramebuffer(ctx, w, h, flags)
-  #define nvgDeleteFramebuffer(fb) mnvgDeleteFramebuffer(fb)
-  #define nvgViewport(x, y, w, h) NVG_NOTUSED(x); NVG_NOTUSED(y); NVG_NOTUSED(w); NVG_NOTUSED(h)
-  #define nvgClear(nvg) mnvgClearWithColor(nvg, nvgRGBA(0, 0, 0, 0))
-  #define nvgClearWithColor(nvg, col) mnvgClearWithColor(nvg, col)
-  #define nvgReadPixels(nvg, image, x, y, w, h, total_h, data) mnvgReadPixels(nvg, image, x, y, w, h, data)
-  #define nvgBlitFramebuffer(nvg, fb, x, y, w, h) mnvgBlitFramebuffer(nvg, fb, x, y, w, h)
-  #define nvgMaxTextureSize(size) size = 8192
-  #define NVGframebuffer MNVGframebuffer
-#endif
-#if defined NANOVG_GL_IMPLEMENTATION
-#define nvgBindFramebuffer(fb) nvgluBindFramebuffer(fb)
-#define nvgCreateFramebuffer(ctx, w, h, flags) nvgluCreateFramebuffer(ctx, w, h, flags)
-#define nvgDeleteFramebuffer(fb) nvgluDeleteFramebuffer(fb)
-#define nvgViewport(x, y, w, h) glViewport(x, y, w, h)
-#define nvgReadPixels(nvg, image, x, y, w, h, total_h, data) nvgluReadPixels(nvg, image, x, y, w, h, total_h, data)
-#define nvgBlitFramebuffer(nvg, fb, x, y, w, h) nvgluBlitFramebuffer(nvg, fb, x, y, w, h)
-#define nvgClear(nvg) glDisable(GL_SCISSOR_TEST); \
-                      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE); \
-                      glClearColor(0, 0, 0, 0); \
-                      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT); \
-                      glEnable(GL_SCISSOR_TEST);
-#define nvgClearWithColor(nvg, col) nvglClearWithColor(col)
-#define nvgMaxTextureSize(size) glGetIntegerv(GL_MAX_TEXTURE_SIZE, &size);
-#define NVGframebuffer NVGLUframebuffer
-#endif
-
-
 typedef struct NVGcontext NVGcontext;
-
-typedef struct FONStextRow FONStextRow;  // include fontstash.h to use
-
+typedef struct NVGframebuffer NVGframebuffer;
 struct NVGcolor {
     union {
         uint32_t rgba32;
@@ -97,6 +45,29 @@ struct NVGcolor {
     };
 };
 typedef struct NVGcolor NVGcolor;
+
+void* nvg__getUptr(void* ctx);
+
+#if defined(NANOVG_METAL_IMPLEMENTATION)
+NVGcontext* nvgCreateContext(void* layer, int flags, int width, int height);
+#else
+NVGcontext* nvgCreateContext(int flags);
+#endif
+void nvgDeleteContext(NVGcontext* context);
+
+void nvgBindFramebuffer(NVGframebuffer* fb);
+NVGframebuffer* nvgCreateFramebuffer(NVGcontext* ctx, int w, int h, int flags);
+void nvgDeleteFramebuffer(NVGframebuffer* fb);
+void nvgBlitFramebuffer(NVGcontext* nvg, NVGframebuffer* fb, int x, int y, int w, int h);
+int nvgFramebufferImage(NVGframebuffer* fb);
+
+void nvgViewport(int x, int y, int w, int h);
+void nvgClear(NVGcontext* nvg);
+void nvgClearWithColor(NVGcontext* nvg, NVGcolor col);
+void nvgReadPixels(NVGcontext* nvg, NVGframebuffer* fb, int x, int y, int w, int h, int total_h, void* data);
+void nvgMaxTextureSize(int* size);
+
+typedef struct FONStextRow FONStextRow;  // include fontstash.h to use
 
 typedef enum
 {

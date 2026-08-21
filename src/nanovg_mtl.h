@@ -56,11 +56,10 @@ enum MNVGTarget {
     MNVG_UNKNOWN,
 };
 
-struct MNVGframebuffer {
+struct NVGframebuffer {
     NVGcontext* ctx;
     int image;
 };
-typedef struct MNVGframebuffer MNVGframebuffer;
 
 // Creates a new NanoVG context. The `metalLayer` parameter should be a
 // `CAMetalLayer` object, and the `flags` should be combination of
@@ -73,33 +72,6 @@ void mnvgSetViewBounds(void* view, int width, int height);
 
 // Deletes the specified NanoVG context.
 void nvgDeleteMTL(NVGcontext* ctx);
-
-//
-// Framebuffer
-//
-
-// Binds the specified framebuffer as the current render pass.
-void mnvgBindFramebuffer(MNVGframebuffer* framebuffer);
-
-int mnvgBlitFramebuffer(NVGcontext* ctx, MNVGframebuffer* fb, int x, int y, int w, int h);
-
-// Creates a new framebuffer.
-MNVGframebuffer* mnvgCreateFramebuffer(NVGcontext* ctx, int width,
-                                       int height, int imageFlags);
-
-// Deletes the specified framebuffer.
-void mnvgDeleteFramebuffer(MNVGframebuffer* framebuffer);
-
-//
-// Metal bridging functions
-//
-
-// Clear context on next frame, must be called before nvgEndFrame
-void mnvgClearWithColor(NVGcontext* ctx, NVGcolor color);
-
-// Read pixels from an image
-void mnvgReadPixels(NVGcontext* ctx, MNVGframebuffer* fb, int x, int y, int width,
-                    int height, void* data);
 
 // Returns a pointer to the corresponded `id<MTLDevice>` object.
 void* mnvgDevice(NVGcontext* ctx);

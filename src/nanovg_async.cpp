@@ -67,11 +67,6 @@ bool hasPendingFrame(NVGcontext* handle)
     return x->pending != nullptr;
 }
 
-void setBackendFunctions(NVGcontext* handle, BackendFunctions functions)
-{
-    reinterpret_cast<Context*>(handle)->backendFunctions = functions;
-}
-
 int Context::allocateImageId(int const width, int const height, int const bytesPerPixel)
 {
     std::lock_guard<std::mutex> lock(resourceMutex);
@@ -272,7 +267,7 @@ void bindFramebuffer(NVGcontext* c, void* framebuffer)
     b.put(reinterpret_cast<uintptr_t>(framebuffer));
 }
 
-void setMainFramebuffer(NVGcontext* c, void* realFramebuffer)
+void setMainFramebuffer(NVGcontext* c, NVGframebuffer* realFramebuffer)
 {
     // Consumer thread only: no lock needed (mainTarget is touched only here and at
     // Op::BindMainFramebuffer replay, both on the GL thread).
@@ -336,8 +331,9 @@ void Context::replayBuffer(CommandBuffer const& buf)
         case Op::CreateFramebuffer: {
             auto* key = reinterpret_cast<void*>(buf.get<uintptr_t>(pos));
             int const w = buf.get<int>(pos), h = buf.get<int>(pos), flags = buf.get<int>(pos);
-            void* realFramebuffer = backendFunctions.createFramebuffer ? backendFunctions.createFramebuffer(R, w, h, flags) : nullptr;
-            int const realImage = realFramebuffer && backendFunctions.framebufferImage ? backendFunctions.framebufferImage(realFramebuffer) : 0;
+
+            NVGframebuffer* realFramebuffer = nvgCreateFramebuffer(R, w, h, flags);
+            int const realImage = realFramebuffer ? nvgFramebufferImage(realFramebuffer) : 0;
             bool keepFramebuffer = false;
 
             {
@@ -353,12 +349,12 @@ void Context::replayBuffer(CommandBuffer const& buf)
                 }
             }
 
-            if (!keepFramebuffer && realFramebuffer && backendFunctions.deleteFramebuffer)
-                backendFunctions.deleteFramebuffer(realFramebuffer);
+            if (!keepFramebuffer && realFramebuffer)
+                nvgDeleteFramebuffer(realFramebuffer);
         } break;
         case Op::DeleteFramebuffer: {
             auto* key = reinterpret_cast<void*>(buf.get<uintptr_t>(pos));
-            void* realFramebuffer = nullptr;
+            NVGframebuffer* realFramebuffer = nullptr;
             bool releaseToken = false;
             {
                 std::lock_guard<std::mutex> lock(resourceMutex);
@@ -371,14 +367,14 @@ void Context::replayBuffer(CommandBuffer const& buf)
                 }
             }
 
-            if (realFramebuffer && backendFunctions.deleteFramebuffer)
-                backendFunctions.deleteFramebuffer(realFramebuffer);
+            if (realFramebuffer)
+                nvgDeleteFramebuffer(realFramebuffer);
             if (releaseToken)
                 delete reinterpret_cast<uint64_t*>(key);
         } break;
         case Op::BindFramebuffer: {
             auto* key = reinterpret_cast<void*>(buf.get<uintptr_t>(pos));
-            void* realFramebuffer = nullptr;
+            NVGframebuffer* realFramebuffer = nullptr;
             if (key != nullptr) {
                 std::lock_guard<std::mutex> lock(resourceMutex);
                 auto const iter = framebuffers.find(key);
@@ -387,31 +383,28 @@ void Context::replayBuffer(CommandBuffer const& buf)
                     // Lazily create the real framebuffer the first time it is
                     // bound. Its CreateFramebuffer command may have been dropped
                     // by frame coalescing, so binding is the reliable trigger.
-                    if (!realFramebuffer && backendFunctions.createFramebuffer) {
-                        realFramebuffer = backendFunctions.createFramebuffer(R, iter->second.width, iter->second.height, iter->second.imageFlags);
+                    if (!realFramebuffer) {
+                        realFramebuffer = nvgCreateFramebuffer(R, iter->second.width, iter->second.height, iter->second.imageFlags);
                         iter->second.real = realFramebuffer;
-                        int const realImage = realFramebuffer && backendFunctions.framebufferImage ? backendFunctions.framebufferImage(realFramebuffer) : 0;
+                        int const realImage = realFramebuffer ? nvgFramebufferImage(realFramebuffer) : 0;
                         images[iter->second.virtualImageId].realId = realImage;
                     }
                 }
             }
-            if (backendFunctions.bindFramebuffer)
-                backendFunctions.bindFramebuffer(realFramebuffer);
+
+            nvgBindFramebuffer(realFramebuffer);
         } break;
         case Op::BindMainFramebuffer:
             // Bind the surface's persistent main/damage framebuffer, which the GL
             // thread owns and set via setMainFramebuffer() before this replay.
-            if (backendFunctions.bindFramebuffer)
-                backendFunctions.bindFramebuffer(mainTarget);
+            nvgBindFramebuffer(mainTarget);
             break;
         case Op::Viewport: {
             int const x = buf.get<int>(pos), y = buf.get<int>(pos), w = buf.get<int>(pos), h = buf.get<int>(pos);
-            if (backendFunctions.viewport)
-                backendFunctions.viewport(x, y, w, h);
+            nvgViewport(x, y, w, h);
         } break;
         case Op::Clear:
-            if (backendFunctions.clear)
-                backendFunctions.clear(R);
+            nvgClear(R);
             break;
         case Op::RenderCallback: {
             auto const callback = buf.get<RenderCallback>(pos);
@@ -738,8 +731,8 @@ void destroy(NVGcontext* handle)
         return;
     auto* x = reinterpret_cast<Context*>(handle);
     for (auto& [framebuffer, info] : x->framebuffers) {
-        if (info.real && x->backendFunctions.deleteFramebuffer)
-            x->backendFunctions.deleteFramebuffer(info.real);
+        if (info.real)
+            nvgDeleteFramebuffer(info.real);
         delete reinterpret_cast<uint64_t*>(framebuffer);
     }
     for (auto* b : x->ownedBuffers)

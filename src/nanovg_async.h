@@ -373,7 +373,7 @@ struct Context {
     // recorded `Op::BindMainFramebuffer` binds it. Touched only by the consumer, so
     // no lock. Lets the message thread record "bind the main target" without
     // knowing (or managing) the real framebuffer.
-    void* mainTarget = nullptr;
+    NVGframebuffer* mainTarget = nullptr;
 
     // When true, nvgEndFrame replays the frame immediately on the calling thread
     // instead of publishing it for a separate render thread. Used to run the
@@ -396,19 +396,11 @@ struct Context {
         int bytesPerPixel = 4;
     };
     struct FramebufferInfo {
-        void* real = nullptr;
+        NVGframebuffer* real = nullptr;
         int virtualImageId = 0;
         int width = 0;
         int height = 0;
         int imageFlags = 0;
-    };
-    struct BackendFunctions {
-        void* (*createFramebuffer)(NVGcontext*, int, int, int) = nullptr;
-        void (*deleteFramebuffer)(void*) = nullptr;
-        void (*bindFramebuffer)(void*) = nullptr;
-        int (*framebufferImage)(void*) = nullptr;
-        void (*viewport)(int, int, int, int) = nullptr;
-        void (*clear)(NVGcontext*) = nullptr;
     };
     mutable std::mutex resourceMutex;
     std::unordered_map<int, ImageInfo> images;
@@ -417,7 +409,6 @@ struct Context {
     // Consumer-owned membership for the render-thread SDF glyph cache (same rationale as `paths`:
     // set only once the real nvgSaveSDFGlyph has actually replayed, so it survives frame coalescing).
     std::unordered_set<uint64_t> sdfGlyphs;
-    BackendFunctions backendFunctions;
     int nextImageId = 0x40000000;
     uint64_t nextFramebufferId = 1;
     uint32_t nextPathId = 1;
@@ -517,11 +508,6 @@ inline bool performRender(NVGcontext* handle)
 // True if a published-but-not-yet-drawn frame is waiting.
 bool hasPendingFrame(NVGcontext* handle);
 
-// Backend helpers supplied by the GL/Metal owner. These keep macro-only NanoVG
-// backend calls on the render thread while letting the UI thread record them.
-using BackendFunctions = Context::BackendFunctions;
-void setBackendFunctions(NVGcontext* handle, BackendFunctions functions);
-
 void* createFramebuffer(NVGcontext* c, int width, int height, int imageFlags);
 void deleteFramebuffer(NVGcontext* c, void* framebuffer);
 void bindFramebuffer(NVGcontext* c, void* framebuffer);
@@ -533,7 +519,7 @@ int framebufferImage(NVGcontext* c, void* framebuffer);
 // `bindMainFramebuffer()` ops resolve to. Call before performRender. The main
 // framebuffer is owned entirely by the GL thread; the message thread never sees
 // the real handle.
-void setMainFramebuffer(NVGcontext* c, void* realFramebuffer);
+void setMainFramebuffer(NVGcontext* c, NVGframebuffer* realFramebuffer);
 // Producer (message) thread: record "bind the main render target" at this point
 // in the stream. Resolves to whatever the consumer last passed to
 // setMainFramebuffer.
@@ -674,6 +660,11 @@ inline void nvgEndFrame(NVGcontext* c)
     } else {
         x->publish();
     }
+}
+
+inline void nvgEndFrameWithoutPublishing(NVGcontext* c)
+{
+    detail::ctx(c)->record->putOp(Op::EndFrame);
 }
 
 // Abort the frame being recorded: discard it, publish nothing.
