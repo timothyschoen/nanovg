@@ -133,6 +133,50 @@ void Context::applyResources(std::vector<ResourceOp>& ops)
             if (realId != 0)
                 ::nvgDeleteImage(R, realId);
         } break;
+        case ResourceOp::Kind::CreateFramebuffer: {
+            NVGframebuffer* const realFramebuffer = nvgCreateFramebuffer(R, op.width, op.height, op.flags);
+            int const realImage = realFramebuffer ? nvgFramebufferImage(realFramebuffer) : 0;
+            bool keepFramebuffer = false;
+            {
+                std::lock_guard<std::mutex> lock(resourceMutex);
+                auto const iter = framebuffers.find(op.framebuffer);
+                if (iter != framebuffers.end()) {
+                    iter->second.real = realFramebuffer;
+                    iter->second.width = op.width;
+                    iter->second.height = op.height;
+                    iter->second.imageFlags = op.flags;
+                    images[iter->second.virtualImageId].realId = realImage;
+                    keepFramebuffer = true;
+                }
+            }
+            // Its delete already ran (out-of-order should not happen, but stay safe).
+            if (!keepFramebuffer && realFramebuffer)
+                nvgDeleteFramebuffer(realFramebuffer);
+        } break;
+        case ResourceOp::Kind::DeleteFramebuffer: {
+            NVGframebuffer* realFramebuffer = nullptr;
+            bool releaseToken = false;
+            {
+                std::lock_guard<std::mutex> lock(resourceMutex);
+                auto const iter = framebuffers.find(op.framebuffer);
+                if (iter != framebuffers.end()) {
+                    realFramebuffer = iter->second.real;
+                    images.erase(iter->second.virtualImageId);
+                    framebuffers.erase(iter);
+                    releaseToken = true;
+                }
+            }
+            if (realFramebuffer)
+                nvgDeleteFramebuffer(realFramebuffer);
+            if (releaseToken)
+                delete reinterpret_cast<uint64_t*>(op.framebuffer);
+        } break;
+        case ResourceOp::Kind::FramebufferPass:
+            // The create that made this pass's target ran earlier in this same
+            // ordered batch, so its real FBO (bound inside the pass) already exists.
+            if (op.pass)
+                replayBuffer(*op.pass);
+            break;
         }
     }
 }
@@ -240,13 +284,17 @@ NVGpaint Context::resolvePaint(NVGpaint paint) const
 void* createFramebuffer(NVGcontext* c, int width, int height, int imageFlags)
 {
     auto* x = detail::ctx(c);
+    // Eagerly reserve the key + backing virtual image id so the producer can build
+    // paints against it in the same frame; the real FBO is created when the op runs.
     void* const framebuffer = x->allocateFramebuffer(width, height, imageFlags);
-    auto& b = detail::rec(c);
-    b.putOp(Op::CreateFramebuffer);
-    b.put(reinterpret_cast<uintptr_t>(framebuffer));
-    b.put(width);
-    b.put(height);
-    b.put(imageFlags);
+
+    Context::ResourceOp op;
+    op.kind = Context::ResourceOp::Kind::CreateFramebuffer;
+    op.framebuffer = framebuffer;
+    op.width = width;
+    op.height = height;
+    op.flags = imageFlags;
+    x->enqueueResource(std::move(op));
     return framebuffer;
 }
 
@@ -255,9 +303,31 @@ void deleteFramebuffer(NVGcontext* c, void* framebuffer)
     if (framebuffer == nullptr)
         return;
 
-    auto& b = detail::rec(c);
-    b.putOp(Op::DeleteFramebuffer);
-    b.put(reinterpret_cast<uintptr_t>(framebuffer));
+    Context::ResourceOp op;
+    op.kind = Context::ResourceOp::Kind::DeleteFramebuffer;
+    op.framebuffer = framebuffer;
+    detail::ctx(c)->enqueueResource(std::move(op));
+}
+
+void commitFramebufferPass(NVGcontext* c, void* framebuffer, std::function<void(NVGcontext*)> body)
+{
+    auto* x = detail::ctx(c);
+
+    // Record bind(target) -> body -> unbind into a standalone buffer, off the
+    // current frame. Its own frame boundaries (nvgBeginFrame / EndFrame) live
+    // inside `body`; it must NOT publish (see the header contract).
+    auto pass = std::make_unique<CommandBuffer>(1u << 12);
+    {
+        ScopedCommandRecorder recorder(c, *pass);
+        bindFramebuffer(c, framebuffer);
+        body(c);
+        bindFramebuffer(c, nullptr);
+    }
+
+    Context::ResourceOp op;
+    op.kind = Context::ResourceOp::Kind::FramebufferPass;
+    op.pass = std::move(pass);
+    x->enqueueResource(std::move(op));
 }
 
 void bindFramebuffer(NVGcontext* c, void* framebuffer)
@@ -328,50 +398,6 @@ void Context::replayBuffer(CommandBuffer const& buf)
             break;
 
         // --- backend framebuffers ---
-        case Op::CreateFramebuffer: {
-            auto* key = reinterpret_cast<void*>(buf.get<uintptr_t>(pos));
-            int const w = buf.get<int>(pos), h = buf.get<int>(pos), flags = buf.get<int>(pos);
-
-            NVGframebuffer* realFramebuffer = nvgCreateFramebuffer(R, w, h, flags);
-            int const realImage = realFramebuffer ? nvgFramebufferImage(realFramebuffer) : 0;
-            bool keepFramebuffer = false;
-
-            {
-                std::lock_guard<std::mutex> lock(resourceMutex);
-                auto const iter = framebuffers.find(key);
-                if (iter != framebuffers.end()) {
-                    iter->second.real = realFramebuffer;
-                    iter->second.width = w;
-                    iter->second.height = h;
-                    iter->second.imageFlags = flags;
-                    images[iter->second.virtualImageId].realId = realImage;
-                    keepFramebuffer = true;
-                }
-            }
-
-            if (!keepFramebuffer && realFramebuffer)
-                nvgDeleteFramebuffer(realFramebuffer);
-        } break;
-        case Op::DeleteFramebuffer: {
-            auto* key = reinterpret_cast<void*>(buf.get<uintptr_t>(pos));
-            NVGframebuffer* realFramebuffer = nullptr;
-            bool releaseToken = false;
-            {
-                std::lock_guard<std::mutex> lock(resourceMutex);
-                auto const iter = framebuffers.find(key);
-                if (iter != framebuffers.end()) {
-                    realFramebuffer = iter->second.real;
-                    images.erase(iter->second.virtualImageId);
-                    framebuffers.erase(iter);
-                    releaseToken = true;
-                }
-            }
-
-            if (realFramebuffer)
-                nvgDeleteFramebuffer(realFramebuffer);
-            if (releaseToken)
-                delete reinterpret_cast<uint64_t*>(key);
-        } break;
         case Op::BindFramebuffer: {
             auto* key = reinterpret_cast<void*>(buf.get<uintptr_t>(pos));
             NVGframebuffer* realFramebuffer = nullptr;
@@ -380,9 +406,9 @@ void Context::replayBuffer(CommandBuffer const& buf)
                 auto const iter = framebuffers.find(key);
                 if (iter != framebuffers.end()) {
                     realFramebuffer = iter->second.real;
-                    // Lazily create the real framebuffer the first time it is
-                    // bound. Its CreateFramebuffer command may have been dropped
-                    // by frame coalescing, so binding is the reliable trigger.
+                    // The CreateFramebuffer resource op runs before any frame that
+                    // binds this key, so `real` is normally already set. Kept as a
+                    // defensive fallback (e.g. a bind reached without its create).
                     if (!realFramebuffer) {
                         realFramebuffer = nvgCreateFramebuffer(R, iter->second.width, iter->second.height, iter->second.imageFlags);
                         iter->second.real = realFramebuffer;

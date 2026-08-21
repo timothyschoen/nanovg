@@ -73,6 +73,8 @@
 #include <cstddef>
 #include <cmath>
 #include <atomic>
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -91,9 +93,9 @@ enum class Op : uint8_t {
     // frame
     BeginFrame,
     EndFrame,
-    // backend framebuffer commands
-    CreateFramebuffer,
-    DeleteFramebuffer,
+    // backend framebuffer bind commands. Create/delete and the render-to-target
+    // pass all go through the resource queue (see ResourceOp), so they survive
+    // frame coalescing; only the per-frame binds are recorded inline here.
     BindFramebuffer,
     BindMainFramebuffer,
     Viewport,
@@ -423,14 +425,28 @@ struct Context {
     // gl->textures[id-1] and reads wildly out of bounds -> crash. Instead these
     // ops go into this queue, which the consumer drains IN FULL before every
     // replay, so a resource op is never lost to coalescing.
+    //
+    // Framebuffer create/delete AND the render-to-framebuffer pass ride here too,
+    // in the same single ordered stream. This is what keeps create -> render ->
+    // delete in step even when the frames that produced them are coalesced away:
+    // a dropped create would leave the FBO's realId at 0 (nothing sampled ->
+    // flicker), and a dropped delete would leak the GL FBO + texture forever
+    // (seen on every zoom step). FramebufferPass carries a standalone command
+    // buffer (bind target, draw, unbind) that the consumer replays in order,
+    // after the create that made its target and before the frame that samples it.
     // -----------------------------------------------------------------------
     struct ResourceOp {
-        enum class Kind : uint8_t { CreateARGB, CreateARGBSRGB, CreateAlpha, Update, Delete };
+        enum class Kind : uint8_t {
+            CreateARGB, CreateARGBSRGB, CreateAlpha, Update, Delete,
+            CreateFramebuffer, DeleteFramebuffer, FramebufferPass
+        };
         Kind kind;
-        int image = 0;
+        int image = 0;                     // image id, or a framebuffer's backing virtual image id
         int width = 0;
         int height = 0;
         int flags = 0;
+        void* framebuffer = nullptr;       // framebuffer key (create/delete)
+        std::unique_ptr<CommandBuffer> pass;   // recorded render-to-framebuffer stream (FramebufferPass)
         std::vector<unsigned char> data;   // pixel payload (empty == none)
     };
     // Resource ops are staged per-frame and committed to the consumer ATOMICALLY
@@ -515,19 +531,11 @@ void viewport(NVGcontext* c, int x, int y, int width, int height);
 void clear(NVGcontext* c);
 int framebufferImage(NVGcontext* c, void* framebuffer);
 
-// Consumer (GL) thread: designate the real framebuffer that recorded
-// `bindMainFramebuffer()` ops resolve to. Call before performRender. The main
-// framebuffer is owned entirely by the GL thread; the message thread never sees
-// the real handle.
-void setMainFramebuffer(NVGcontext* c, NVGframebuffer* realFramebuffer);
-// Producer (message) thread: record "bind the main render target" at this point
-// in the stream. Resolves to whatever the consumer last passed to
-// setMainFramebuffer.
-void bindMainFramebuffer(NVGcontext* c);
+void commitFramebufferPass(NVGcontext* c, void* framebuffer, std::function<void(NVGcontext*)> body);
 
-// The real backend framebuffer behind a virtual handle, or nullptr if it has
-// not been created yet. Call from the render thread (after performRender) to
-// blit / read back the persistent framebuffer.
+
+void setMainFramebuffer(NVGcontext* c, NVGframebuffer* realFramebuffer);
+void bindMainFramebuffer(NVGcontext* c);
 void* underlyingFramebuffer(NVGcontext* c, void* framebuffer);
 
 // ---------------------------------------------------------------------------
