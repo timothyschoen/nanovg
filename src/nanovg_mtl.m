@@ -1415,6 +1415,7 @@ void* mnvgDevice(NVGcontext* ctx) {
         texture->tex = nil;
         texture->sampler = nil;
     }
+    [_framebufferFences removeObjectForKey:@(image)];
     texture->valid = 0;
     texture->flags = 0;
     return 1;
