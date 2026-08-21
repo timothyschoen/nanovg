@@ -676,11 +676,6 @@ inline void nvgEndFrame(NVGcontext* c)
     }
 }
 
-inline void nvgEndFrameWithoutPublishing(NVGcontext* c)
-{
-    detail::ctx(c)->record->putOp(Op::EndFrame);
-}
-
 // Abort the frame being recorded: discard it, publish nothing.
 inline void nvgCancelFrame(NVGcontext* c)
 {
@@ -847,41 +842,6 @@ inline void nvgDeletePath(NVGcontext* c, uint32_t pathId)      {
     // `paths` membership is dropped by the consumer when it actually replays the
     // DeletePath op (confirmPathDeleted), so it stays in step with the real cache.
     auto& b = detail::rec(c); b.putOp(Op::DeletePath); b.put(pathId);
-}
-
-// --- text ---
-// The advance width returned by the real nvgText is not available until replay,
-// so the recorded version returns 0. The string bytes are copied into the buffer.
-inline float nvgText(NVGcontext* c, float x, float y, char const* string, char const* end)
-{
-    auto& b = detail::rec(c); b.putOp(Op::Text); b.put(x); b.put(y);
-    uint32_t len = string ? (uint32_t)(end ? (size_t)(end - string) : std::strlen(string)) : 0u;
-    b.putBytes(string, len);
-    return 0.0f;
-}
-inline void nvgTextBox(NVGcontext* c, float x, float y, float breakRowWidth, char const* string, char const* end)
-{
-    auto& b = detail::rec(c); b.putOp(Op::TextBox); b.put(x); b.put(y); b.put(breakRowWidth);
-    uint32_t len = string ? (uint32_t)(end ? (size_t)(end - string) : std::strlen(string)) : 0u;
-    b.putBytes(string, len);
-}
-inline void nvgFontSize(NVGcontext* c, float size)            { auto& b = detail::rec(c); b.putOp(Op::FontSize); b.put(size); }
-// Note: nvgFontBlur and nvgFontDilate are declared in nanovg.h but not
-// implemented in this fork, so they are intentionally not wrapped here
-// (referencing them would fail to link).
-inline void nvgTextLetterSpacing(NVGcontext* c, float spacing){ auto& b = detail::rec(c); b.putOp(Op::TextLetterSpacing); b.put(spacing); }
-inline void nvgTextLineHeight(NVGcontext* c, float lineHeight){ auto& b = detail::rec(c); b.putOp(Op::TextLineHeight); b.put(lineHeight); }
-inline void nvgTextAlign(NVGcontext* c, int align)           { auto& b = detail::rec(c); b.putOp(Op::TextAlign); b.put(align); }
-inline void nvgAtlasTextThreshold(NVGcontext* c, float threshold){ auto& b = detail::rec(c); b.putOp(Op::AtlasTextThreshold); b.put(threshold); }
-// Font selection sets deferred state; the return value (font id / error) is not
-// resolved until replay, so 0 is returned here.
-inline int nvgFontFaceId(NVGcontext* c, int font) { auto& b = detail::rec(c); b.putOp(Op::FontFaceId); b.put(font); return 0; }
-inline int nvgFontFace(NVGcontext* c, char const* font)
-{
-    auto& b = detail::rec(c); b.putOp(Op::FontFace);
-    uint32_t len = font ? (uint32_t)(std::strlen(font) + 1) : 0u;  // include terminator
-    b.putBytes(font, len);
-    return 0;
 }
 
 // --- plugdata direct draws ---
@@ -1096,15 +1056,7 @@ inline void nvgResetFallbackFonts(NVGcontext* c, char const* baseFont) { ::nvgRe
 inline float nvgCurrentPixelScale(NVGcontext* c) { return detail::ctx(c)->devicePxRatio; }
 inline void setCurrentPixelScale(NVGcontext* c, float const devicePixelRatio) { detail::ctx(c)->devicePxRatio = devicePixelRatio; }
 
-inline int nvgGetFontFaceId(NVGcontext* c) { return ::nvgGetFontFaceId(detail::real(c)); }
-inline float nvgGetFontSize(NVGcontext* c) { return ::nvgGetFontSize(detail::real(c)); }
 inline float nvgGetStrokeWidth(NVGcontext* c) { return ::nvgGetStrokeWidth(detail::real(c)); }
-inline int nvgGetTextAlign(NVGcontext* c) { return ::nvgGetTextAlign(detail::real(c)); }
-inline float nvgTextBounds(NVGcontext* c, float x, float y, char const* string, char const* end, float* bounds) { return ::nvgTextBounds(detail::real(c), x, y, string, end, bounds); }
-inline void nvgTextBoxBounds(NVGcontext* c, float x, float y, float breakRowWidth, char const* string, char const* end, float* bounds) { ::nvgTextBoxBounds(detail::real(c), x, y, breakRowWidth, string, end, bounds); }
-inline int nvgTextGlyphPositions(NVGcontext* c, float x, float y, char const* string, char const* end, NVGglyphPosition* positions, int maxPositions) { return ::nvgTextGlyphPositions(detail::real(c), x, y, string, end, positions, maxPositions); }
-inline void nvgTextMetrics(NVGcontext* c, float* ascender, float* descender, float* lineh) { ::nvgTextMetrics(detail::real(c), ascender, descender, lineh); }
-inline int nvgTextBreakLines(NVGcontext* c, char const* string, char const* end, float breakRowWidth, FONStextRow* rows, int maxRows) { return ::nvgTextBreakLines(detail::real(c), string, end, breakRowWidth, rows, maxRows); }
 
 inline void nvgDebugDumpPathCache(NVGcontext* c) { ::nvgDebugDumpPathCache(detail::real(c)); }
 
