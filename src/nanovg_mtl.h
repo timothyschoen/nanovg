@@ -70,6 +70,13 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height);
 
 void mnvgSetViewBounds(void* view, int width, int height);
 
+// Layer-based variants that never touch the hosting NSView/UIView, so they are
+// safe to call from a background render thread (the AppKit/UIKit view may only
+// be accessed on the main thread). `metalLayer` must be a `CAMetalLayer`.
+NVGcontext* nvgCreateContextForLayer(void* metalLayer, int flags, int width, int height);
+
+void mnvgSetLayerDrawableSize(void* metalLayer, int width, int height);
+
 // Deletes the specified NanoVG context.
 void nvgDeleteMTL(NVGcontext* ctx);
 

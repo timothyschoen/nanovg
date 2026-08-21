@@ -545,6 +545,31 @@ NVGcontext* nvgCreateContext(void* view, int flags, int width, int height) {
 }
 #endif
 
+// Layer-based variants: operate on the CAMetalLayer directly, never touching the
+// hosting view, so they are safe to call off the main thread.
+void mnvgSetLayerDrawableSize(void* layer, int width, int height) {
+    CAMetalLayer* metalLayer = (__bridge CAMetalLayer*)layer;
+    CGSize const newSize = CGSizeMake(width, height);
+    if (!CGSizeEqualToSize(metalLayer.drawableSize, newSize))
+        [metalLayer setDrawableSize:newSize];
+}
+
+NVGcontext* nvgCreateContextForLayer(void* layer, int flags, int width, int height) {
+    CAMetalLayer* metalLayer = (__bridge CAMetalLayer*)layer;
+    if (![metalLayer isKindOfClass:[CAMetalLayer class]])
+        return NULL;
+
+    if (metalLayer.device == nil)
+        metalLayer.device = MTLCreateSystemDefaultDevice();
+    if (metalLayer.device == nil)
+        return NULL;
+
+    [metalLayer setPixelFormat:MTLPixelFormatBGRA8Unorm];
+    [metalLayer setFramebufferOnly:FALSE];
+    [metalLayer setDrawableSize:CGSizeMake(width, height)];
+    return nvgCreateMTL((__bridge void*)metalLayer, flags);
+}
+
 NVGcontext* nvgCreateMTL(void* metalLayer, int flags) {
 #ifdef MNVG_INVALID_TARGET
     printf("Metal is only supported on iOS, macOS, and tvOS.\n");
@@ -1681,21 +1706,26 @@ error:
 
     id<CAMetalDrawable> drawable = nil;
     drawable = _metalLayer.nextDrawable;
-    
+
     // Get the texture from the drawable (the screen or render target)
     id<MTLTexture> drawableTexture = drawable.texture;
-    
-    // Blit the texture onto the drawable texture
-    [blitEncoder copyFromTexture:mnvgTexture->tex
-                     sourceSlice:0
-                     sourceLevel:0
-                    sourceOrigin:MTLOriginMake(0, 0, 0)
-                      sourceSize:MTLSizeMake(mnvgTexture->tex.width, mnvgTexture->tex.height, 1)
-                       toTexture:drawableTexture
-                destinationSlice:0
-                destinationLevel:0
-               destinationOrigin:MTLOriginMake(0, 0, 0)];
-    
+
+    if (drawableTexture) {
+        NSUInteger const copyWidth  = MIN(mnvgTexture->tex.width,  drawableTexture.width);
+        NSUInteger const copyHeight = MIN(mnvgTexture->tex.height, drawableTexture.height);
+
+        // Blit the texture onto the drawable texture
+        [blitEncoder copyFromTexture:mnvgTexture->tex
+                         sourceSlice:0
+                         sourceLevel:0
+                        sourceOrigin:MTLOriginMake(0, 0, 0)
+                          sourceSize:MTLSizeMake(copyWidth, copyHeight, 1)
+                           toTexture:drawableTexture
+                    destinationSlice:0
+                    destinationLevel:0
+                   destinationOrigin:MTLOriginMake(0, 0, 0)];
+    }
+
     // End encoding
     [blitEncoder endEncoding];
     
