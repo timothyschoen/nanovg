@@ -559,6 +559,10 @@ void nvgDrawSDFGlyph(NVGcontext* ctx, int image, float x, float y, float w, floa
 int32_t nvgSaveSDFGlyph(NVGcontext* ctx, uint64_t hash);
 int nvgFillSDFGlyph(NVGcontext* ctx, uint64_t hash, NVGcolor color);
 
+// Returns 1 if an SDF entry (tile or handled-empty sentinel) exists for `hash`, else 0.
+int nvgSDFGlyphCached(NVGcontext* ctx, uint64_t hash);
+
+void nvgFillSDFGlyphRun(NVGcontext* ctx, uint64_t const* hashes, float const* xforms, int count, NVGcolor color);
 
 //
 // Scissoring

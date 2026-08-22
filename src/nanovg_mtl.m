@@ -197,6 +197,7 @@ __attribute__((objc_direct_members))
 
 // Per frame buffers
 @property (nonatomic, assign) MNVGbuffers* buffers;
+@property (nonatomic, assign) MNVGrenderData* renderData;
 @property (nonatomic, strong) NSMutableArray* cbuffers;
 @property (nonatomic, assign) int maxBuffers;
 @property (nonatomic, strong) dispatch_semaphore_t semaphore;
@@ -738,7 +739,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 
 - (MNVGcall*)allocCall {
     MNVGcall* ret = NULL;
-    MNVGrenderData* renderData = _buffers.renderData;
+    MNVGrenderData* renderData = _renderData;
     if (renderData->ncalls + 1 > renderData->ccalls) {
         MNVGcall* calls;
         int ccalls = nvg__maxi(renderData->ncalls + 1, 128) + renderData->ccalls / 2;
@@ -753,7 +754,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 }
 
 - (int)allocFragUniforms:(int)n {
-    MNVGrenderData* renderData = _buffers.renderData;
+    MNVGrenderData* renderData = _renderData;
     int ret = 0;
     if (renderData->nuniforms + n > renderData->cuniforms) {
         int cuniforms = nvg__maxi(renderData->nuniforms + n, 128) + renderData->cuniforms / 2;
@@ -776,7 +777,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 
 - (int)allocIndexes:(int)n {
     int ret = 0;
-    MNVGrenderData* renderData = _buffers.renderData;
+    MNVGrenderData* renderData = _renderData;
     if (renderData->nindexes + n > renderData->cindexes) {
         int cindexes = nvg__maxi(renderData->nindexes + n, 4096) + renderData->cindexes / 2;
         id<MTLBuffer> buffer = [_metalLayer.device
@@ -814,7 +815,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 }
 
 - (int)allocVerts:(int)n {
-    MNVGrenderData* renderData = _buffers.renderData;
+    MNVGrenderData* renderData = _renderData;
     int ret = 0;
     if (renderData->nverts + n > renderData->cverts) {
         int cverts = nvg__maxi(renderData->nverts + n, 4096) + renderData->cverts / 2;
@@ -1000,7 +1001,7 @@ void* mnvgDevice(NVGcontext* ctx) {
 }
 
 - (MNVGfragUniforms*)fragUniformAtIndex:(int)index {
-    return (MNVGfragUniforms*)&_buffers.renderData->uniforms[index];
+    return (MNVGfragUniforms*)&_renderData->uniforms[index];
 }
 
 - (void)renderCancel {
@@ -1432,8 +1433,8 @@ void* mnvgDevice(NVGcontext* ctx) {
     if (call == NULL) return;
     
     NVGvertex* quad;
-    MNVGrenderData* renderData = _buffers.renderData;
-    
+    MNVGrenderData* renderData = _renderData;
+
     call->type = MNVG_FILL;
     call->triangleCount = 4;
     call->image = paint->image;
@@ -1546,7 +1547,7 @@ error:
         }
     }];
     
-    MNVGrenderData* renderData = _buffers.renderData;
+    MNVGrenderData* renderData = _renderData;
     if (s_framebuffer == NULL ||
         MNVG_GET_CONTEXT(s_framebuffer->ctx) != (__bridge void*)self) {
         textureSize = _viewPortSize;
@@ -1756,7 +1757,7 @@ error:
     
     if (call == NULL) return;
     
-    MNVGrenderData* renderData = _buffers.renderData;
+    MNVGrenderData* renderData = _renderData;
     call->type = MNVG_STROKE;
     call->image = paint->image;
     call->blendFunc = [self blendCompositeOperation:compositeOperation];
@@ -1816,8 +1817,8 @@ error:
     MNVGfragUniforms* frag;
     
     if (call == NULL) return;
-    
-    MNVGrenderData* renderData = _buffers.renderData;
+
+    MNVGrenderData* renderData = _renderData;
     call->type = MNVG_TRIANGLES;
     call->image = paint->image;
     call->blendFunc = [self blendCompositeOperation:compositeOperation];
@@ -1977,7 +1978,8 @@ error:
             break;
         }
     }
-    
+    _renderData = _buffers.renderData;
+
     // Initializes view size buffer for vertex function.
     if (_buffers.viewSizeBuffer == nil) {
         _buffers.viewSizeBuffer = [_metalLayer.device

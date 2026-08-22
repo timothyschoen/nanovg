@@ -2792,22 +2792,37 @@ int nvgStrokeCachedPath(NVGcontext* ctx, uint32_t pathId)
         NVGpaint strokePaint = state->stroke;
         
         auto& cacheEntry = cacheItemIterator->second;
-        
-        float totalTransform[6];
-        nvgTransformInverse(totalTransform, cacheEntry.currentTransform);
-        nvgTransformMultiply(totalTransform, state->xform);
-        
-        // Apply transform
-        for (int i = 0; i < cacheEntry.paths.size(); i++) {
-            auto& cachedPath = cacheEntry.paths[i];
-            for(int j = 0; j < cachedPath.nstroke; j++)
-            {
-                nvgTransformPoint(&cachedPath.stroke[j].x, &cachedPath.stroke[j].y, totalTransform, cachedPath.stroke[j].x, cachedPath.stroke[j].y);
+
+        // If possible, skip transforms or limit them to just translation
+        if (memcmp(cacheEntry.currentTransform, state->xform, 6 * sizeof(float)) != 0) {
+            float totalTransform[6];
+            nvgTransformInverse(totalTransform, cacheEntry.currentTransform);
+            nvgTransformMultiply(totalTransform, state->xform);
+
+            bool const translationOnly =
+                cacheEntry.currentTransform[0] == state->xform[0] && cacheEntry.currentTransform[1] == state->xform[1] &&
+                cacheEntry.currentTransform[2] == state->xform[2] && cacheEntry.currentTransform[3] == state->xform[3];
+
+            float const a = totalTransform[0], b = totalTransform[1], c = totalTransform[2];
+            float const d = totalTransform[3], e = totalTransform[4], f = totalTransform[5];
+
+            for (int i = 0; i < cacheEntry.paths.size(); i++) {
+                NVGvertex* verts = cacheEntry.paths[i].stroke;
+                int const n = cacheEntry.paths[i].nstroke;
+                if (translationOnly) {
+                    for (int j = 0; j < n; j++) { verts[j].x += e; verts[j].y += f; }
+                } else {
+                    for (int j = 0; j < n; j++) {
+                        float const x = verts[j].x, y = verts[j].y;
+                        verts[j].x = x * a + y * c + e;
+                        verts[j].y = x * b + y * d + f;
+                    }
+                }
             }
+
+            memcpy(cacheEntry.currentTransform, state->xform, 6*sizeof(float));
         }
-        
-        memcpy(cacheEntry.currentTransform, state->xform, 6*sizeof(float));
-        
+
         nvg__renderStroke(ctx->backend, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth, strokeWidth, state->lineStyle, cacheEntry.lineLength, cacheEntry.paths.data(), (int)cacheEntry.paths.size());
         return 1;
     }
@@ -3358,49 +3373,63 @@ static int nvg__uploadSDFGlyphToAtlas(NVGcontext* ctx, int tileW, int tileH, con
     return 1;
 }
 
-static void nvg__drawSDFGlyphUV(NVGcontext* ctx, int image, float x, float y, float w, float h,
-                                float u0, float v0, float u1, float v1, NVGcolor color)
+static int nvg__emitSDFGlyphQuad(NVGvertex* dst, const float* tf,
+                                 float x, float y, float w, float h,
+                                 float u0, float v0, float u1, float v1)
 {
-    if (image <= 0 || w <= 0.0f || h <= 0.0f)
-        return;
+    if (w <= 0.0f || h <= 0.0f)
+        return 0;
 
-    NVGstate* state = nvg__getState(ctx);
-    float* tf = state->xform;
-
-    // Transform the four corners of the quad (given in local space) by the current transform,
-    // exactly like nvg__textFromAtlas does for fontstash quads.
     float c[4 * 2];
     nvgTransformPoint(&c[0], &c[1], tf, x,     y);
     nvgTransformPoint(&c[2], &c[3], tf, x + w, y);
     nvgTransformPoint(&c[4], &c[5], tf, x + w, y + h);
     nvgTransformPoint(&c[6], &c[7], tf, x,     y + h);
 
-    // Reverse winding on a flipped transform so the front face stays CCW (matches nvg__textFromAtlas).
+    // Reverse winding on a flipped transform so the front face stays CCW (like in nvg__textFromAtlas).
     int const rev = (tf[0] * tf[3] < 0) ? 1 : 0;
+
+    nvg__vset(&dst[0],       c[0], c[1], u0, v0, 0, 0);
+    nvg__vset(&dst[1 + rev], c[4], c[5], u1, v1, 0, 0);
+    nvg__vset(&dst[2 - rev], c[2], c[3], u1, v0, 0, 0);
+    nvg__vset(&dst[3],       c[0], c[1], u0, v0, 0, 0);
+    nvg__vset(&dst[4 + rev], c[6], c[7], u0, v1, 0, 0);
+    nvg__vset(&dst[5 - rev], c[4], c[5], u1, v1, 0, 0);
+    return 6;
+}
+
+// Builds the text paint shared by all SDF glyph draws.
+static void nvg__setSDFGlyphPaint(NVGpaint* paint, NVGcolor color, float alpha, int image)
+{
+    memset(paint, 0, sizeof(*paint));
+    nvgTransformIdentity(paint->xform);
+    paint->radius = 0.5f;
+    paint->feather = 1.0f;
+    paint->innerColor = color;
+    paint->outerColor = color;
+    paint->innerColor.a *= alpha;
+    paint->outerColor.a *= alpha;
+    paint->image = image;
+    paint->type = PAINT_TYPE_TEXT;
+}
+
+static void nvg__drawSDFGlyphUV(NVGcontext* ctx, int image, float x, float y, float w, float h,
+                                float u0, float v0, float u1, float v1, NVGcolor color)
+{
+    if (image <= 0)
+        return;
+
+    NVGstate* state = nvg__getState(ctx);
 
     NVGvertex* verts = nvg__allocTempVerts(ctx, 6);
     if (verts == NULL)
         return;
 
-    // s/t (line-AA channels) are unused for text and left at 0.
-    nvg__vset(&verts[0],       c[0], c[1], u0, v0, 0, 0);
-    nvg__vset(&verts[1 + rev], c[4], c[5], u1, v1, 0, 0);
-    nvg__vset(&verts[2 - rev], c[2], c[3], u1, v0, 0, 0);
-    nvg__vset(&verts[3],       c[0], c[1], u0, v0, 0, 0);
-    nvg__vset(&verts[4 + rev], c[6], c[7], u0, v1, 0, 0);
-    nvg__vset(&verts[5 - rev], c[4], c[5], u1, v1, 0, 0);
+    if (nvg__emitSDFGlyphQuad(verts, state->xform, x, y, w, h, u0, v0, u1, v1) == 0)
+        return;
 
     NVGpaint paint;
-    memset(&paint, 0, sizeof(paint));
-    nvgTransformIdentity(paint.xform);
-    paint.radius = 0.5f;   // superSDF's sdfCov() offset: coverage crosses 0.5 at the 127 iso-value
-    paint.feather = 1.0f;
-    paint.innerColor = color;
-    paint.outerColor = color;
-    paint.innerColor.a *= state->alpha;
-    paint.outerColor.a *= state->alpha;
-    paint.image = image;
-    paint.type = PAINT_TYPE_TEXT;
+    nvg__setSDFGlyphPaint(&paint, color, state->alpha, image);
 
     nvg__renderTriangles(ctx->backend, &paint, state->compositeOperation, &state->scissor, verts, 6, ctx->fringeWidth, 1);
 }
@@ -3408,6 +3437,55 @@ static void nvg__drawSDFGlyphUV(NVGcontext* ctx, int image, float x, float y, fl
 void nvgDrawSDFGlyph(NVGcontext* ctx, int image, float x, float y, float w, float h, NVGcolor color)
 {
     nvg__drawSDFGlyphUV(ctx, image, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color);
+}
+
+int nvgSDFGlyphCached(NVGcontext* ctx, uint64_t hash)
+{
+    return ctx->sdfGlyphs->find(hash) != ctx->sdfGlyphs->end() ? 1 : 0;
+}
+
+void nvgFillSDFGlyphRun(NVGcontext* ctx, uint64_t const* hashes, float const* xforms, int count, NVGcolor color)
+{
+    if (count <= 0)
+        return;
+
+    NVGstate* state = nvg__getState(ctx);
+
+    NVGvertex* verts = nvg__allocTempVerts(ctx, count * 6);
+    if (verts == NULL)
+        return;
+
+    int nverts = 0;
+    int curImage = 0;
+
+    for (int i = 0; i < count; i++) {
+        auto const it = ctx->sdfGlyphs->find(hashes[i]);
+        if (it == ctx->sdfGlyphs->end())
+            continue;
+        NVGSDFGlyph const& g = it->second;
+        if (g.image <= 0 || g.ew <= 0.0f || g.eh <= 0.0f)
+            continue;   // not cached yet, or a handled-empty glyph (e.g. space)
+
+        if (nverts > 0 && g.image != curImage) {
+            NVGpaint paint;
+            nvg__setSDFGlyphPaint(&paint, color, state->alpha, curImage);
+            nvg__renderTriangles(ctx->backend, &paint, state->compositeOperation, &state->scissor, verts, nverts, ctx->fringeWidth, 1);
+            nverts = 0;
+        }
+        curImage = g.image;
+
+        float m[6];
+        memcpy(m, state->xform, sizeof(m));
+        nvgTransformPremultiply(m, &xforms[i * 6]);
+
+        nverts += nvg__emitSDFGlyphQuad(&verts[nverts], m, g.ex0, g.ey0, g.ew, g.eh, g.u0, g.v0, g.u1, g.v1);
+    }
+
+    if (nverts > 0) {
+        NVGpaint paint;
+        nvg__setSDFGlyphPaint(&paint, color, state->alpha, curImage);
+        nvg__renderTriangles(ctx->backend, &paint, state->compositeOperation, &state->scissor, verts, nverts, ctx->fringeWidth, 1);
+    }
 }
 
 // Builds and caches an SDF tile from the CURRENT (already flattened) path. Runs on the consumer /

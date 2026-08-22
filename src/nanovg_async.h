@@ -188,6 +188,7 @@ enum class Op : uint8_t {
     // SDF glyph cache (generated on the consumer, mirroring SavePath / FillCachedPath)
     SaveSDFGlyph,
     FillSDFGlyph,
+    FillSDFGlyphRun,
 };
 
 using RenderCallback = void (*)(NVGcontext* realContext, void const* data, uint32_t dataSize);
@@ -411,6 +412,12 @@ struct Context {
     // Consumer-owned membership for the render-thread SDF glyph cache (same rationale as `paths`:
     // set only once the real nvgSaveSDFGlyph has actually replayed, so it survives frame coalescing).
     std::unordered_set<uint64_t> sdfGlyphs;
+
+    // Consumer-thread-only scratch for replaying Op::FillSDFGlyphRun. Reused across
+    // frames (byte payloads in the command buffer are not aligned for uint64_t/float,
+    // so they are memcpy'd into these before the real call). No lock: replay only.
+    std::vector<uint64_t> sdfRunHashes;
+    std::vector<float> sdfRunXforms;
     int nextImageId = 0x40000000;
     uint64_t nextFramebufferId = 1;
     uint32_t nextPathId = 1;
@@ -885,6 +892,18 @@ inline void nvgSaveSDFGlyph(NVGcontext* c, uint64_t hash)
 inline void nvgFillSDFGlyph(NVGcontext* c, uint64_t hash, NVGcolor color)
 {
     auto& b = detail::rec(c); b.putOp(Op::FillSDFGlyph); b.put(hash); b.put(color);
+}
+
+inline void nvgFillSDFGlyphRun(NVGcontext* c, uint64_t const* hashes, float const* xforms, int count, NVGcolor color)
+{
+    if (count <= 0)
+        return;
+    auto& b = detail::rec(c);
+    b.putOp(Op::FillSDFGlyphRun);
+    b.put(color);
+    b.put(count);
+    b.putBytes(hashes, static_cast<uint32_t>(count * sizeof(uint64_t)));
+    b.putBytes(xforms, static_cast<uint32_t>(count * 6 * sizeof(float)));
 }
 
 // nvgDoubleStroke both builds a paint AND mutates the state's line style. We can

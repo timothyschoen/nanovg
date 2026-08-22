@@ -686,6 +686,20 @@ void Context::replayBuffer(CommandBuffer const& buf)
             NVGcolor col = buf.get<NVGcolor>(pos);
             ::nvgFillSDFGlyph(R, hash, col);
         } break;
+        case Op::FillSDFGlyphRun: {
+            NVGcolor const col = buf.get<NVGcolor>(pos);
+            int const count = buf.get<int>(pos);
+            uint32_t hbytes = 0; char const* hp = buf.getBytes(pos, hbytes);
+            uint32_t xbytes = 0; char const* xp = buf.getBytes(pos, xbytes);
+            if (count > 0) {
+                // Copy into aligned, reusable scratch (buffer bytes are unaligned).
+                sdfRunHashes.resize(static_cast<size_t>(count));
+                sdfRunXforms.resize(static_cast<size_t>(count) * 6);
+                std::memcpy(sdfRunHashes.data(), hp, hbytes);
+                std::memcpy(sdfRunXforms.data(), xp, xbytes);
+                ::nvgFillSDFGlyphRun(R, sdfRunHashes.data(), sdfRunXforms.data(), count, col);
+            }
+        } break;
         }
     }
 }
