@@ -46,6 +46,10 @@
 #define NVG_SDF_GLYPH_ATLAS_SIZE 2048
 #endif
 
+#ifndef NVG_SDF_GLYPH_MAX_MAGNIFICATION
+#define NVG_SDF_GLYPH_MAX_MAGNIFICATION 1.5f
+#endif
+
 #define NVG_INIT_COMMANDS_SIZE 32
 #define NVG_INIT_COMMAND_VALUES_SIZE 256
 #define NVG_INIT_POINTS_SIZE 128
@@ -137,14 +141,14 @@ struct StrokeCacheLine {
 
 using StrokeCache = std::unordered_map<uint32_t, StrokeCacheLine>;
 
-// A cached signed-distance-field glyph tile living on the real context (consumer thread), analogous
-// to the StrokeCache. `image` is a real alpha texture atlas; (ex0,ey0,ew,eh) is the em-space rect the
-// tile covers, and (u0,v0,u1,v1) addresses the tile within the atlas. image == 0 marks an empty glyph
-// (e.g. space) that was handled but draws nothing.
 struct NVGSDFGlyph {
     int image;
     float ex0, ey0, ew, eh;
     float u0, v0, u1, v1;
+    // Vector fallback in case we draw too large for SDF
+    float refPx;
+    std::vector<uint8_t> pathCommands;
+    std::vector<float> pathValues;
 };
 using SDFGlyphCache = std::unordered_map<uint64_t, NVGSDFGlyph>;
 
@@ -2077,6 +2081,7 @@ static void nvg__calculateJoins(NVGcontext* ctx, float w, int lineJoin, float mi
         NVGpoint* p0 = &pts[path->count-1];
         NVGpoint* p1 = &pts[0];
         int nleft = 0;
+        float turning = 0.0f;
         
         path->nbevel = 0;
         
@@ -2109,6 +2114,10 @@ static void nvg__calculateJoins(NVGcontext* ctx, float w, int lineJoin, float mi
                 p1->flags |= NVG_PT_LEFT;
             }
             
+            // How far the direction vector has swung, for the convexity test below.
+            if (path->nonzero)
+                turning += nvg__atan2f(cross, p0->dx * p1->dx + p0->dy * p1->dy);
+            
             // Calculate if we should use bevel or miter for inner join.
             limit = nvg__maxf(1.01f, nvg__minf(p0->len, p1->len) * iw);
             if ((dmr2 * limit*limit) < 1.0f)
@@ -2126,8 +2135,10 @@ static void nvg__calculateJoins(NVGcontext* ctx, float w, int lineJoin, float mi
             
             p0 = p1++;
         }
-        
+
         path->convex = (nleft == path->count) ? 1 : 0;
+        if (path->convex && path->nonzero && nvg__absf(turning) > 3.0f * NVG_PI)
+            path->convex = 0;
     }
 }
 
@@ -3439,6 +3450,92 @@ void nvgDrawSDFGlyph(NVGcontext* ctx, int image, float x, float y, float w, floa
     nvg__drawSDFGlyphUV(ctx, image, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color);
 }
 
+// Copies the current path into `glyph` as the vector fallback, mapped back out of the record-time
+// transform so it is stored in plain em space and can be replayed at any size later.
+static void nvg__storeGlyphOutline(NVGcontext* ctx, NVGSDFGlyph* glyph, const float* xform)
+{
+    float inv[6];
+
+    if (NVG_SDF_GLYPH_MAX_MAGNIFICATION <= 0.0f)  // fallback disabled: don't pay for the outline
+        return;
+
+    if (ctx->ncommands == 0 || ctx->nvalues == 0 || !nvgTransformInverse(inv, xform))
+        return;
+
+    glyph->pathCommands.assign(ctx->commands, ctx->commands + ctx->ncommands);
+    glyph->pathValues.assign(ctx->commandValues, ctx->commandValues + ctx->nvalues);
+
+    // Commands are stored already transformed (see nvg__appendCommand), and every command holds
+    // whole x/y pairs, so undoing the transform pairwise recovers the em-space outline.
+    for (size_t i = 0; i + 1 < glyph->pathValues.size(); i += 2)
+        nvgTransformPoint(&glyph->pathValues[i], &glyph->pathValues[i + 1], inv,
+                          glyph->pathValues[i], glyph->pathValues[i + 1]);
+}
+
+// True when this glyph has to be drawn from its outline at `emPx` device pixels per em (the outline
+// is stored in em space, so that is exactly the resolution being asked of a tile that holds refPx of
+// them): either the tile would be magnified past what it can describe, or there is no tile at all.
+// Glyphs with no outline stored -- empty ones like space, and every glyph if the fallback is off --
+// are never candidates.
+static int nvg__sdfGlyphNeedsOutline(NVGSDFGlyph const& g, float emPx)
+{
+    if (g.pathCommands.empty() || g.refPx <= 0.0f)
+        return 0;
+
+    return g.image <= 0 || emPx > g.refPx * NVG_SDF_GLYPH_MAX_MAGNIFICATION;
+}
+
+// A run is drawn one way or the other, never mixed: filling a path reuses the temp vertex buffer the
+// tiles batch into, so the two cannot interleave. Since a run is laid out at a single size, that
+// costs nothing in practice -- the answer is the same for every glyph in it anyway.
+static int nvg__sdfRunNeedsOutlines(NVGcontext* ctx, uint64_t const* hashes, int count, float emPx)
+{
+    for (int i = 0; i < count; i++) {
+        auto const it = ctx->sdfGlyphs->find(hashes[i]);
+        if (it != ctx->sdfGlyphs->end() && nvg__sdfGlyphNeedsOutline(it->second, emPx))
+            return 1;
+    }
+
+    return 0;
+}
+
+// Fills a glyph's cached outline as a real path at transform `m` (em space -> device pixels). This is
+// what large text falls back to: re-tessellating at the final size is what keeps it exact, so unlike
+// the tile path it costs geometry on every draw. Consumes the current path, like nvgSaveSDFGlyph.
+static void nvg__fillGlyphOutline(NVGcontext* ctx, NVGSDFGlyph const& g, const float* m, NVGcolor color)
+{
+    NVGstate* state = nvg__getState(ctx);
+    NVGpaint paint;
+    float savedXform[6];
+
+    if (g.pathCommands.empty() || g.pathValues.empty())
+        return;
+
+    // nvg__appendCommands transforms the values it is handed in place, so give it a copy, with the
+    // glyph transform installed for the duration of the append.
+    static thread_local std::vector<uint8_t> cmds;
+    static thread_local std::vector<float> vals;
+    cmds.assign(g.pathCommands.begin(), g.pathCommands.end());
+    vals.assign(g.pathValues.begin(), g.pathValues.end());
+
+    memcpy(savedXform, state->xform, sizeof(savedXform));
+    memcpy(state->xform, m, sizeof(savedXform));
+
+    nvgBeginPath(ctx);
+    nvg__appendCommands(ctx, cmds.data(), (int)cmds.size(), vals.data(), (int)vals.size());
+    nvg__flattenPaths(ctx);
+    nvg__expandFill(ctx, state->shapeAntiAlias ? ctx->fringeWidth : 0.0f, NVG_MITER, 2.4f);
+
+    memcpy(state->xform, savedXform, sizeof(savedXform));
+
+    nvg__setPaintColor(&paint, color);
+    paint.innerColor.a *= state->alpha;
+    paint.outerColor.a *= state->alpha;
+
+    nvg__renderFill(ctx->backend, &paint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
+                    ctx->cache->bounds, ctx->cache->paths, ctx->cache->npaths);
+}
+
 int nvgSDFGlyphCached(NVGcontext* ctx, uint64_t hash)
 {
     return ctx->sdfGlyphs->find(hash) != ctx->sdfGlyphs->end() ? 1 : 0;
@@ -3450,6 +3547,23 @@ void nvgFillSDFGlyphRun(NVGcontext* ctx, uint64_t const* hashes, float const* xf
         return;
 
     NVGstate* state = nvg__getState(ctx);
+
+    float m[6];
+    memcpy(m, state->xform, sizeof(m));
+    nvgTransformPremultiply(m, &xforms[0]);
+
+    if (nvg__sdfRunNeedsOutlines(ctx, hashes, count, nvg__getAverageScale(m))) {
+        for (int i = 0; i < count; i++) {
+            auto const it = ctx->sdfGlyphs->find(hashes[i]);
+            if (it == ctx->sdfGlyphs->end())
+                continue;
+
+            memcpy(m, state->xform, sizeof(m));
+            nvgTransformPremultiply(m, &xforms[i * 6]);
+            nvg__fillGlyphOutline(ctx, it->second, m, color);
+        }
+        return;
+    }
 
     NVGvertex* verts = nvg__allocTempVerts(ctx, count * 6);
     if (verts == NULL)
@@ -3474,7 +3588,6 @@ void nvgFillSDFGlyphRun(NVGcontext* ctx, uint64_t const* hashes, float const* xf
         }
         curImage = g.image;
 
-        float m[6];
         memcpy(m, state->xform, sizeof(m));
         nvgTransformPremultiply(m, &xforms[i * 6]);
 
@@ -3518,8 +3631,21 @@ static int nvg__buildGlyphSDF(NVGcontext* ctx, uint64_t hash)
     float const sy0 = cache->bounds[1] - sdfPadding;
     int W = (int)ceilf(cache->bounds[2] - cache->bounds[0] + 2 * sdfPadding);
     int H = (int)ceilf(cache->bounds[3] - cache->bounds[1] + 2 * sdfPadding);
+    // A glyph past the tile limit could only be stored cropped, i.e. with part of it missing.
+    int const croppedTile = W > maxTile || H > maxTile;
     W = nvg__clampi((W + 3) & ~3, 4, maxTile);
     H = nvg__clampi(H, 1, maxTile);
+
+    // Keep the outline alongside the tile: it is what oversized draws are filled from, and the only
+    // thing left to draw with if the tile itself turns out to be unusable.
+    NVGSDFGlyph glyph = {};
+    glyph.refPx = S;
+    nvg__storeGlyphOutline(ctx, &glyph, state->xform);
+
+    if (croppedTile && !glyph.pathCommands.empty()) {
+        (*ctx->sdfGlyphs)[hash] = glyph;
+        return 1;
+    }
 
     // Collect flattened segments, offset into tile-pixel space, closing each subpath.
     struct Seg { float ax, ay, bx, by; };
@@ -3562,9 +3688,13 @@ static int nvg__buildGlyphSDF(NVGcontext* ctx, uint64_t hash)
         }
     }
 
-    NVGSDFGlyph glyph = {};
-    if (!nvg__uploadSDFGlyphToAtlas(ctx, W, H, pixels.data(), &glyph))
-        return 0;
+    if (!nvg__uploadSDFGlyphToAtlas(ctx, W, H, pixels.data(), &glyph)) {
+        // Out of atlas space: drawing the glyph as a path beats not drawing it at all.
+        if (glyph.pathCommands.empty())
+            return 0;
+        (*ctx->sdfGlyphs)[hash] = glyph;
+        return 1;
+    }
 
     glyph.ex0 = sx0 / S;
     glyph.ey0 = sy0 / S;
@@ -3601,7 +3731,13 @@ int nvgFillSDFGlyph(NVGcontext* ctx, uint64_t hash, NVGcolor color)
     if (it == ctx->sdfGlyphs->end())
         return 0;
     NVGSDFGlyph const& g = it->second;
-    if (g.image > 0)
+
+    float m[6];
+    memcpy(m, nvg__getState(ctx)->xform, sizeof(m));
+
+    if (nvg__sdfGlyphNeedsOutline(g, nvg__getAverageScale(m)))
+        nvg__fillGlyphOutline(ctx, g, m, color);
+    else if (g.image > 0)
         nvg__drawSDFGlyphUV(ctx, g.image, g.ex0, g.ey0, g.ew, g.eh, g.u0, g.v0, g.u1, g.v1, color);
     return 1;
 }

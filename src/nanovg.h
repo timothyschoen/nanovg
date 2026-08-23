@@ -556,6 +556,12 @@ void nvgDrawSDFGlyph(NVGcontext* ctx, int image, float x, float y, float w, floa
 // scale transform, like a glyph outline) and caches it under `hash`; returns 1 on success (or a
 // handled empty glyph), -1 if it could not be created. nvgFillSDFGlyph draws the cached tile for
 // `hash` at the current transform, returning 1 if an entry exists and 0 if it is not cached yet.
+// The outline is cached along with the tile: a glyph asked for at more than
+// NVG_SDF_GLYPH_MAX_MAGNIFICATION times the scale its tile was rasterised at (as is a glyph too big
+// to fit a tile at all) is filled as a real re-tessellated path instead, which is exact at any size
+// but costs geometry per draw. Callers do not need to do anything for this. nvgFillSDFGlyphRun
+// assumes a run is laid out at one size and chooses once for the whole run, off the first glyph.
+// Note that the outline fill, like nvgSaveSDFGlyph, consumes the current path.
 int32_t nvgSaveSDFGlyph(NVGcontext* ctx, uint64_t hash);
 int nvgFillSDFGlyph(NVGcontext* ctx, uint64_t hash, NVGcolor color);
 
