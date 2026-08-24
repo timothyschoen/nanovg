@@ -1191,7 +1191,8 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
             {
                 float alphaMult = std::clamp((width * 0.4f) / fringe, 0.0f, 1.0f);
                 alphaMult *= alphaMult;
-                frag->innerCol = (frag->innerCol & 0xFFFFFF00) | (uint32_t)((frag->innerCol & 0xFF) * alphaMult);
+                uint32_t alpha = (frag->innerCol >> 24) & 0xFF;
+                frag->innerCol = (frag->innerCol & 0x00FFFFFF) | ((uint32_t)(alpha * alphaMult) << 24);
             }
 
 

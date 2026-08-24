@@ -955,7 +955,8 @@ int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs) {
                 if(alphaMult < 0.0f) alphaMult = 0.0f;
                 if(alphaMult > 1.0f) alphaMult = 1.0f;
                 alphaMult *= alphaMult;
-                frag->innerCol = (frag->innerCol & 0xFFFFFF00) | (uint32_t)((frag->innerCol & 0xFF) * alphaMult);
+                uint32_t alpha = ((uint32_t)frag->innerCol >> 24) & 0xFF;
+                frag->innerCol = (int)(((uint32_t)frag->innerCol & 0x00FFFFFFu) | ((uint32_t)(alpha * alphaMult) << 24));
             }
             break;
         }
