@@ -187,6 +187,9 @@ __attribute__((objc_direct_members))
 @property (nonatomic, assign) vector_uint2 viewPortSize;
 @property (nonatomic, assign) MTLClearColor clearColor;
 @property (nonatomic, assign) BOOL clearBufferOnFlush;
+@property (nonatomic, assign) BOOL captureNextGPUTime;
+@property (nonatomic, assign) BOOL gpuTimeReady;
+@property (nonatomic, assign) double lastGPUTimeMs;
 @property (nonatomic, assign) int lastUniformOffset;
 @property (nonatomic, assign) int lastBoundTexture;
 @property (nonatomic, weak)   id<MTLTexture> lastColorTexture;
@@ -730,6 +733,23 @@ void nvgReadPixels(NVGcontext* ctx, NVGframebuffer* fb, int x, int y, int width,
 void* mnvgDevice(NVGcontext* ctx) {
     MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
     return (__bridge void*)mtl.metalLayer.device;
+}
+
+void mnvgBeginGPUTimer(NVGcontext* ctx) {
+    if (ctx == NULL) return;
+    MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
+    mtl.captureNextGPUTime = YES;
+}
+
+int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs) {
+    if (ctx == NULL || gpuTimeMs == NULL) return 0;
+    MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
+    @synchronized (mtl) {
+        if (!mtl.gpuTimeReady) return 0;
+        *gpuTimeMs = mtl.lastGPUTimeMs;
+        mtl.gpuTimeReady = NO;
+        return 1;
+    }
 }
 
 @implementation MNVGbuffers
@@ -1529,9 +1549,22 @@ error:
     __block MNVGbuffers* buffers = _buffers;
     __weak MNVGcontext* weakSelf = self;
     __weak MNVGbuffers* weakBuffers = buffers;
+    BOOL const captureGPUTime = _captureNextGPUTime;
+    _captureNextGPUTime = NO;
     
     [commandBuffer enqueue];
     [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
+        MNVGcontext* strongSelf = weakSelf;
+        if (captureGPUTime && strongSelf && buffer.status == MTLCommandBufferStatusCompleted) {
+            CFTimeInterval const start = buffer.GPUStartTime;
+            CFTimeInterval const end = buffer.GPUEndTime;
+            if (end > start) {
+                @synchronized (strongSelf) {
+                    strongSelf.lastGPUTimeMs = (end - start) * 1000.0;
+                    strongSelf.gpuTimeReady = YES;
+                }
+            }
+        }
         if(weakBuffers) {
             MNVGrenderData* renderData = [weakBuffers renderData];
             renderData->image = 0;
@@ -1542,8 +1575,8 @@ error:
             [weakBuffers setIsBusy:NO];
             [weakBuffers setCommandBuffer:nil];
         }
-        if(weakSelf) {
-            dispatch_semaphore_signal([weakSelf semaphore]);
+        if(strongSelf) {
+            dispatch_semaphore_signal([strongSelf semaphore]);
         }
     }];
     

@@ -77,6 +77,14 @@ NVGcontext* nvgCreateContextForLayer(void* metalLayer, int flags, int width, int
 
 void mnvgSetLayerDrawableSize(void* metalLayer, int width, int height);
 
+// Captures the GPU execution time of the next NanoVG frame submitted through
+// this context. Results become available asynchronously after the Metal command
+// buffer completes. `mnvgGetGPUTimerResult` returns 1 once per completed query
+// and writes milliseconds to `gpuTimeMs`; otherwise it returns 0.
+void mnvgBeginGPUTimer(NVGcontext* ctx);
+
+int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs);
+
 // Deletes the specified NanoVG context.
 void nvgDeleteMTL(NVGcontext* ctx);
 
