@@ -85,6 +85,7 @@ enum NVGimageFlagsGL {
 
 enum GLNVGuniformLoc {
     GLNVG_LOC_VIEWSIZE,
+    GLNVG_LOC_XFORM,
     GLNVG_LOC_TEX,
     GLNVG_LOC_FRAG,
     GLNVG_MAX_LOCS
@@ -153,9 +154,14 @@ struct GLNVGcall {
     int triangleOffset;
     int triangleCount;
     int uniformOffset;
+    // 2x3 matrix the vertex shader applies to this call's vertices; identity for
+    // everything except a cached path replayed at a transform it was not saved at.
+    float xform[6];
     GLNVGblend blendFunc;
 };
 typedef struct GLNVGcall GLNVGcall;
+
+static const float kGLNVGidentityXform[6] = { 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
 
 struct GLNVGpath {
     int fillOffset;
@@ -409,6 +415,7 @@ static void glnvg__deleteShader(GLNVGshader* shader)
 static void glnvg__getUniforms(GLNVGshader* shader)
 {
     shader->loc[GLNVG_LOC_VIEWSIZE] = glGetUniformLocation(shader->prog, "viewSize");
+    shader->loc[GLNVG_LOC_XFORM] = glGetUniformLocation(shader->prog, "xform");
     shader->loc[GLNVG_LOC_TEX] = glGetUniformLocation(shader->prog, "tex");
     shader->loc[GLNVG_LOC_FRAG] = glGetUniformBlockIndex(shader->prog, "frag");
 }
@@ -616,8 +623,13 @@ int nvg__renderCreate(void* uptr)
     << "#define NSVG_TEXTURE_ARGB_SRGB             " << NVG_TEXTURE_ARGB_SRGB << "\n"
     << "\n";
 
+    // xform is a 2x3 affine matrix, (a, b, c, d) then (e, f), applied to every vertex of
+    // the draw call so a cached path can be replayed at a new transform without the CPU
+    // rewriting its vertices. With the identity the math is x*1 + y*0 + 0, which is exact,
+    // so ordinary draws rasterize exactly as they did when vertex was used directly.
     static char const* fillVertShader = R"(
         uniform vec2 viewSize;
+        uniform vec4 xform[2];
         in vec2 vertex;
         in vec4 tcoord;
         out vec2 ftcoord;
@@ -625,10 +637,14 @@ int nvg__renderCreate(void* uptr)
         smooth out vec2 uv;
 
         void main(void) {
+            vec2 pos = vec2(vertex.x*xform[0].x + vertex.y*xform[0].z + xform[1].x,
+                            vertex.x*xform[0].y + vertex.y*xform[0].w + xform[1].y);
             ftcoord = tcoord.xy * 2.0f;
             uv = tcoord.zw;
-            fpos = vertex;
-            gl_Position = vec4(2.0f*vertex.x/viewSize.x - 1.0f, 1.0f - 2.0f*vertex.y/viewSize.y, 0.f, 1.f);
+            // Still the final device-space position, so the fragment shader's scissor and
+            // paint matrices keep working unchanged.
+            fpos = pos;
+            gl_Position = vec4(2.0f*pos.x/viewSize.x - 1.0f, 1.0f - 2.0f*pos.y/viewSize.y, 0.f, 1.f);
         }
     )";
 
@@ -1409,11 +1425,26 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
 
         glBindBuffer(GL_UNIFORM_BUFFER, gl->fragBuf);
 
+        // Seeded so the first call always uploads; setting it once per frame is not
+        // enough because the uniform is per-call state.
+        float lastXform[6] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+
         for (i = 0; i < gl->ncalls; i++)
         {
             GLNVGcall* call = &gl->calls[i];
 
             glnvg__blendFuncSeparate(gl, &call->blendFunc);
+
+            // A run of ordinary (identity) draws costs one memcmp each and no GL call.
+            if (memcmp(lastXform, call->xform, sizeof(lastXform)) != 0)
+            {
+                float packed[8] = {
+                    call->xform[0], call->xform[1], call->xform[2], call->xform[3],
+                    call->xform[4], call->xform[5], 0.0f, 0.0f
+                };
+                glUniform4fv(gl->shader.loc[GLNVG_LOC_XFORM], 2, packed);
+                memcpy(lastXform, call->xform, sizeof(lastXform));
+            }
 
             switch (call->type)
             {
@@ -1449,8 +1480,9 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
                         const bool sameBlend = memcmp(&next->blendFunc, &call->blendFunc, sizeof(call->blendFunc)) == 0;
                         GLNVGfragUniforms* nextUniforms = nvg__fragUniformPtr(gl, next->uniformOffset);
                         const bool sameUniforms = memcmp(uniforms, nextUniforms, sizeof(GLNVGfragUniforms)) == 0;
+                        const bool sameXform = memcmp(next->xform, call->xform, sizeof(call->xform)) == 0;
 
-                        if (!contiguous || !sameImage || !sameBlend || !sameUniforms)
+                        if (!contiguous || !sameImage || !sameBlend || !sameUniforms || !sameXform)
                         {
                             break;
                         }
@@ -1584,7 +1616,7 @@ static void glnvg__vset(NVGvertex* vtx, float x, float y, float u, float v)
 }
 
 void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe,
-                     const float* bounds, const NVGpath* paths, int npaths)
+                     const float* bounds, const float* xform, const NVGpath* paths, int npaths)
 {
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
     GLNVGcall* call = glnvg__allocCall(gl);
@@ -1601,6 +1633,7 @@ void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState com
     call->pathCount = npaths;
     call->image = paint->image;
     call->blendFunc = glnvg__blendCompositeOperation(compositeOperation);
+    memcpy(call->xform, xform ? xform : kGLNVGidentityXform, sizeof(call->xform));
 
     if (npaths == 1 && paths[0].convex)
     {
@@ -1665,7 +1698,7 @@ error:
 }
 
 void nvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe,
-                       float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths, int npaths)
+                       float strokeWidth, int lineStyle, float lineLength, const float* xform, const NVGpath* paths, int npaths)
 {
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
     GLNVGcall* call = glnvg__allocCall(gl);
@@ -1681,6 +1714,7 @@ void nvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState c
     call->pathCount = npaths;
     call->image = paint->image;
     call->blendFunc = glnvg__blendCompositeOperation(compositeOperation);
+    memcpy(call->xform, xform ? xform : kGLNVGidentityXform, sizeof(call->xform));
 
     // Allocate vertices for all the paths.
     maxverts = glnvg__maxVertCount(paths, npaths);
@@ -1725,6 +1759,7 @@ void nvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationStat
     call->type = GLNVG_TRIANGLES;
     call->image = paint->image;
     call->blendFunc = glnvg__blendCompositeOperation(compositeOperation);
+    memcpy(call->xform, kGLNVGidentityXform, sizeof(call->xform));
 
     // Allocate vertices for all the paths.
     call->triangleOffset = glnvg__allocVerts(gl, nverts);

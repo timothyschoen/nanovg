@@ -33,7 +33,7 @@ result=true
 
 PREFIX="mnvg_bitcode"
 
-mkdir $PREFIX
+mkdir -p $PREFIX
 
 execute_cmd() {
   SDK=$1
@@ -52,6 +52,8 @@ execute_cmd() {
     CMD="$CMD -target air64-apple-ios12.0-simulator"
   elif [ $SDK = "macosx" ]; then
     CMD="$CMD -mmacosx-version-min=10.15"
+  elif [ $SDK = "appletvos" ]; then
+    CMD="$CMD -mtvos-version-min=12.0"
   fi
 
   CMD="$CMD -o $AIR_FILE_NAME"
@@ -67,7 +69,7 @@ execute_cmd() {
   return 0
 }
 
-for SDK in "iphoneos" "iphonesimulator" "macosx"; do
+for SDK in "iphoneos" "iphonesimulator" "macosx" "appletvos"; do
     if [ $SDK = "iphoneos" ]; then
         echo "* Compiling for iOS..."
         TARGET="ios"
@@ -77,6 +79,9 @@ for SDK in "iphoneos" "iphonesimulator" "macosx"; do
     elif [ $SDK = "macosx" ]; then
         echo "* Compiling for macOS..."
         TARGET="macos"
+    elif [ $SDK = "appletvos" ]; then
+        echo "* Compiling for tvOS..."
+        TARGET="tvos"
     fi
 
     execute_cmd $SDK $TARGET

@@ -62,7 +62,17 @@
 typedef enum MNVGvertexInputIndex {
     MNVG_VERTEX_INPUT_INDEX_VERTICES = 0,
     MNVG_VERTEX_INPUT_INDEX_VIEW_SIZE = 1,
+    MNVG_VERTEX_INPUT_INDEX_XFORM = 2,
 } MNVGvertexInputIndex;
+
+// Mirrors `VertexTransform` in nanovg_mtl_shaders.metal.
+struct MNVGvertexTransform {
+    vector_float4 row01;   // a, b, c, d
+    vector_float4 offset;  // e, f, unused, unused
+};
+typedef struct MNVGvertexTransform MNVGvertexTransform;
+
+static const float kMNVGidentityXform[6] = { 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
 
 enum MNVGcallType {
     MNVG_NONE = 0,
@@ -107,6 +117,9 @@ struct MNVGcall {
     int strokeOffset;
     int strokeCount;
     int uniformOffset;
+    // 2x3 matrix the vertex shader applies to this call's vertices; identity for
+    // everything except a cached path replayed at a transform it was not saved at.
+    float xform[6];
     MNVGblend blendFunc;
 };
 typedef struct MNVGcall MNVGcall;
@@ -256,6 +269,7 @@ stencilOnlyPipelineState;
                     scissor:(NVGscissor*)scissor
                      fringe:(float)fringe
                      bounds:(const float*)bounds
+                      xform:(const float*)xform
                       paths:(const NVGpath*)paths
                      npaths:(int)npaths;
 
@@ -278,6 +292,7 @@ stencilOnlyPipelineState;
                   strokeWidth:(float)strokeWidth
                     lineStyle:(int)lineStyle
                    lineLength:(float)lineLength
+                        xform:(const float*)xform
                         paths:(const NVGpath*)paths
                        npaths:(int)npaths;
 
@@ -409,14 +424,15 @@ int nvg__renderDeleteTexture(void* uptr, int image) {
 void nvg__renderFill(void* uptr, NVGpaint* paint,
                      NVGcompositeOperationState compositeOperation,
                      NVGscissor* scissor, float fringe,
-                     const float* bounds, const NVGpath* paths,
-                     int npaths) {
+                     const float* bounds, const float* xform,
+                     const NVGpath* paths, int npaths) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
     [mtl renderFillWithPaint:paint
           compositeOperation:compositeOperation
                      scissor:scissor
                       fringe:fringe
                       bounds:bounds
+                       xform:xform
                        paths:paths
                       npaths:npaths];
 }
@@ -441,7 +457,8 @@ int nvg__renderGetMaxTextureSize(void* uptr) {
 void nvg__renderStroke(void* uptr, NVGpaint* paint,
                        NVGcompositeOperationState compositeOperation,
                        NVGscissor* scissor, float fringe,
-                       float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths,
+                       float strokeWidth, int lineStyle, float lineLength,
+                       const float* xform, const NVGpath* paths,
                        int npaths) {
     MNVGcontext* mtl = (__bridge MNVGcontext*)uptr;
     [mtl renderStrokeWithPaint:paint
@@ -451,6 +468,7 @@ void nvg__renderStroke(void* uptr, NVGpaint* paint,
                    strokeWidth:strokeWidth
                      lineStyle:lineStyle
                     lineLength:lineLength
+                         xform:xform
                          paths:paths
                         npaths:npaths];
 }
@@ -758,7 +776,10 @@ int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs) {
 @implementation MNVGbuffers
 @end
 
-@implementation MNVGcontext
+@implementation MNVGcontext {
+    // Last vertex transform uploaded to the current encoder; see -setVertexTransform:.
+    float _lastVertexXform[6];
+}
 
 - (MNVGcall*)allocCall {
     MNVGcall* ret = NULL;
@@ -1082,6 +1103,16 @@ int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs) {
                      atIndex:MNVG_VERTEX_INPUT_INDEX_VIEW_SIZE];
     
     [encoder setFragmentBuffer:_buffers.uniformBuffer offset:0 atIndex:0];
+    
+    // setVertexBytes state is per-encoder, so seed both the encoder and the cache that
+    // -setVertexTransform: compares against.
+    MNVGvertexTransform identity;
+    identity.row01 = (vector_float4){ 1.0f, 0.0f, 0.0f, 1.0f };
+    identity.offset = (vector_float4){ 0.0f, 0.0f, 0.0f, 0.0f };
+    [encoder setVertexBytes:&identity
+                     length:sizeof(identity)
+                    atIndex:MNVG_VERTEX_INPUT_INDEX_XFORM];
+    memcpy(_lastVertexXform, kMNVGidentityXform, sizeof(_lastVertexXform));
     
     return encoder;
 }
@@ -1475,6 +1506,7 @@ int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs) {
                     scissor:(NVGscissor*)scissor
                      fringe:(float)fringe
                      bounds:(const float*)bounds
+                      xform:(const float*)xform
                       paths:(const NVGpath*)paths
                      npaths:(int)npaths {
     MNVGcall* call = [self allocCall];
@@ -1487,6 +1519,7 @@ int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs) {
     call->triangleCount = 4;
     call->image = paint->image;
     call->blendFunc = [self blendCompositeOperation:compositeOperation];
+    memcpy(call->xform, xform ? xform : kMNVGidentityXform, sizeof(call->xform));
     
     if (npaths == 1 && paths[0].convex) {
         call->type = MNVG_CONVEXFILL;
@@ -1661,6 +1694,10 @@ error:
         [self updateRenderPipelineStatesForBlend:blend
                                      pixelFormat:colorTexture.pixelFormat];
 
+        // Must precede every draw of this call, including the stencil-only pass in
+        // -fill:, which runs before -setUniforms:.
+        [self setVertexTransform:call->xform];
+
         if (call->type == MNVG_TRIANGLES)
         {
             int vertexStart = call->triangleOffset;
@@ -1680,6 +1717,10 @@ error:
 
                 // Must use the same shader uniforms.
                 if (next->uniformOffset != call->uniformOffset)
+                    break;
+
+                // Must use the same vertex transform.
+                if (memcmp(next->xform, call->xform, sizeof(call->xform)) != 0)
                     break;
 
                 // Must use the same blending.
@@ -1829,6 +1870,7 @@ error:
                   strokeWidth:(float)strokeWidth
                     lineStyle: (int)lineStyle
                    lineLength: (float)lineLength
+                        xform:(const float*)xform
                         paths:(const NVGpath*)paths
                        npaths:(int)npaths
 {
@@ -1840,6 +1882,7 @@ error:
     call->type = MNVG_STROKE;
     call->image = paint->image;
     call->blendFunc = [self blendCompositeOperation:compositeOperation];
+    memcpy(call->xform, xform ? xform : kMNVGidentityXform, sizeof(call->xform));
     
     // Allocate vertices for all the paths.
     int strokeCount = 0;
@@ -1899,6 +1942,7 @@ error:
 
     MNVGrenderData* renderData = _renderData;
     call->type = MNVG_TRIANGLES;
+    memcpy(call->xform, kMNVGidentityXform, sizeof(call->xform));
     call->image = paint->image;
     call->blendFunc = [self blendCompositeOperation:compositeOperation];
     
@@ -2068,6 +2112,21 @@ error:
     float* viewSize = (float*)[_buffers.viewSizeBuffer contents];
     viewSize[0] = width;
     viewSize[1] = height;
+}
+
+// Uploads the call's vertex transform. Cached with the last value set, so a run of
+// ordinary (identity) draws costs one memcmp each and never touches the encoder.
+- (void)setVertexTransform:(const float*)xform {
+    if (memcmp(_lastVertexXform, xform, sizeof(_lastVertexXform)) == 0)
+        return;
+    memcpy(_lastVertexXform, xform, sizeof(_lastVertexXform));
+
+    MNVGvertexTransform transform;
+    transform.row01 = (vector_float4){ xform[0], xform[1], xform[2], xform[3] };
+    transform.offset = (vector_float4){ xform[4], xform[5], 0.0f, 0.0f };
+    [_renderEncoder setVertexBytes:&transform
+                            length:sizeof(transform)
+                           atIndex:MNVG_VERTEX_INPUT_INDEX_XFORM];
 }
 
 - (void)setUniforms:(int)uniformOffset image:(int)image {

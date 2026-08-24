@@ -873,8 +873,11 @@ int nvg__renderGetImageTextureId(void* uptr, int handle);
 void nvg__renderViewport(void* uptr, float width, float height, float devicePixelRatio);
 void nvg__renderCancel(void* uptr);
 void nvg__renderFlush(void* uptr, NVGscissorBounds scissor);
-void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, const float* bounds, const NVGpath* paths, int npaths);
-void nvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths, int npaths);
+// `xform` is a 2x3 affine matrix the backend's vertex shader applies to every vertex of
+// the call, letting cached paths be drawn at a new transform without touching the
+// vertices on the CPU. NULL means identity, which is what every uncached draw passes.
+void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, const float* bounds, const float* xform, const NVGpath* paths, int npaths);
+void nvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, float strokeWidth, int lineStyle, float lineLength, const float* xform, const NVGpath* paths, int npaths);
 void nvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe, int text);
 void nvg__renderDelete(void* uptr);
 int nvg__isTexture(void* uptr, int image);

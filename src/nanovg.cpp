@@ -2796,102 +2796,39 @@ int32_t nvgSavePath(NVGcontext* ctx, uint32_t pathId)
     return pathId;
 }
 
-struct NVGcachedDrawScratch {
-    std::vector<NVGvertex> verts;
-    std::vector<NVGpath> paths;
-};
-
-static const NVGpath* nvg__cachedPathsInCurrentSpace(StrokeCacheLine const& cacheEntry, const float* xform, float* bounds, int* npaths)
+static bool nvg__cachedPathXform(StrokeCacheLine const& cacheEntry, const float* xform, float* out)
 {
-    *npaths = (int)cacheEntry.paths.size();
-
     if (memcmp(cacheEntry.saveTransform, xform, 6 * sizeof(float)) == 0) {
-        memcpy(bounds, cacheEntry.bounds, 4 * sizeof(float));
-        return cacheEntry.paths.data();
+        nvgTransformIdentity(out);
+        return true;
     }
 
-    float totalTransform[6];
-    nvgTransformInverse(totalTransform, cacheEntry.saveTransform);
-    nvgTransformMultiply(totalTransform, xform);
-
-    // If only the translation differs, add it instead of running every vertex through a
-    // matrix that is only approximately the identity.
-    bool const translationOnly =
-        cacheEntry.saveTransform[0] == xform[0] && cacheEntry.saveTransform[1] == xform[1] &&
-        cacheEntry.saveTransform[2] == xform[2] && cacheEntry.saveTransform[3] == xform[3];
-
-    float const a = totalTransform[0], b = totalTransform[1], c = totalTransform[2];
-    float const d = totalTransform[3], e = totalTransform[4], f = totalTransform[5];
-
-    static thread_local NVGcachedDrawScratch scratch;
-
-    size_t totalVerts = 0;
-    for (auto const& path : cacheEntry.paths)
-        totalVerts += (size_t)path.nfill + (size_t)path.nstroke;
-
-    scratch.verts.resize(totalVerts);
-    scratch.paths.resize(cacheEntry.paths.size());
-
-    bool hasBounds = false;
-    size_t offset = 0;
-
-    auto transformVerts = [&](NVGvertex const* source, int const n) -> NVGvertex* {
-        if (n <= 0)
-            return NULL;
-
-        NVGvertex* dest = scratch.verts.data() + offset;
-        offset += (size_t)n;
-
-        for (int i = 0; i < n; i++) {
-            NVGvertex vertex = source[i];
-            if (translationOnly) {
-                vertex.x += e;
-                vertex.y += f;
-            } else {
-                float const x = source[i].x, y = source[i].y;
-                vertex.x = x * a + y * c + e;
-                vertex.y = x * b + y * d + f;
-            }
-            dest[i] = vertex;
-
-            if (!hasBounds) {
-                bounds[0] = bounds[2] = vertex.x;
-                bounds[1] = bounds[3] = vertex.y;
-                hasBounds = true;
-            } else {
-                bounds[0] = nvg__minf(bounds[0], vertex.x);
-                bounds[1] = nvg__minf(bounds[1], vertex.y);
-                bounds[2] = nvg__maxf(bounds[2], vertex.x);
-                bounds[3] = nvg__maxf(bounds[3], vertex.y);
-            }
-        }
-
-        return dest;
-    };
-
-    for (size_t i = 0; i < cacheEntry.paths.size(); i++) {
-        NVGpath path = cacheEntry.paths[i];
-        path.fill = transformVerts(cacheEntry.paths[i].fill, path.nfill);
-        path.stroke = transformVerts(cacheEntry.paths[i].stroke, path.nstroke);
-        scratch.paths[i] = path;
+    if (cacheEntry.saveTransform[0] == xform[0] && cacheEntry.saveTransform[1] == xform[1] &&
+        cacheEntry.saveTransform[2] == xform[2] && cacheEntry.saveTransform[3] == xform[3]) {
+        nvgTransformIdentity(out);
+        out[4] = xform[4] - cacheEntry.saveTransform[4];
+        out[5] = xform[5] - cacheEntry.saveTransform[5];
+        return false;
     }
 
-    if (!hasBounds)
-        memcpy(bounds, cacheEntry.bounds, 4 * sizeof(float));
-
-    return scratch.paths.data();
+    nvgTransformInverse(out, cacheEntry.saveTransform);
+    nvgTransformMultiply(out, xform);
+    return false;
 }
-
 
 void nvgDeletePath(NVGcontext* ctx, uint32_t pathId)
 {
-    for(auto& path : CACHE[pathId].paths)
+    auto const existing = CACHE.find(pathId);
+    if (existing == CACHE.end())
+        return;
+
+    for (auto& path : existing->second.paths)
     {
         free(path.stroke);
         free(path.fill);
     }
-    
-    CACHE.erase(pathId);
+
+    CACHE.erase(existing);
 }
 
 int nvgStrokeCachedPath(NVGcontext* ctx, uint32_t pathId)
@@ -2906,11 +2843,10 @@ int nvgStrokeCachedPath(NVGcontext* ctx, uint32_t pathId)
 
         auto const& cacheEntry = cacheItemIterator->second;
 
-        float bounds[4];
-        int npaths = 0;
-        const NVGpath* paths = nvg__cachedPathsInCurrentSpace(cacheEntry, state->xform, bounds, &npaths);
+        float xform[6];
+        bool const identity = nvg__cachedPathXform(cacheEntry, state->xform, xform);
 
-        nvg__renderStroke(ctx->backend, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth, strokeWidth, state->lineStyle, cacheEntry.lineLength, paths, npaths);
+        nvg__renderStroke(ctx->backend, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth, strokeWidth, state->lineStyle, cacheEntry.lineLength, identity ? NULL : xform, cacheEntry.paths.data(), (int)cacheEntry.paths.size());
         return 1;
     }
     
@@ -2927,11 +2863,10 @@ int nvgFillCachedPath(NVGcontext* ctx, uint32_t pathId)
 
         auto const& cacheEntry = cacheItemIterator->second;
 
-        float bounds[4];
-        int npaths = 0;
-        const NVGpath* paths = nvg__cachedPathsInCurrentSpace(cacheEntry, state->xform, bounds, &npaths);
+        float xform[6];
+        bool const identity = nvg__cachedPathXform(cacheEntry, state->xform, xform);
 
-        nvg__renderFill(ctx->backend, &fillPaint, state->compositeOperation, &state->scissor, ctx->fringeWidth, bounds, paths, npaths);
+        nvg__renderFill(ctx->backend, &fillPaint, state->compositeOperation, &state->scissor, ctx->fringeWidth, cacheEntry.bounds, identity ? NULL : xform, cacheEntry.paths.data(), (int)cacheEntry.paths.size());
         return 1;
     }
     
@@ -2954,7 +2889,7 @@ void nvgFill(NVGcontext* ctx)
     fillPaint.outerColor.a *= state->alpha;
     
     nvg__renderFill(ctx->backend, &fillPaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-                    ctx->cache->bounds, ctx->cache->paths, ctx->cache->npaths);
+                    ctx->cache->bounds, NULL, ctx->cache->paths, ctx->cache->npaths);
     
     // Count triangles
 #if DEBUG
@@ -2995,7 +2930,7 @@ void nvgStroke(NVGcontext* ctx)
         nvg__expandStroke(ctx, strokeWidth*0.5f, 0.0f, state->lineCap, state->lineJoin, state->lineStyle, state->miterLimit);
     
     nvg__renderStroke(ctx->backend, &strokePaint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-                      strokeWidth, state->lineStyle, ctx->currentLineLength, ctx->cache->paths, ctx->cache->npaths);
+                      strokeWidth, state->lineStyle, ctx->currentLineLength, NULL, ctx->cache->paths, ctx->cache->npaths);
     
 }
 
@@ -3577,7 +3512,7 @@ static void nvg__fillGlyphOutline(NVGcontext* ctx, NVGSDFGlyph const& g, const f
     paint.outerColor.a *= state->alpha;
 
     nvg__renderFill(ctx->backend, &paint, state->compositeOperation, &state->scissor, ctx->fringeWidth,
-                    ctx->cache->bounds, ctx->cache->paths, ctx->cache->npaths);
+                    ctx->cache->bounds, NULL, ctx->cache->paths, ctx->cache->npaths);
 }
 
 int nvgSDFGlyphCached(NVGcontext* ctx, uint64_t hash)
