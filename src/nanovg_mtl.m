@@ -205,6 +205,9 @@ __attribute__((objc_direct_members))
 @property (nonatomic, assign) int maxBuffers;
 @property (nonatomic, strong) dispatch_semaphore_t semaphore;
 
+@property (nonatomic, strong) dispatch_semaphore_t presentSemaphore;
+@property (nonatomic, assign) int maxPresentsInFlight;
+
 // Cached states.
 @property (nonatomic, assign) MNVGblend* blendFunc;
 @property (nonatomic, strong) id<MTLDepthStencilState> defaultStencilState;
@@ -1155,6 +1158,13 @@ int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs) {
     }
     _clearBufferOnFlush = NO;
     _semaphore = dispatch_semaphore_create(_maxBuffers);
+
+    // maximumDrawableCount is 2 or 3; clamp defensively in case the layer reports 0
+    // (it can, before the layer has been laid out).
+    _maxPresentsInFlight = (int)_metalLayer.maximumDrawableCount;
+    if (_maxPresentsInFlight < 2) _maxPresentsInFlight = 2;
+    if (_maxPresentsInFlight > 3) _maxPresentsInFlight = 3;
+    _presentSemaphore = dispatch_semaphore_create(_maxPresentsInFlight);
     
     // Initializes vertex descriptor.
     _vertexDescriptor = [MTLVertexDescriptor vertexDescriptor];
@@ -1387,9 +1397,18 @@ int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs) {
 }
 
 - (void)renderDelete {
-    
+    if (_presentSemaphore != nil) {
+        for (int i = 0; i < _maxPresentsInFlight; ++i) {
+            if (dispatch_semaphore_wait(_presentSemaphore,
+                                        dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC)) != 0)
+                break;
+        }
+        for (int i = 0; i < _maxPresentsInFlight; ++i)
+            dispatch_semaphore_signal(_presentSemaphore);
+    }
+
     [self renderCancel];
-    
+
     for (MNVGbuffers* buffers in _cbuffers) {
         buffers.commandBuffer = nil;
         buffers.viewSizeBuffer = nil;
@@ -1729,10 +1748,25 @@ error:
 
 - (void)blitTextureToScreen:(MNVGtexture *)mnvgTexture
 {
+    dispatch_semaphore_wait(_presentSemaphore, DISPATCH_TIME_FOREVER);
+
     // Create a blit command encoder
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
-    
+
+    if (commandBuffer == nil || blitEncoder == nil) {
+        dispatch_semaphore_signal(_presentSemaphore);
+        return;
+    }
+
+    __weak MNVGcontext* weakSelf = self;
+    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
+        MNVGcontext* strongSelf = weakSelf;
+        if (strongSelf) {
+            dispatch_semaphore_signal([strongSelf presentSemaphore]);
+        }
+    }];
+
     NSNumber* imageKey = @(mnvgTexture->id);
     id<MTLFence> fence = _framebufferFences[imageKey];
     if (fence) {
@@ -1771,6 +1805,9 @@ error:
     }
     else if(drawable) {
         [commandBuffer presentDrawable:drawable];
+        [commandBuffer commit];
+    }
+    else {
         [commandBuffer commit];
     }
 }

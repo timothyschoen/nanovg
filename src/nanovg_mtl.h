@@ -70,17 +70,10 @@ NVGcontext* mnvgCreateContext(void* view, int flags, int width, int height);
 
 void mnvgSetViewBounds(void* view, int width, int height);
 
-// Layer-based variants that never touch the hosting NSView/UIView, so they are
-// safe to call from a background render thread (the AppKit/UIKit view may only
-// be accessed on the main thread). `metalLayer` must be a `CAMetalLayer`.
 NVGcontext* nvgCreateContextForLayer(void* metalLayer, int flags, int width, int height);
 
 void mnvgSetLayerDrawableSize(void* metalLayer, int width, int height);
 
-// Captures the GPU execution time of the next NanoVG frame submitted through
-// this context. Results become available asynchronously after the Metal command
-// buffer completes. `mnvgGetGPUTimerResult` returns 1 once per completed query
-// and writes milliseconds to `gpuTimeMs`; otherwise it returns 0.
 void mnvgBeginGPUTimer(NVGcontext* ctx);
 
 int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs);
