@@ -1029,7 +1029,8 @@ int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs) {
 
 - (void)renderCancel {
     MNVGrenderData* renderData = _buffers.renderData;
-    
+    BOOL const heldSlot = (_buffers != nil && _buffers.isBusy);
+
     _buffers.isBusy = NO;
     if(renderData) {
         renderData->image = 0;
@@ -1038,12 +1039,9 @@ int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs) {
         renderData->ncalls = 0;
         renderData->nuniforms = 0;
     }
-    
-    // terrible, but it fixes a crash when closing the MNVGContext
-    // we need to be very sure that _semaphore has a value of at least 3
-    dispatch_semaphore_signal(_semaphore);
-    dispatch_semaphore_signal(_semaphore);
-    dispatch_semaphore_signal(_semaphore);
+
+    if (heldSlot)
+        dispatch_semaphore_signal(_semaphore);
 }
 
 - (id<MTLRenderCommandEncoder>)renderCommandEncoderWithColorTexture:
@@ -1405,6 +1403,16 @@ int mnvgGetGPUTimerResult(NVGcontext* ctx, double* gpuTimeMs) {
         }
         for (int i = 0; i < _maxPresentsInFlight; ++i)
             dispatch_semaphore_signal(_presentSemaphore);
+    }
+
+    if (_semaphore != nil) {
+        for (int i = 0; i < _maxBuffers; ++i) {
+            if (dispatch_semaphore_wait(_semaphore,
+                                        dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC)) != 0)
+                break;
+        }
+        for (int i = 0; i < _maxBuffers; ++i)
+            dispatch_semaphore_signal(_semaphore);
     }
 
     [self renderCancel];
