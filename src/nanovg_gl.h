@@ -85,6 +85,7 @@ enum NVGimageFlagsGL {
 
 enum GLNVGuniformLoc {
     GLNVG_LOC_VIEWSIZE,
+    GLNVG_LOC_XFORM,
     GLNVG_LOC_TEX,
     GLNVG_LOC_FRAG,
     GLNVG_MAX_LOCS
@@ -138,7 +139,6 @@ struct GLNVGblend
 typedef struct GLNVGblend GLNVGblend;
 
 enum GLNVGcallType {
-    GLNVG_NONE = 0,
     GLNVG_FILL,
     GLNVG_CONVEXFILL,
     GLNVG_STROKE,
@@ -153,9 +153,14 @@ struct GLNVGcall {
     int triangleOffset;
     int triangleCount;
     int uniformOffset;
+    // 2x3 matrix the vertex shader applies to this call's vertices; identity for
+    // everything except a cached path replayed at a transform it was not saved at.
+    float xform[6];
     GLNVGblend blendFunc;
 };
 typedef struct GLNVGcall GLNVGcall;
+
+static const float kGLNVGidentityXform[6] = { 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
 
 struct GLNVGpath {
     int fillOffset;
@@ -381,6 +386,11 @@ static int glnvg__createShader(GLNVGshader* shader, const char* header, const ch
 
     glBindAttribLocation(prog, 0, "vertex");
     glBindAttribLocation(prog, 1, "tcoord");
+    glBindAttribLocation(prog, 2, "linelen");
+    glBindAttribLocation(prog, 3, "vscissor");
+    glBindAttribLocation(prog, 4, "vpaint");
+    glBindAttribLocation(prog, 5, "vcol");
+    glBindAttribLocation(prog, 6, "vextent");
 
     glLinkProgram(prog);
     glGetProgramiv(prog, GL_LINK_STATUS, &status);
@@ -409,6 +419,7 @@ static void glnvg__deleteShader(GLNVGshader* shader)
 static void glnvg__getUniforms(GLNVGshader* shader)
 {
     shader->loc[GLNVG_LOC_VIEWSIZE] = glGetUniformLocation(shader->prog, "viewSize");
+    shader->loc[GLNVG_LOC_XFORM] = glGetUniformLocation(shader->prog, "xform");
     shader->loc[GLNVG_LOC_TEX] = glGetUniformLocation(shader->prog, "tex");
     shader->loc[GLNVG_LOC_FRAG] = glGetUniformBlockIndex(shader->prog, "frag");
 }
@@ -616,19 +627,43 @@ int nvg__renderCreate(void* uptr)
     << "#define NSVG_TEXTURE_ARGB_SRGB             " << NVG_TEXTURE_ARGB_SRGB << "\n"
     << "\n";
 
+    // xform is a 2x3 affine matrix, (a, b, c, d) then (e, f), applied to every vertex of
+    // the draw call so a cached path can be replayed at a new transform without the CPU
+    // rewriting its vertices. With the identity the math is x*1 + y*0 + 0, which is exact,
+    // so ordinary draws rasterize exactly as they did when vertex was used directly.
     static char const* fillVertShader = R"(
         uniform vec2 viewSize;
+        uniform vec4 xform[2];
         in vec2 vertex;
         in vec4 tcoord;
+        in float linelen;
+        in vec4 vscissor;
+        in vec2 vpaint;
+        in ivec2 vcol;
+        in vec2 vextent;
         out vec2 ftcoord;
         out vec2 fpos;
         smooth out vec2 uv;
+        out float flinelen;
+        flat out vec4 fvscissor;
+        smooth out vec2 fpaint;
+        flat out ivec2 fcol;
+        flat out vec2 fextent;
 
         void main(void) {
+            vec2 pos = vec2(vertex.x*xform[0].x + vertex.y*xform[0].z + xform[1].x,
+                            vertex.x*xform[0].y + vertex.y*xform[0].w + xform[1].y);
             ftcoord = tcoord.xy * 2.0f;
             uv = tcoord.zw;
-            fpos = vertex;
-            gl_Position = vec4(2.0f*vertex.x/viewSize.x - 1.0f, 1.0f - 2.0f*vertex.y/viewSize.y, 0.f, 1.f);
+            flinelen = linelen;
+            fvscissor = vscissor;
+            fpaint = vpaint;
+            fcol = vcol;
+            fextent = vextent;
+            // Still the final device-space position, so the fragment shader's scissor and
+            // paint matrices keep working unchanged.
+            fpos = pos;
+            gl_Position = vec4(2.0f*pos.x/viewSize.x - 1.0f, 1.0f - 2.0f*pos.y/viewSize.y, 0.f, 1.f);
         }
     )";
 
@@ -648,12 +683,12 @@ int nvg__renderCreate(void* uptr)
         layout(std140) uniform frag {
             affine_transform scissorMat;
             affine_transform paintMat;
-            int innerCol;
-            int outerCol;
-            int dashCol;
+            int uInnerCol;
+            int uOuterCol;
+            int uDashCol;
             int stateData;
             vec2 scissorExt;
-            vec2 extent;
+            vec2 uExtent;
             float radius;
             float feather;
             float strokeMult;
@@ -666,6 +701,11 @@ int nvg__renderCreate(void* uptr)
         in vec2 ftcoord;
         in vec2 fpos;
         smooth in vec2 uv;
+        in float flinelen;
+        flat in vec4 fvscissor;
+        smooth in vec2 fpaint;
+        flat in ivec2 fcol;
+        flat in vec2 fextent;
         out vec4 outColor;
 
         vec4 getRawColour(int bgra){
@@ -738,6 +778,14 @@ int nvg__renderCreate(void* uptr)
             float sc3 = fwidth(sc2) * 0.5;
             return clamp(inverseLerp(sc3, -sc3, sc2), 0.0f, 1.0f);
         }
+        // Axis-aligned per-vertex scissor: centre = fvscissor.xy, half-extent = fvscissor.zw
+        // (device space). Used when fvscissor.z >= 0 (see nvg__renderTriangles).
+        float boxScissorMask(vec2 p) {
+            vec2 sc = abs(p - fvscissor.xy);
+            float sc2 = sdroundrect(sc, fvscissor.zw, 0.0f) - 0.04f;
+            float sc3 = fwidth(sc2) * 0.5;
+            return clamp(inverseLerp(sc3, -sc3, sc2), 0.0f, 1.0f);
+        }
         float glow(vec2 uv){
             return smoothstep(0.0f, 1.0f, 1.0f - 2.0f * abs(uv.x));
         }
@@ -760,7 +808,7 @@ int nvg__renderCreate(void* uptr)
         // Stroke - from [0..1] to clipped pyramid, where the slope is 1px.
         float strokeMask(int lineStyle) {
             float mask = min(1.0f, (1.0f-abs(ftcoord.x*2.0f-1.0f))*strokeMult) * min(1.0f, ftcoord.y);
-            if(lineStyle == 2) mask*=dashed(vec2(uv.x, uv.y * lineLength - offset), radius, 0.45f, 0.0f);
+            if(lineStyle == 2) mask*=dashed(vec2(uv.x, uv.y * flinelen - offset), radius, 0.45f, 0.0f);
             if(lineStyle == 3) mask*=dotted(uv);
             if(lineStyle == 4) mask*=glow(uv);
             return mask;
@@ -886,13 +934,23 @@ int nvg__renderCreate(void* uptr)
         )" << R"(
         void main(void) {
             vec4 result;
-            float scissor = scissorMask(fpos, scissorRadius);
+            float scissor = (fvscissor.z >= 0.0f) ? boxScissorMask(fpos) : scissorMask(fpos, scissorRadius);
             if(scissor == 0.0f) {
                 outColor = vec4(0, 0, 0, 0);
             }
+            // Colours travel per-vertex for every non-stroke paint (see nvg__renderTriangles /
+            // nvg__renderFill); strokes keep the uniform colour. These locals shadow the block.
+            bool vcolActive = (type != NSVG_DOUBLE_STROKE && type != NSVG_DOUBLE_STROKE_GRAD &&
+                               type != NSVG_DOUBLE_STROKE_ACTIVITY && type != NSVG_DOUBLE_STROKE_GRAD_ACTIVITY);
+            int innerCol = vcolActive ? fcol.x : uInnerCol;
+            // dashCol stays in the uniform (only OBJECT_RECT uses it).
+            int outerCol = vcolActive ? fcol.y : uOuterCol;
+            int dashCol  = uDashCol;
+            // extent travels per-vertex for the rounded-rect paints; others keep the uniform.
+            vec2 extent = (type == NSVG_SHADER_FAST_ROUNDEDRECT || type == NSVG_SHADER_OBJECT_RECT) ? fextent : uExtent;
             switch(type) {
             case NSVG_SHADER_FAST_ROUNDEDRECT: {
-                vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy;
+                vec2 pt = fpaint;   // paint-local coordinate carried per-vertex
 
                 float oD = sdroundrect(pt, extent, radius) - 0.04f;
                 float outerD = fwidth(oD) * 0.5f;
@@ -905,7 +963,7 @@ int nvg__renderCreate(void* uptr)
                 return;
             }
             case NSVG_SHADER_OBJECT_RECT: {
-                vec2 pt = (transformInverse(paintMat) * vec3(fpos,1.0f)).xy;
+                vec2 pt = fpaint;   // paint-local coordinate carried per-vertex
 
                 int flagType = (stateData >> 9) & 0x03;     // 2 bits
                 float flagSize = 5.0f;
@@ -980,7 +1038,7 @@ int nvg__renderCreate(void* uptr)
                 // Deal with path flipping here - instead of in geometry
                 // We only need to flip the Y as the X (width) of the line is symmetrical currently
                 float revUVy = (getReverse()) ? 0.5f - uv.y : uv.y;
-                vec2 uvLine = vec2(uv.x, revUVy * lineLength);
+                vec2 uvLine = vec2(uv.x, revUVy * flinelen);
 
                 float zoom = 1.0f / length(transformInverse(paintMat)[0].xy);
                 float lineScale = mix(1.0, 2.0, smoothstep(1.0, 0.5, zoom));
@@ -989,7 +1047,7 @@ int nvg__renderCreate(void* uptr)
 
                 float innerMask = min(1.0f, (1.0f-abs(ftcoord.x*2.0f-1.0f))*strokeMult);
 
-                float seg = sdSegment(uvLine, vec2(0.0f), vec2(0.0f, lineLength * 0.5f));
+                float seg = sdSegment(uvLine, vec2(0.0f), vec2(0.0f, flinelen * 0.5f));
                 float outerSeg = seg - outerSize;
                 float outerDelta = fwidth(outerSeg);
                 float outerShape = clamp(inverseLerp(outerDelta, -outerDelta, outerSeg), 0.0f, 1.0f);
@@ -1020,14 +1078,14 @@ int nvg__renderCreate(void* uptr)
                         vec4 mixedResult = mix(overlay, convertColour(innerCol), innerShape);
                         cable = mixedResult * outerShape;
                     }
-                    float scaledUV = uv.y * 2.0f * lineLength;
+                    float scaledUV = uv.y * 2.0f * flinelen;
                     // Define the proportion of the line length where the fade should occur
                     float fadeProportion = 0.3;
 
                     // Calculate the fade range based on the line length, and make connections shorter than 60px solid
-                    float fadeRange = max(fadeProportion * lineLength, 60.0f);
+                    float fadeRange = max(fadeProportion * flinelen, 60.0f);
 
-                    float fade = smoothstep(0.4, fadeRange, scaledUV) * smoothstep(0.4, fadeRange, lineLength - scaledUV);
+                    float fade = smoothstep(0.4, fadeRange, scaledUV) * smoothstep(0.4, fadeRange, flinelen - scaledUV);
 
                     // limit fade transparency so it doesn't become fully transparent
                     fade = min(fade, 0.7f);
@@ -1140,10 +1198,24 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
     frag->stateData |= glnvg__packStateDataUniform(PACK_LINE_STYLE, lineStyle);
     frag->radius = paint->radius;
     frag->feather = paint->feather;
-    memcpy(frag->extent, paint->extent, sizeof(frag->extent));
+    // The rounded-rect shaders read extent per-vertex now (see nvg__renderTriangles),
+    // so keep it zeroed in the uniform for them -- constant across rects so they batch.
+    if (paint->type == PAINT_TYPE_FAST_ROUNDEDRECT || paint->type == PAINT_TYPE_OBJECT_RECT) {
+        frag->extent[0] = frag->extent[1] = 0.0f;
+    } else {
+        memcpy(frag->extent, paint->extent, sizeof(frag->extent));
+    }
     frag->strokeMult = (width * 0.5f + fringe * 0.5f) / fringe;
-    frag->lineLength = lineLength;
-    memcpy(frag->paintMat, paint->xform, 6 * sizeof(float));
+    // lineLength now travels per-vertex (NVGvertex::lineLength -> shader `flinelen`);
+    // keep this uniform field zeroed so same-paint cords of different lengths match.
+    (void)lineLength;
+    frag->lineLength = 0.0f;
+    // The rounded-rect shaders read the paint-local coordinate per-vertex now, so keep
+    // paintMat zeroed for them -- constant across rects of the same size, so they batch.
+    if (paint->type == PAINT_TYPE_FAST_ROUNDEDRECT || paint->type == PAINT_TYPE_OBJECT_RECT)
+        memset(frag->paintMat, 0, sizeof(frag->paintMat));
+    else
+        memcpy(frag->paintMat, paint->xform, 6 * sizeof(float));
 
     if (scissor->extent[0] < -0.5f || scissor->extent[1] < -0.5f) {
         memset(frag->scissorMat, 0, sizeof(frag->scissorMat));
@@ -1199,6 +1271,16 @@ static int glnvg__convertPaint(GLNVGcontext* gl, GLNVGfragUniforms* frag, NVGpai
 
             break;
         default: break;
+    }
+
+    // Non-stroke paints carry inner/outer colour per-vertex now (see nvg__renderTriangles /
+    // nvg__renderFill), so keep those uniform colours zeroed -- constant across draws so they
+    // don't block merging. dashCol stays in the uniform (only OBJECT_RECT reads it, and it
+    // rarely varies). Strokes keep the uniform colour (with its alpha fade).
+    if (paint->type != PAINT_TYPE_DOUBLE_STROKE && paint->type != PAINT_TYPE_DOUBLE_STROKE_GRAD &&
+        paint->type != PAINT_TYPE_DOUBLE_STROKE_ACTIVITY && paint->type != PAINT_TYPE_DOUBLE_STROKE_GRAD_ACTIVITY) {
+        frag->innerCol = 0;
+        frag->outerCol = 0;
     }
     return 1;
 }
@@ -1296,18 +1378,6 @@ static void glnvg__convexFill(GLNVGcontext* gl, GLNVGcall* call)
     }
 }
 
-static void glnvg__stroke(GLNVGcontext* gl, GLNVGcall* call)
-{
-    GLNVGpath* paths = &gl->paths[call->pathOffset];
-    int npaths = call->pathCount, i;
-
-    glnvg__setUniforms(gl, call->uniformOffset, call->image);
-    glnvg__checkError(gl, "stroke fill");
-    // Draw Strokes
-    for (i = 0; i < npaths; i++)
-        glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
-}
-
 void nvg__renderCancel(void* uptr) {
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
     gl->nverts = 0;
@@ -1400,8 +1470,18 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
 
         glEnableVertexAttribArray(0);
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(NVGvertex), (const GLvoid*)(size_t)0);
-        glVertexAttribPointer(1, 4, GL_SHORT, GL_TRUE, sizeof(NVGvertex), (const GLvoid*)(0 + 2*sizeof(float)));
+        glEnableVertexAttribArray(2);
+        glEnableVertexAttribArray(3);
+        glEnableVertexAttribArray(4);
+        glEnableVertexAttribArray(5);
+        glEnableVertexAttribArray(6);
+        glVertexAttribPointer(0, 2, GL_FLOAT,      GL_FALSE, sizeof(NVGvertex), (const GLvoid*)offsetof(NVGvertex, x));
+        glVertexAttribPointer(1, 4, GL_SHORT,      GL_TRUE,  sizeof(NVGvertex), (const GLvoid*)offsetof(NVGvertex, u));
+        glVertexAttribPointer(2, 1, GL_FLOAT,      GL_FALSE, sizeof(NVGvertex), (const GLvoid*)offsetof(NVGvertex, lineLength));
+        glVertexAttribPointer(3, 4, GL_FLOAT,      GL_FALSE, sizeof(NVGvertex), (const GLvoid*)offsetof(NVGvertex, scissorCX));
+        glVertexAttribPointer(4, 2, GL_HALF_FLOAT, GL_FALSE, sizeof(NVGvertex), (const GLvoid*)offsetof(NVGvertex, paintX));
+        glVertexAttribIPointer(5, 2, GL_INT,                 sizeof(NVGvertex), (const GLvoid*)offsetof(NVGvertex, vcolInner));
+        glVertexAttribPointer(6, 2, GL_HALF_FLOAT, GL_FALSE, sizeof(NVGvertex), (const GLvoid*)offsetof(NVGvertex, extentX));
 
         // Set view and texture just once per frame.
         glUniform1i(gl->shader.loc[GLNVG_LOC_TEX], 0);
@@ -1409,11 +1489,26 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
 
         glBindBuffer(GL_UNIFORM_BUFFER, gl->fragBuf);
 
+        // Seeded so the first call always uploads; setting it once per frame is not
+        // enough because the uniform is per-call state.
+        float lastXform[6] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+
         for (i = 0; i < gl->ncalls; i++)
         {
             GLNVGcall* call = &gl->calls[i];
 
             glnvg__blendFuncSeparate(gl, &call->blendFunc);
+
+            // A run of ordinary (identity) draws costs one memcmp each and no GL call.
+            if (memcmp(lastXform, call->xform, sizeof(lastXform)) != 0)
+            {
+                float packed[8] = {
+                    call->xform[0], call->xform[1], call->xform[2], call->xform[3],
+                    call->xform[4], call->xform[5], 0.0f, 0.0f
+                };
+                glUniform4fv(gl->shader.loc[GLNVG_LOC_XFORM], 2, packed);
+                memcpy(lastXform, call->xform, sizeof(lastXform));
+            }
 
             switch (call->type)
             {
@@ -1426,8 +1521,48 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
                     break;
 
                 case GLNVG_STROKE:
-                    glnvg__stroke(gl, call);
+                {
+                    // Gather this stroke plus any following strokes that share full draw
+                    // state (image + blend + xform + uniform contents) and draw all of
+                    // their strips in a single glMultiDrawArrays. Same-paint cords now
+                    // share a uniform (lineLength moved per-vertex), so a run of them
+                    // collapses from one glDrawArrays per sub-path to one multi-draw.
+                    static thread_local std::vector<GLint> strokeFirsts;
+                    static thread_local std::vector<GLsizei> strokeCounts;
+                    strokeFirsts.clear();
+                    strokeCounts.clear();
+
+                    GLNVGfragUniforms* uniforms = nvg__fragUniformPtr(gl, call->uniformOffset);
+                    int last = i;
+                    while (true) {
+                        GLNVGcall* sc = &gl->calls[last];
+                        GLNVGpath* spaths = &gl->paths[sc->pathOffset];
+                        for (int pi = 0; pi < sc->pathCount; pi++) {
+                            if (spaths[pi].strokeCount > 0) {
+                                strokeFirsts.push_back(spaths[pi].strokeOffset);
+                                strokeCounts.push_back(spaths[pi].strokeCount);
+                            }
+                        }
+                        if (last + 1 >= gl->ncalls)
+                            break;
+                        GLNVGcall* next = &gl->calls[last + 1];
+                        if (next->type != GLNVG_STROKE
+                            || next->image != call->image
+                            || memcmp(&next->blendFunc, &call->blendFunc, sizeof(call->blendFunc)) != 0
+                            || memcmp(next->xform, call->xform, sizeof(call->xform)) != 0
+                            || memcmp(nvg__fragUniformPtr(gl, next->uniformOffset), uniforms, sizeof(GLNVGfragUniforms)) != 0)
+                            break;
+                        ++last;
+                    }
+
+                    glnvg__setUniforms(gl, call->uniformOffset, call->image);
+                    glnvg__checkError(gl, "stroke fill");
+                    if (!strokeFirsts.empty())
+                        glMultiDrawArrays(GL_TRIANGLE_STRIP, strokeFirsts.data(), strokeCounts.data(), (GLsizei)strokeFirsts.size());
+
+                    i = last;   // the for-loop's ++i steps past the merged run
                     break;
+                }
 
                 case GLNVG_TRIANGLES:
                 {
@@ -1449,8 +1584,9 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
                         const bool sameBlend = memcmp(&next->blendFunc, &call->blendFunc, sizeof(call->blendFunc)) == 0;
                         GLNVGfragUniforms* nextUniforms = nvg__fragUniformPtr(gl, next->uniformOffset);
                         const bool sameUniforms = memcmp(uniforms, nextUniforms, sizeof(GLNVGfragUniforms)) == 0;
+                        const bool sameXform = memcmp(next->xform, call->xform, sizeof(call->xform)) == 0;
 
-                        if (!contiguous || !sameImage || !sameBlend || !sameUniforms)
+                        if (!contiguous || !sameImage || !sameBlend || !sameUniforms || !sameXform)
                         {
                             break;
                         }
@@ -1480,6 +1616,11 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
         }
         glDisableVertexAttribArray(0);
         glDisableVertexAttribArray(1);
+        glDisableVertexAttribArray(2);
+        glDisableVertexAttribArray(3);
+        glDisableVertexAttribArray(4);
+        glDisableVertexAttribArray(5);
+        glDisableVertexAttribArray(6);
         glBindVertexArray(0);
 
         glDisable(GL_CULL_FACE);
@@ -1487,6 +1628,7 @@ void nvg__renderFlush(void* uptr, NVGscissorBounds scissor)
         glUseProgram(0);
         glnvg__bindTexture(gl, 0);
     }
+
 
     // Reset calls
     gl->nverts = 0;
@@ -1574,6 +1716,19 @@ static GLNVGfragUniforms* nvg__fragUniformPtr(GLNVGcontext* gl, int i)
     return (GLNVGfragUniforms*)&gl->uniforms[i];
 }
 
+// float -> IEEE half bits (truncating). Only used for small positive rect-local values,
+// where half precision is exact for the .5-fraction sizes we produce.
+static uint16_t glnvg__f2h(float v)
+{
+    union { float f; uint32_t u; } x = { v };
+    uint32_t const u = x.u;
+    uint16_t const sign = (uint16_t)((u >> 16) & 0x8000u);
+    int32_t const e = (int32_t)((u >> 23) & 0xFFu) - 127 + 15;
+    if (e <= 0)    return sign;                              // too small / zero -> 0
+    if (e >= 0x1F) return (uint16_t)(sign | 0x7C00u);        // too large -> inf
+    return (uint16_t)(sign | (uint16_t)(e << 10) | (uint16_t)((u >> 13) & 0x3FFu));
+}
+
 static void glnvg__vset(NVGvertex* vtx, float x, float y, float u, float v)
 {
     int16_t scaling_factor = 1 << 14;
@@ -1581,16 +1736,24 @@ static void glnvg__vset(NVGvertex* vtx, float x, float y, float u, float v)
     vtx->y = y;
     vtx->u = u * scaling_factor;
     vtx->v = v * scaling_factor;
+    vtx->s = 0;
+    vtx->t = 0;
+    vtx->lineLength = 0.0f;
+    vtx->scissorCX = vtx->scissorCY = vtx->scissorHH = 0.0f;
+    vtx->scissorHW = -1.0f;   // fill quad uses the uniform scissor
+    vtx->vcolInner = vtx->vcolOuter = 0;
+    vtx->paintX = vtx->paintY = 0;
+    vtx->extentX = vtx->extentY = 0;
 }
 
 void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe,
-                     const float* bounds, const NVGpath* paths, int npaths)
+                     const float* bounds, const float* xform, const NVGpath* paths, int npaths)
 {
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
     GLNVGcall* call = glnvg__allocCall(gl);
     NVGvertex* quad;
     GLNVGfragUniforms* frag;
-    int i, maxverts, offset;
+    int i, maxverts, offset, fillFirstVert;
 
     if (call == NULL) return;
 
@@ -1601,6 +1764,7 @@ void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState com
     call->pathCount = npaths;
     call->image = paint->image;
     call->blendFunc = glnvg__blendCompositeOperation(compositeOperation);
+    memcpy(call->xform, xform ? xform : kGLNVGidentityXform, sizeof(call->xform));
 
     if (npaths == 1 && paths[0].convex)
     {
@@ -1612,6 +1776,7 @@ void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState com
     maxverts = glnvg__maxVertCount(paths, npaths) + call->triangleCount;
     offset = glnvg__allocVerts(gl, maxverts);
     if (offset == -1) goto error;
+    fillFirstVert = offset;
 
     for (i = 0; i < npaths; i++) {
         GLNVGpath* copy = &gl->paths[call->pathOffset + i];
@@ -1656,6 +1821,13 @@ void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState com
         glnvg__convertPaint(gl, frag, paint, scissor, fringe, fringe, -1.0f, 0.0f, 0);
     }
 
+    // Colours travel per-vertex so differently coloured fills share a uniform. Covers
+    // every vertex this fill allocated (path fills/strokes plus the fringe quad).
+    for (int cv = fillFirstVert; cv < fillFirstVert + maxverts; cv++) {
+        gl->verts[cv].vcolInner = paint->innerColor.rgba32;
+        gl->verts[cv].vcolOuter = paint->outerColor.rgba32;
+    }
+
     return;
 
 error:
@@ -1665,7 +1837,7 @@ error:
 }
 
 void nvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe,
-                       float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths, int npaths)
+                       float strokeWidth, int lineStyle, float lineLength, const float* xform, const NVGpath* paths, int npaths)
 {
     GLNVGcontext* gl = (GLNVGcontext*)uptr;
     GLNVGcall* call = glnvg__allocCall(gl);
@@ -1681,6 +1853,7 @@ void nvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState c
     call->pathCount = npaths;
     call->image = paint->image;
     call->blendFunc = glnvg__blendCompositeOperation(compositeOperation);
+    memcpy(call->xform, xform ? xform : kGLNVGidentityXform, sizeof(call->xform));
 
     // Allocate vertices for all the paths.
     maxverts = glnvg__maxVertCount(paths, npaths);
@@ -1696,6 +1869,14 @@ void nvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState c
             copy->strokeOffset = offset;
             copy->strokeCount = path->nstroke;
             memcpy(&gl->verts[offset], path->stroke, sizeof(NVGvertex) * path->nstroke);
+            // Carry the cord's total length per-vertex (see NVGvertex::lineLength), and the
+            // colours per-vertex too -- the shader reads them for every non-double-stroke
+            // paint (a plain nvgStroke uses e.g. FILLCOLOR), so they must be set here.
+            for (int v = 0; v < path->nstroke; v++) {
+                gl->verts[offset + v].lineLength = lineLength;
+                gl->verts[offset + v].vcolInner = paint->innerColor.rgba32;
+                gl->verts[offset + v].vcolOuter = paint->outerColor.rgba32;
+            }
             offset += path->nstroke;
         }
     }
@@ -1713,6 +1894,26 @@ error:
     if (gl->ncalls > 0) gl->ncalls--;
 }
 
+// Extracts an axis-aligned device-space scissor (centre + half-extent) from an
+// NVGscissor so it can be carried per-vertex instead of as a per-draw uniform.
+// Returns false (caller uses the uniform scissor) for no clip, or a rounded/rotated
+// clip that can't be expressed as an axis-aligned box.
+static bool glnvg__deviceScissor(const NVGscissor* scissor, float* cx, float* cy, float* hw, float* hh)
+{
+    if (scissor->extent[0] < -0.5f || scissor->extent[1] < -0.5f)
+        return false;                        // no clip
+    if (scissor->radius > 0.01f)
+        return false;                        // rounded clip -> uniform path
+    const float* m = scissor->xform;         // scissor-local -> device
+    if (fabsf(m[1]) > 1e-4f || fabsf(m[2]) > 1e-4f)
+        return false;                        // rotated/skewed -> uniform path
+    *cx = m[4];
+    *cy = m[5];
+    *hw = fabsf(m[0]) * scissor->extent[0];
+    *hh = fabsf(m[3]) * scissor->extent[1];
+    return true;
+}
+
 void nvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor,
                           const NVGvertex* verts, int nverts, float fringe, int text)
 {
@@ -1725,6 +1926,7 @@ void nvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationStat
     call->type = GLNVG_TRIANGLES;
     call->image = paint->image;
     call->blendFunc = glnvg__blendCompositeOperation(compositeOperation);
+    memcpy(call->xform, kGLNVGidentityXform, sizeof(call->xform));
 
     // Allocate vertices for all the paths.
     call->triangleOffset = glnvg__allocVerts(gl, nverts);
@@ -1733,11 +1935,44 @@ void nvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationStat
 
     memcpy(&gl->verts[call->triangleOffset], verts, sizeof(NVGvertex) * nverts);
 
-    // Fill shader
-    call->uniformOffset = glnvg__allocFragUniforms(gl, 1);
-    if (call->uniformOffset == -1) goto error;
-    frag = nvg__fragUniformPtr(gl, call->uniformOffset);
-    glnvg__convertPaint(gl, frag, paint, scissor, 1.0f, fringe, -1.0f, 0.0f, 0);
+    // Carry the clip per-vertex (axis-aligned box in device space) so differently
+    // clipped triangle draws share a uniform and can batch. Falls back to -1 (use the
+    // uniform scissor) for rotated / rounded clips.
+    {
+        float scx, scy, shw, shh;
+        bool const perVertexScissor = glnvg__deviceScissor(scissor, &scx, &scy, &shw, &shh);
+        // For the rounded-rect shaders, carry the paint-local coordinate per-vertex
+        // (= inverse(paintMat) * position) so paintMat leaves the uniform and rects at
+        // different positions batch. inverse(paintMat)*fpos is affine, so interpolating
+        // the per-vertex value is exact.
+        bool perVertexPaint =
+            (paint->type == PAINT_TYPE_FAST_ROUNDEDRECT || paint->type == PAINT_TYPE_OBJECT_RECT);
+        float invPaint[6];
+        if (perVertexPaint)
+            perVertexPaint = (nvgTransformInverse(invPaint, paint->xform) != 0);
+
+        for (int vi = 0; vi < nverts; vi++) {
+            NVGvertex* vv = &gl->verts[call->triangleOffset + vi];
+            if (perVertexScissor) { vv->scissorCX = scx; vv->scissorCY = scy; vv->scissorHW = shw; vv->scissorHH = shh; }
+            else                  { vv->scissorHW = -1.0f; }
+            if (perVertexPaint)   { float px, py; nvgTransformPoint(&px, &py, invPaint, vv->x, vv->y);
+                                    vv->paintX = glnvg__f2h(px); vv->paintY = glnvg__f2h(py);
+                                    vv->extentX = glnvg__f2h(paint->extent[0]); vv->extentY = glnvg__f2h(paint->extent[1]); }
+            vv->vcolInner = paint->innerColor.rgba32;
+            vv->vcolOuter = paint->outerColor.rgba32;
+        }
+
+        // Fill shader
+        call->uniformOffset = glnvg__allocFragUniforms(gl, 1);
+        if (call->uniformOffset == -1) goto error;
+        frag = nvg__fragUniformPtr(gl, call->uniformOffset);
+        // When the clip travels per-vertex, hand convertPaint a "no clip" scissor so the
+        // uniform's scissor fields stay constant and don't block merging.
+        NVGscissor noScissor;
+        memset(&noScissor, 0, sizeof(noScissor));
+        noScissor.extent[0] = noScissor.extent[1] = -1.0f;
+        glnvg__convertPaint(gl, frag, paint, perVertexScissor ? &noScissor : scissor, 1.0f, fringe, -1.0f, 0.0f, 0);
+    }
     if(text) {
         frag->type = PAINT_TYPE_TEXT;
     }

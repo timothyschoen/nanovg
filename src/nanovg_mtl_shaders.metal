@@ -52,6 +52,14 @@ typedef struct {
   float4 tcoord [[attribute(1)]];
 } Vertex;
 
+// A 2x3 affine matrix applied to every vertex of a draw call, so a cached path can be
+// replayed at a new transform without the CPU rewriting its vertices. `row01` is
+// (a, b, c, d) and `offset` is (e, f); the identity is (1, 0, 0, 1) / (0, 0).
+typedef struct {
+  float4 row01;
+  float4 offset;
+} VertexTransform;
+
 typedef struct {
   float4 pos  [[position]];
   float2 fpos;
@@ -295,14 +303,22 @@ float superSDF(texture2d<float> tex, sampler samp, float2 st, float radius)
 
 // Vertex Function
 vertex RasterizerData vertexShader(Vertex vert [[stage_in]],
-                                   constant float2& viewSize [[buffer(1)]]) {
+                                   constant float2& viewSize [[buffer(1)]],
+                                   constant VertexTransform& xform [[buffer(2)]]) {
   RasterizerData out;
+
+  // With the identity this is x*1 + y*0 + 0, which is exact, so uncached draws rasterize
+  // bit-for-bit the same as they did when the position was passed straight through.
+  float2 pos = float2(vert.pos.x * xform.row01.x + vert.pos.y * xform.row01.z + xform.offset.x,
+                      vert.pos.x * xform.row01.y + vert.pos.y * xform.row01.w + xform.offset.y);
 
   out.ftcoord = vert.tcoord.xy * 2.0;
   out.uv = vert.tcoord.zw;
-  out.fpos = vert.pos;
-  out.pos = float4(2.0 * vert.pos.x / viewSize.x - 1.0,
-                   1.0 - 2.0 * vert.pos.y / viewSize.y,
+  // Stays the final device-space position, so the fragment shader's scissor and paint
+  // matrices keep working unchanged.
+  out.fpos = pos;
+  out.pos = float4(2.0 * pos.x / viewSize.x - 1.0,
+                   1.0 - 2.0 * pos.y / viewSize.y,
                    0, 1);
   return out;
 }

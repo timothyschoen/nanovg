@@ -837,9 +837,29 @@ struct NVGscissorBounds {
 };
 typedef struct NVGscissorBounds NVGscissorBounds;
 
+// Fields are ordered to pack to 52 bytes with no padding. The half-float fields hold
+// small rect-local values so half precision is exact for the sizes we produce.
 struct NVGvertex {
     float x,y;
     int16_t u,v,s,t;
+    // Per-vertex total stroke length, carried so the double-stroke/dash shader no
+    // longer needs it as a per-draw uniform -- which lets same-paint cords of
+    // different lengths share a uniform and batch. 0 for non-stroke vertices.
+    float lineLength;
+    // Per-vertex axis-aligned scissor in device space (centreX, centreY, halfW, halfH),
+    // carried so an object clip is no longer a per-draw uniform -- which lets differently
+    // clipped draws share a uniform and batch. halfW < 0 means "no per-vertex scissor":
+    // fall back to the uniform scissorMat (rotated / rounded clips, or no clip at all).
+    float scissorCX, scissorCY, scissorHW, scissorHH;
+    // Per-vertex colours (rgba32), carried for every non-stroke paint so differently
+    // coloured draws share a uniform and batch. Strokes keep the uniform colour.
+    // (dashCol stays in the uniform -- only OBJECT_RECT uses it, and it rarely varies.)
+    uint32_t vcolInner, vcolOuter;
+    // Per-vertex paint-local coordinate (= inverse(paintMat) * position) and paint extent
+    // (half-size), carried as half-floats for the rounded-rect shaders so paintMat/extent
+    // leave the uniform and rects at different positions/sizes batch. Half bits (uint16).
+    uint16_t paintX, paintY;
+    uint16_t extentX, extentY;
 };
 typedef struct NVGvertex NVGvertex;
 
@@ -873,8 +893,11 @@ int nvg__renderGetImageTextureId(void* uptr, int handle);
 void nvg__renderViewport(void* uptr, float width, float height, float devicePixelRatio);
 void nvg__renderCancel(void* uptr);
 void nvg__renderFlush(void* uptr, NVGscissorBounds scissor);
-void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, const float* bounds, const NVGpath* paths, int npaths);
-void nvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, float strokeWidth, int lineStyle, float lineLength, const NVGpath* paths, int npaths);
+// `xform` is a 2x3 affine matrix the backend's vertex shader applies to every vertex of
+// the call, letting cached paths be drawn at a new transform without touching the
+// vertices on the CPU. NULL means identity, which is what every uncached draw passes.
+void nvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, const float* bounds, const float* xform, const NVGpath* paths, int npaths);
+void nvg__renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, float strokeWidth, int lineStyle, float lineLength, const float* xform, const NVGpath* paths, int npaths);
 void nvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe, int text);
 void nvg__renderDelete(void* uptr);
 int nvg__isTexture(void* uptr, int image);
