@@ -2946,26 +2946,33 @@ static void nvg__renderTrianglesSimple(NVGcontext* ctx, const NVGvertex* verts, 
     nvg__renderTriangles(ctx->backend, &fillPaint, state->compositeOperation, &scissor, verts, nverts, ctx->fringeWidth, 0);
 }
 
-void nvgFillRect(NVGcontext* ctx, float x1, float y1, float w, float h)
+void nvgFillRect(NVGcontext* ctx, float x, float y, float w, float h)
 {
-    float x2 = x1 + w, y2 = y1 + h;
-    
 #if DEBUG
     assert(w >= 0 && h >= 0);
 #endif
     NVGstate* state = nvg__getState(ctx);
-    nvgTransformPoint(&x1, &y1, state->xform, x1, y1);
-    nvgTransformPoint(&x2, &y2, state->xform, x2, y2);
-    
+    const float* xf = state->xform;
+
+    // Transform one corner, then offset by the transformed edge vectors (handles rotation/skew)
+    float x0, y0;
+    nvgTransformPoint(&x0, &y0, xf, x, y);
+    const float exx = xf[0] * w, exy = xf[1] * w;
+    const float eyx = xf[2] * h, eyy = xf[3] * h;
+
+    const float x1 = x0 + exx, y1 = y0 + exy; // top-right
+    const float x2 = x1 + eyx, y2 = y1 + eyy; // bottom-right
+    const float x3 = x0 + eyx, y3 = y0 + eyy; // bottom-left
+
     constexpr int16_t t[] = { 8192, 16384, 8192, 16384 };
     NVGvertex verts[] =
     {
-        {x1, y1, t[0], t[1]},
+        {x0, y0, t[0], t[1]},
         {x2, y2, t[2], t[3]},
-        {x2, y1, t[2], t[1]},
-        
-        {x1, y1, t[0], t[1]},
-        {x1, y2, t[0], t[3]},
+        {x1, y1, t[2], t[1]},
+
+        {x0, y0, t[0], t[1]},
+        {x3, y3, t[0], t[3]},
         {x2, y2, t[2], t[3]}
     };
     
