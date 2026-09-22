@@ -330,8 +330,10 @@ stencilOnlyPipelineState;
 
 @end
 
-// Keeps the weak reference to the currently binded framebuffer.
-NVGframebuffer* s_framebuffer = NULL;
+// Each context is rendered on its owning thread. A process-wide binding lets
+// another window redirect a framebuffer pass (including cached images) to the
+// drawable between bind and flush. Match OpenGL's per-thread binding semantics.
+static _Thread_local NVGframebuffer* s_framebuffer = NULL;
 
 const MTLResourceOptions kMetalBufferOptions = (MTLResourceCPUCacheModeWriteCombined | MTLResourceStorageModeShared);
 
@@ -657,6 +659,8 @@ NVGframebuffer* nvgCreateFramebuffer(NVGcontext* ctx, int width,
 
 void nvgDeleteFramebuffer(NVGframebuffer* framebuffer) {
     if (framebuffer == NULL) return;
+    if (s_framebuffer == framebuffer)
+        s_framebuffer = NULL;
     if (framebuffer->image > 0) {
         nvgDeleteImage(framebuffer->ctx, framebuffer->image);
     }
