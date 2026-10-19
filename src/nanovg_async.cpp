@@ -330,6 +330,32 @@ void commitFramebufferPass(NVGcontext* c, void* framebuffer, std::function<void(
     x->enqueueResource(std::move(op));
 }
 
+void flushResources(NVGcontext* c)
+{
+    auto* x = detail::ctx(c);
+    std::lock_guard<std::mutex> lock(x->mutex);
+    if (x->recordingResources.empty())
+        return;
+    x->committedResources.insert(x->committedResources.end(),
+        std::make_move_iterator(x->recordingResources.begin()),
+        std::make_move_iterator(x->recordingResources.end()));
+    x->recordingResources.clear();
+}
+
+bool applyCommittedResources(NVGcontext* c)
+{
+    auto* x = detail::ctx(c);
+    std::vector<Context::ResourceOp> ops;
+    {
+        std::lock_guard<std::mutex> lock(x->mutex);
+        ops.swap(x->committedResources);
+    }
+    if (ops.empty())
+        return false;
+    x->applyResources(ops);
+    return true;
+}
+
 void bindFramebuffer(NVGcontext* c, void* framebuffer)
 {
     auto& b = detail::rec(c);
@@ -362,6 +388,14 @@ void viewport(NVGcontext* c, int x, int y, int width, int height)
 void clear(NVGcontext* c)
 {
     detail::rec(c).putOp(Op::Clear);
+}
+
+int maxTextureSize(NVGcontext* c)
+{
+    int size = 0;
+    if (::nvgMaxTextureSize(c, &size) == 0)
+        return 0;
+    return size;
 }
 
 int framebufferImage(NVGcontext* c, void* framebuffer)

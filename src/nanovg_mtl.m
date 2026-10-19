@@ -643,17 +643,28 @@ void nvgBindFramebuffer(NVGframebuffer* framebuffer) {
 }
 
 NVGframebuffer* nvgCreateFramebuffer(NVGcontext* ctx, int width,
-                                       int height, int imageFlags) {
+                                        int height, int imageFlags) {
+    if (ctx == NULL || width <= 0 || height <= 0) return NULL;
+    MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
+    if (mtl == nil) return NULL;
     NVGframebuffer* framebuffer = (NVGframebuffer*)malloc(sizeof(NVGframebuffer));
     if (framebuffer == NULL)
         return NULL;
     
     memset(framebuffer, 0, sizeof(NVGframebuffer));
     framebuffer->image = nvgCreateImageARGB(ctx, width, height,
-                                            imageFlags,
-                                            NULL);
-    
+                                             imageFlags,
+                                             NULL);
     framebuffer->ctx = ctx;
+    if (framebuffer->image <= 0) {
+        free(framebuffer);
+        return NULL;
+    }
+    MNVGtexture* tex = [mtl findTexture:framebuffer->image];
+    if (tex == nil || tex->tex == nil) {
+        nvgDeleteFramebuffer(framebuffer);
+        return NULL;
+    }
     return framebuffer;
 }
 
@@ -700,39 +711,56 @@ void nvgClearWithColor(NVGcontext* ctx, NVGcolor color) {
     mtl.clearBufferOnFlush = YES;
 }
 
-void nvgReadPixels(NVGcontext* ctx, NVGframebuffer* fb, int x, int y, int width,
-                    int height, int total_height, void* data) {
+int nvgMaxTextureSize(NVGcontext* ctx, int* size) {
     MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
-    
-    MNVGtexture* tex = [mtl findTexture:fb->image];
-    if (tex == nil) return;
-    
-    NSUInteger bytesPerRow;
-    if (tex->type == NVG_TEXTURE_ARGB || tex->type == NVG_TEXTURE_ARGB_SRGB) {
-        bytesPerRow = width * 4;
-    } else {
-        bytesPerRow = width;
+    if (mtl == nil || size == NULL) {
+        return 0;
     }
+    int const max = [mtl renderGetMaxTextureSize];
+    *size = max;
+    return 1;
+}
+
+int nvgReadPixels(NVGcontext* ctx, NVGframebuffer* fb, int x, int y, int width,
+                    int height, int total_height, void* data) {
+    (void)total_height;
+    if (ctx == NULL || fb == NULL || data == NULL || x < 0 || y < 0 || width <= 0 || height <= 0)
+        return 0;
+    MNVGcontext* mtl = MNVG_GET_CONTEXT(ctx);
+    if (mtl == nil) return 0;
+    MNVGtexture* tex = [mtl findTexture:fb->image];
+    if (tex == nil || tex->tex == nil) return 0;
+    if (tex->type != NVG_TEXTURE_ARGB && tex->type != NVG_TEXTURE_ARGB_SRGB) return 0;
+    if ((NSUInteger)x > tex->tex.width || (NSUInteger)width > tex->tex.width - (NSUInteger)x
+        || (NSUInteger)y > tex->tex.height || (NSUInteger)height > tex->tex.height - (NSUInteger)y)
+        return 0;
+    if ((size_t)width > SIZE_MAX / 4) return 0;
+    NSUInteger const bytesPerRow = (NSUInteger)width * 4;
+    if ((size_t)height > SIZE_MAX / bytesPerRow) return 0;
     
     // Makes sure the command execution for the image has been done.
     for (MNVGbuffers* buffers in mtl.cbuffers) {
         if (buffers.isBusy && buffers.renderData && buffers.renderData->image == fb->image && buffers.commandBuffer) {
             id<MTLCommandBuffer> commandBuffer = buffers.commandBuffer;
             while(buffers.isBusy) usleep(10);
+            if (commandBuffer.status != MTLCommandBufferStatusCompleted) return 0;
             break;
         }
     }
     
 #if TARGET_OS_SIMULATOR
     CAMetalLayer* metalLayer = mtl.metalLayer;
-    const NSUInteger kBufferSize = bytesPerRow * height;
+    if (metalLayer == nil || metalLayer.device == nil || mtl.commandQueue == nil) return 0;
+    NSUInteger const kBufferSize = bytesPerRow * (NSUInteger)height;
     id<MTLBuffer> buffer = [metalLayer.device
                             newBufferWithLength:kBufferSize
                             options:MTLResourceStorageModeShared];
-    
+    if (buffer == nil) return 0;
     id<MTLCommandBuffer> commandBuffer = [mtl.commandQueue commandBuffer];
+    if (commandBuffer == nil) return 0;
     id<MTLBlitCommandEncoder> blitCommandEncoder = [commandBuffer
                                                     blitCommandEncoder];
+    if (blitCommandEncoder == nil) return 0;
     [blitCommandEncoder copyFromTexture:tex->tex
                             sourceSlice:0
                             sourceLevel:0
@@ -746,13 +774,15 @@ void nvgReadPixels(NVGcontext* ctx, NVGframebuffer* fb, int x, int y, int width,
     [blitCommandEncoder endEncoding];
     [commandBuffer commit];
     [commandBuffer waitUntilCompleted];
+    if (commandBuffer.status != MTLCommandBufferStatusCompleted || [buffer contents] == NULL) return 0;
     memcpy(data, [buffer contents], kBufferSize);
 #else
     [tex->tex getBytes:data
            bytesPerRow:bytesPerRow
             fromRegion:MTLRegionMake2D(x, y, width, height)
-           mipmapLevel:0];
+            mipmapLevel:0];
 #endif  // TARGET_OS_SIMULATOR
+    return 1;
 }
 
 void* mnvgDevice(NVGcontext* ctx) {
@@ -1792,6 +1822,13 @@ error:
 }
 
 - (int)renderGetMaxTextureSize {
+    NSObject* device = (NSObject*)_metalLayer.device;
+    SEL selector = NSSelectorFromString(@"maxTextureDimension2D");
+    if ([device respondsToSelector:selector]) {
+        NSInteger const size = [[device valueForKey:@"maxTextureDimension2D"] integerValue];
+        if (size > 0)
+            return (int)size;
+    }
     return 8192;
 }
 

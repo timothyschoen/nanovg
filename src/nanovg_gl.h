@@ -1871,7 +1871,7 @@ GLuint nvgImageHandle(NVGcontext* ctx, int image)
 {
     GLNVGcontext* gl = *(GLNVGcontext**)ctx;
     GLNVGtexture* tex = glnvg__findTexture(gl, image);
-    return tex->tex;
+    return tex ? tex->tex : 0;
 }
 
 struct NVGframebuffer {
@@ -2121,11 +2121,16 @@ NVGframebuffer* nvgCreateFramebuffer(NVGcontext* ctx, int w, int h, int imageFla
     fb = (NVGframebuffer*)malloc(sizeof(NVGframebuffer));
     if (fb == NULL) goto error;
     memset(fb, 0, sizeof(NVGframebuffer));
+    fb->ctx = ctx;
+    fb->image = -1;
 
     fb->image = nvgCreateImageARGB(ctx, w, h, imageFlags | NVG_IMAGE_FLIPY, NULL);
+    if (fb->image <= 0) {
+        fb->image = -1;
+        goto error;
+    }
     fb->texture = nvgImageHandle(ctx, fb->image);
-
-    fb->ctx = ctx;
+    if (fb->texture == 0) goto error;
 
     // frame buffer object
     glGenFramebuffers(1, &fb->fbo);
@@ -2176,14 +2181,55 @@ int nvgFramebufferImage(NVGframebuffer* fb)
     return fb->image;
 }
 
-void nvgReadPixels(NVGcontext* ctx, NVGframebuffer* fb, int x, int y, int width, int height, int total_height, void* data) {
-    // Bind the framebuffer associated with the NVGframebuffer
-    glBindFramebuffer(GL_FRAMEBUFFER, fb->fbo);
+int nvgReadPixels(NVGcontext* ctx, NVGframebuffer* fb, int x, int y, int width, int height, int total_height, void* data) {
+    (void)ctx;
+    if (!fb || !data || width <= 0 || height <= 0) return 0;
 
-    // Set the pixel storage alignment (important for correct data reads)
+    // A previous GL error cannot be attributed to this read. Report it and fail
+    // closed rather than silently consuming it and publishing unknown pixels.
+    GLenum const priorError = glGetError();
+    if (priorError != GL_NO_ERROR) {
+        fprintf(stderr, "NanoVG readback blocked by prior GL error: 0x%x\n", priorError);
+        return 0;
+    }
+
+    GLint previousReadFramebuffer = 0;
+    GLint previousPackAlignment = 4;
+    GLint previousPackRowLength = 0;
+    GLint previousPackSkipRows = 0;
+    GLint previousPackSkipPixels = 0;
+    GLint previousPackBuffer = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previousReadFramebuffer);
+    glGetIntegerv(GL_PACK_ALIGNMENT, &previousPackAlignment);
+    glGetIntegerv(GL_PACK_ROW_LENGTH, &previousPackRowLength);
+    glGetIntegerv(GL_PACK_SKIP_ROWS, &previousPackSkipRows);
+    glGetIntegerv(GL_PACK_SKIP_PIXELS, &previousPackSkipPixels);
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &previousPackBuffer);
+    if (glGetError() != GL_NO_ERROR) return 0;
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fb->fbo);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+    bool succeeded = glGetError() == GL_NO_ERROR;
+    if (succeeded)
+        succeeded = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE
+            && glGetError() == GL_NO_ERROR;
+    if (succeeded) {
+        glReadPixels(x, total_height - y - height, width, height, GL_BGRA, GL_UNSIGNED_BYTE, data);
+        succeeded = glGetError() == GL_NO_ERROR;
+    }
 
-    glReadPixels(x, total_height - y - height, width, height, GL_BGRA, GL_UNSIGNED_BYTE, data);
+    glPixelStorei(GL_PACK_ALIGNMENT, previousPackAlignment);
+    glPixelStorei(GL_PACK_ROW_LENGTH, previousPackRowLength);
+    glPixelStorei(GL_PACK_SKIP_ROWS, previousPackSkipRows);
+    glPixelStorei(GL_PACK_SKIP_PIXELS, previousPackSkipPixels);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLuint>(previousPackBuffer));
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, previousReadFramebuffer);
+    succeeded = (glGetError() == GL_NO_ERROR) && succeeded;
+    if (!succeeded) return 0;
 
     auto* buffer = static_cast<uint32_t*>(data);
     for (int row = 0; row < height / 2; row++) {
@@ -2192,8 +2238,7 @@ void nvgReadPixels(NVGcontext* ctx, NVGframebuffer* fb, int x, int y, int width,
                          buffer + (height - 1 - row) * width);
     }
 
-    // Unbind the framebuffer to restore the default state
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    return 1;
 }
 
 
@@ -2211,7 +2256,7 @@ void nvgDeleteFramebuffer(NVGframebuffer* fb)
         glDeleteFramebuffers(1, &fb->fbo);
     if (fb->rbo != 0)
         glDeleteRenderbuffers(1, &fb->rbo);
-    if (fb->image >= 0)
+    if (fb->image > 0)
         nvgDeleteImage(fb->ctx, fb->image);
     fb->ctx = NULL;
     fb->fbo = 0;
@@ -2234,10 +2279,13 @@ void nvgClear(NVGcontext* ctx) {
     glEnable(GL_SCISSOR_TEST);
 }
 
-void nvgMaxTextureSize(int* size) {
-    if (size) {
-        glGetIntegerv(GL_MAX_TEXTURE_SIZE, size);
+int nvgMaxTextureSize(NVGcontext* ctx, int* size) {
+    (void)ctx;
+    if (!size) {
+        return 0;
     }
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, size);
+    return 1;
 }
 
 #endif /* NANOVG_GL_IMPLEMENTATION */

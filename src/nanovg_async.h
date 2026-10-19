@@ -386,6 +386,11 @@ struct Context {
     // Producer-thread-only: the buffer currently being recorded into.
     CommandBuffer* record = nullptr;
 
+    // Producer-thread-only: while recording a standalone pass
+    // (ScopedCommandRecorder) the frame boundary inside the pass must bound the
+    // pass only -- it must not publish itself as a visible frame.
+    bool suppressPublish = false;
+
     // Shared handoff, guarded by mutex_. Kept intentionally tiny.
     std::mutex mutex;
     std::vector<CommandBuffer*> ownedBuffers;   // owns every allocation
@@ -538,7 +543,21 @@ void viewport(NVGcontext* c, int x, int y, int width, int height);
 void clear(NVGcontext* c);
 int framebufferImage(NVGcontext* c, void* framebuffer);
 
+// Backend max 2D texture dimension. Synchronous against the real context, so
+// only call it where touching the real context is safe (e.g. the render thread).
+int maxTextureSize(NVGcontext* c);
+
 void commitFramebufferPass(NVGcontext* c, void* framebuffer, std::function<void(NVGcontext*)> body);
+
+// Producer thread: commit this context's staged resource ops (framebuffer
+// create/delete + passes) to the consumer immediately, without publishing a
+// frame. Used by standalone offscreen passes that are not part of the visible
+// frame stream.
+void flushResources(NVGcontext* c);
+
+// Consumer thread: apply this context's committed resource ops to the real
+// context without replaying the pending frame. Returns true if any were applied.
+bool applyCommittedResources(NVGcontext* c);
 
 
 void setMainFramebuffer(NVGcontext* c, NVGframebuffer* realFramebuffer);
@@ -559,14 +578,18 @@ namespace detail {
 class ScopedCommandRecorder {
 public:
     ScopedCommandRecorder(NVGcontext* c, CommandBuffer& target)
-        : context_(detail::ctx(c)), previous_(context_->record)
+        : context_(detail::ctx(c)), previous_(context_->record), previousSuppress_(context_->suppressPublish)
     {
         context_->record = &target;
+        // A frame boundary recorded into this standalone target bounds the pass;
+        // it must not publish itself as a visible frame (nvgEndFrame honours this).
+        context_->suppressPublish = true;
     }
 
     ~ScopedCommandRecorder()
     {
         context_->record = previous_;
+        context_->suppressPublish = previousSuppress_;
     }
 
     ScopedCommandRecorder(ScopedCommandRecorder const&) = delete;
@@ -575,6 +598,7 @@ public:
 private:
     Context* context_;
     CommandBuffer* previous_;
+    bool previousSuppress_;
 };
 
 // Producer-thread replay: append previously recorded async commands into the
@@ -664,7 +688,10 @@ inline void nvgEndFrame(NVGcontext* c)
 {
     auto* x = detail::ctx(c);
     x->record->putOp(Op::EndFrame);
-    if (x->synchronous) {
+    if (x->suppressPublish) {
+        // Frame recorded into a standalone pass (ScopedCommandRecorder): it bounds
+        // the pass only and must not be published as a visible frame.
+    } else if (x->synchronous) {
         // Single-threaded: apply this frame's resources, then replay immediately on
         // this thread and reuse the buffer. No hand-off, no pending slot.
         if (!x->recordingResources.empty())
