@@ -57,6 +57,16 @@
 #  define MNVG_INVALID_TARGET
 #endif
 
+// ObjC class names are shared by the whole process. Define MNVG_CLASS_SUFFIX when another
+// binary in the same process may also contain this file, so the classes don't clash.
+#ifdef MNVG_CLASS_SUFFIX
+#  define MNVG_JOIN_(a, b) a##_##b
+#  define MNVG_JOIN(a, b) MNVG_JOIN_(a, b)
+#  define MNVGtexture MNVG_JOIN(MNVGtexture, MNVG_CLASS_SUFFIX)
+#  define MNVGbuffers MNVG_JOIN(MNVGbuffers, MNVG_CLASS_SUFFIX)
+#  define MNVGcontext MNVG_JOIN(MNVGcontext, MNVG_CLASS_SUFFIX)
+#endif
+
 #define MNVG_GET_CONTEXT(ctx) (__bridge MNVGcontext*)(*(void**)ctx)
 
 typedef enum MNVGvertexInputIndex {
